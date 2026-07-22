@@ -6,6 +6,7 @@ Soporta Esquemas de Cálculo (Mensual, Jornal), Categorías Jornaleras y Modo de
 import json
 import os
 import sqlite3
+import sys
 
 DB_FILENAME = "liquidacion_sueldos.db"
 
@@ -15,7 +16,11 @@ class DatabaseManager:
 
     def __init__(self, db_path: str | None = None):
         if db_path is None:
-            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), DB_FILENAME)
+            if getattr(sys, "frozen", False):
+                base_dir = os.path.dirname(os.path.abspath(sys.executable))
+            else:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+            db_path = os.path.join(base_dir, DB_FILENAME)
         self.db_path = db_path
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row

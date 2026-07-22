@@ -20,7 +20,7 @@ Diseñado para la liquidación mensual de manera segura y sin posibilidad de rom
 - **Pestañas Ocultas**: Solo son visibles las pestañas de **Empleados**, **Campos Globales** y **Vista Previa**. Las pestañas de configuración y fórmulas están ocultas.
 - **Variables de Cálculo Inteligentes**:
   - En la pestaña de empleados, las variables de cálculo se muestran con controles específicos: **Checkboxes** para valores booleanos (verdadero/falso), **SpinBoxes** numéricos con flechas para ingresar horas o montos con facilidad, y cuadros de texto estándar para cadenas.
-  - Los nombres de las variables son de solo lectura y el botón de eliminación está desactivado. No se pueden agregar variables ni quincenas.
+  - Los nombres de las variables son de solo lectura (en fondo gris) y el botón de eliminación está desactivado. No se pueden agregar variables ni quincenas.
 - **Acceso a Empleados**: El usuario solo puede duplicar empleados existentes para crear nuevos y modificar sus datos básicos (nombre, legajo, tipo asignado, categoría, fecha de ingreso).
 - **Variables Globales Protegidas**: Solo se permite cambiar el valor de las variables existentes. No se pueden agregar, borrar ni modificar los códigos ni descripciones.
 - **Seguridad**: El botón global de reinicio "Nuevo Mes" y los botones de eliminación de empleados están ocultos para prevenir la pérdida accidental de datos.
@@ -94,3 +94,27 @@ Para facilitar la generación masiva de recibos al final de la quincena o mes:
 4. Definir la **Fecha de Cálculo** para calcular la antigüedad correcta de cada empleado.
 5. Hacer clic en **Seleccionar Carpeta y Exportar** para elegir el directorio donde se guardarán los archivos.
 6. El sistema procesará a todos los empleados secuencialmente y guardará los PDFs correspondientes utilizando una nomenclatura descriptiva: `recibo_<legajo>_<quincena>.pdf` o `recibo_<legajo>_Mensual.pdf`.
+
+---
+
+## 7. Persistencia de Datos y Compilación de Ejecutables
+
+### Persistencia y Ubicación de la Base de Datos (`liquidacion_sueldos.db`)
+El sistema gestiona la ubicación de la base de datos SQLite de forma inteligente según el entorno de ejecución:
+- **Modo Desarrollo (`python main.py`)**: La base de datos `liquidacion_sueldos.db` se ubica en el directorio raíz del código fuente.
+- **Modo Ejecutable Empaquetado (`PyInstaller`)**: Al compilar la aplicación como ejecutable portátil en Windows (`.exe`) o Linux, la base de datos se ubica dinámicamente en la **raíz de la carpeta donde se encuentra guardado el archivo ejecutable** (`sys.executable`).
+
+De esta manera, la base de datos **no** se empaqueta de forma estática en la memoria temporal de PyInstaller (`_MEIPASS`), lo que garantiza la persistencia real de todos los datos introducidos (empleados, esquemas, liquidaciones y copias de seguridad de nuevo mes) sin riesgo de pérdida al cerrar el programa.
+
+### Compilación con PyInstaller (`liquidacion.spec`)
+Para empaquetar la aplicación en un único archivo ejecutable portátil:
+
+1. **Instalar PyInstaller**:
+   ```bash
+   pip install pyinstaller
+   ```
+2. **Ejecutar la compilación**:
+   ```bash
+   pyinstaller liquidacion.spec
+   ```
+3. **Resultado**: El ejecutable generado estará disponible en la carpeta `dist/` (`dist/LiquidacionSueldos.exe` en Windows o `dist/LiquidacionSueldos` en Linux).
