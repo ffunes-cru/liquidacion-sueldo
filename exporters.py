@@ -1,7 +1,7 @@
 """
 exporters.py — Módulo de importación/exportación y generación de informes (Excel, CSV, PDF, ODS)
 para la aplicación de Liquidación de Sueldos.
-Soporta importación/exportación plana de variables de empleados (prefijo j_).
+Soporta importación/exportación plana de variables de empleados (prefijo j_) y variables globales de sistema.
 """
 
 import csv
@@ -83,39 +83,76 @@ def exportar_datos_xlsx(db, path: str):
     # 4. Empleados (Con columnas dinámicas j_ para las variables de cálculo)
     ws_emp = wb.create_sheet(title="Empleados")
     
-    # Descubrir todas las claves únicas en los variables_calculo JSON de empleados
+    # Descubrir todas las claves únicas en los variables_calculo JSON de empleados (incluyendo quincenas de jornaleros)
     todas_claves = set()
-    rows_empleados = db.conn.execute("SELECT id, legajo, nombre_completo, tipo_liquidacion, esquema_codigo, categoria_jornal_id, variables_calculo FROM empleados").fetchall()
+    rows_empleados = db.conn.execute("SELECT id, legajo, nombre_completo, tipo_liquidacion, esquema_codigo, categoria_jornal_id, variables_calculo, fecha_ingreso, cuil FROM empleados").fetchall()
     for row in rows_empleados:
         try:
             d = json.loads(row["variables_calculo"])
-            todas_claves.update(d.keys())
+            if isinstance(d, dict):
+                if "quincenas" in d and isinstance(d["quincenas"], dict):
+                    for q_vars in d["quincenas"].values():
+                        if isinstance(q_vars, dict):
+                            todas_claves.update(q_vars.keys())
+                else:
+                    todas_claves.update(d.keys())
         except Exception:
             pass
     claves_ordenadas = sorted(list(todas_claves))
 
     # Cabecera
-    headers = ["id", "legajo", "nombre_completo", "tipo_liquidacion", "esquema_codigo", "categoria_jornal_id"]
+    headers = ["id", "legajo", "nombre_completo", "tipo_liquidacion", "esquema_codigo", "categoria_jornal_id", "fecha_ingreso", "cuil"]
     headers += [f"j_{k}" for k in claves_ordenadas]
     ws_emp.append(headers)
 
     # Rellenar datos de empleados
     for row in rows_empleados:
-        vals = [
-            row["id"],
-            row["legajo"],
-            row["nombre_completo"],
-            row["tipo_liquidacion"],
-            row["esquema_codigo"],
-            row["categoria_jornal_id"]
-        ]
         try:
             d_vars = json.loads(row["variables_calculo"])
         except Exception:
             d_vars = {}
-        for k in claves_ordenadas:
-            vals.append(d_vars.get(k, None))
-        ws_emp.append(vals)
+            
+        es_jornal = row["tipo_liquidacion"] == "jornal"
+        
+        if es_jornal and isinstance(d_vars, dict) and "quincenas" in d_vars and isinstance(d_vars["quincenas"], dict):
+            qs = sorted(list(d_vars["quincenas"].keys()))
+            if not qs:
+                qs = ["Q1"]
+                d_vars["quincenas"] = {"Q1": {}}
+            
+            for idx, q_code in enumerate(qs):
+                q_vars = d_vars["quincenas"].get(q_code, {})
+                if idx == 0:
+                    vals = [
+                        row["id"],
+                        row["legajo"],
+                        row["nombre_completo"],
+                        row["tipo_liquidacion"],
+                        row["esquema_codigo"],
+                        row["categoria_jornal_id"],
+                        row["fecha_ingreso"],
+                        row["cuil"]
+                    ]
+                else:
+                    vals = ["", "", "", "", "", "", "", ""]
+                
+                for k in claves_ordenadas:
+                    vals.append(q_vars.get(k, None))
+                ws_emp.append(vals)
+        else:
+            vals = [
+                row["id"],
+                row["legajo"],
+                row["nombre_completo"],
+                row["tipo_liquidacion"],
+                row["esquema_codigo"],
+                row["categoria_jornal_id"],
+                row["fecha_ingreso"],
+                row["cuil"]
+            ]
+            for k in claves_ordenadas:
+                vals.append(d_vars.get(k, None))
+            ws_emp.append(vals)
 
     # 5. Celdas de Cálculo (Con columnas simples)
     ws_cel = wb.create_sheet(title="Celdas de Cálculo")
@@ -137,6 +174,24 @@ def exportar_datos_xlsx(db, path: str):
     ws_g.append(["id", "etiqueta", "formula", "orden", "esquema_codigo"])
     for row in db.conn.execute("SELECT id, etiqueta, formula, orden, esquema_codigo FROM celdas_grafico").fetchall():
         ws_g.append(list(row))
+
+    # 7. Variables Globales
+    ws_glob = wb.create_sheet(title="Variables Globales")
+    ws_glob.append(["id", "codigo", "valor", "descripcion"])
+    for row in db.conn.execute("SELECT id, codigo, valor, descripcion FROM variables_globales").fetchall():
+        ws_glob.append(list(row))
+
+    # 8. Empresa
+    ws_empr = wb.create_sheet(title="Empresa")
+    ws_empr.append(["id", "razon_social", "direccion", "cuit", "lugar_de_pago"])
+    for row in db.conn.execute("SELECT id, razon_social, direccion, cuit, lugar_de_pago FROM empresa").fetchall():
+        ws_empr.append(list(row))
+
+    # 9. Recibos
+    ws_rec = wb.create_sheet(title="Recibos")
+    ws_rec.append(["id", "empleado_id", "esquema_codigo", "mes", "anio", "periodo", "datos_json", "fecha_emision"])
+    for row in db.conn.execute("SELECT id, empleado_id, esquema_codigo, mes, anio, periodo, datos_json, fecha_emision FROM recibos").fetchall():
+        ws_rec.append(list(row))
 
     wb.save(path)
 
@@ -190,40 +245,79 @@ def importar_datos_xlsx(db, path: str):
             rows = list(sheet.rows)
             if len(rows) > 0:
                 headers = [cell.value for cell in rows[0]]
-                # Encontrar columnas obligatorias
                 id_idx = headers.index("id")
                 legajo_idx = headers.index("legajo")
                 nombre_idx = headers.index("nombre_completo")
                 tipo_idx = headers.index("tipo_liquidacion")
                 esquema_idx = headers.index("esquema_codigo") if "esquema_codigo" in headers else -1
                 cat_idx = headers.index("categoria_jornal_id") if "categoria_jornal_id" in headers else -1
+                fecha_ingreso_idx = headers.index("fecha_ingreso") if "fecha_ingreso" in headers else -1
+                cuil_idx = headers.index("cuil") if "cuil" in headers else -1
                 
-                # Mapear variables j_
                 j_cols = {}
                 for idx, h in enumerate(headers):
                     if h and h.startswith("j_"):
                         j_cols[h[2:]] = idx
-
+ 
+                current_emp = None
+                current_jornal_quincenas = []
+ 
+                def save_current_emp():
+                    if current_emp is None:
+                        return
+                    if current_emp["tipo_liquidacion"] == "jornal":
+                        q_dict = {}
+                        for idx, q_vars in enumerate(current_jornal_quincenas):
+                            q_code = f"Q{idx+1}"
+                            q_dict[q_code] = q_vars
+                        variables_json = json.dumps({"quincenas": q_dict})
+                    else:
+                        variables_json = json.dumps(current_emp["variables_calculo"])
+                    
+                    cur.execute(
+                        """INSERT INTO empleados (id, legajo, nombre_completo, tipo_liquidacion, variables_calculo, esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (current_emp["id"], current_emp["legajo"], current_emp["nombre_completo"], current_emp["tipo_liquidacion"],
+                         variables_json, current_emp["esquema_codigo"], current_emp["categoria_jornal_id"], current_emp["fecha_ingreso"], current_emp["cuil"])
+                    )
+ 
                 for row in rows[1:]:
                     vals = [cell.value for cell in row]
-                    if len(vals) > nombre_idx and vals[nombre_idx] is not None:
-                        # Reensamblar el JSON de variables
-                        d_vars = {}
-                        for var_name, col_i in j_cols.items():
-                            if col_i < len(vals):
-                                val = vals[col_i]
-                                if val is not None:
-                                    # Intentar convertir tipos a float/int si es numérico
-                                    d_vars[var_name] = val
-                        
-                        cur.execute(
-                            """INSERT INTO empleados (id, legajo, nombre_completo, tipo_liquidacion, variables_calculo, esquema_codigo, categoria_jornal_id)
-                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                            (vals[id_idx], vals[legajo_idx], vals[nombre_idx], vals[tipo_idx],
-                             json.dumps(d_vars),
-                             vals[esquema_idx] if esquema_idx >= 0 else 'MENSUAL',
-                             vals[cat_idx] if cat_idx >= 0 else None)
-                        )
+                    if len(vals) <= nombre_idx:
+                        continue
+                    
+                    is_new_emp = vals[nombre_idx] is not None and str(vals[nombre_idx]).strip() != ""
+                    
+                    d_vars = {}
+                    for var_name, col_i in j_cols.items():
+                        if col_i < len(vals):
+                            val = vals[col_i]
+                            if val is not None and val != "":
+                                if isinstance(val, str) and (val.startswith("{") or val.startswith("[")):
+                                    try:
+                                        val = json.loads(val)
+                                    except Exception:
+                                        pass
+                                d_vars[var_name] = val
+ 
+                    if is_new_emp:
+                        save_current_emp()
+                        current_emp = {
+                            "id": vals[id_idx],
+                            "legajo": vals[legajo_idx],
+                            "nombre_completo": vals[nombre_idx],
+                            "tipo_liquidacion": vals[tipo_idx],
+                            "esquema_codigo": vals[esquema_idx] if (esquema_idx >= 0 and vals[esquema_idx]) else 'MENSUAL',
+                            "categoria_jornal_id": vals[cat_idx] if (cat_idx >= 0 and vals[cat_idx] is not None) else None,
+                            "fecha_ingreso": vals[fecha_ingreso_idx] if (fecha_ingreso_idx >= 0 and vals[fecha_ingreso_idx]) else '2020-01-01',
+                            "cuil": vals[cuil_idx] if (cuil_idx >= 0 and vals[cuil_idx]) else '',
+                            "variables_calculo": d_vars
+                        }
+                        current_jornal_quincenas = [d_vars]
+                    else:
+                        if current_emp and current_emp["tipo_liquidacion"] == "jornal":
+                            current_jornal_quincenas.append(d_vars)
+                save_current_emp()
 
         # Importar Celdas Cálculo
         if "Celdas de Cálculo" in wb.sheetnames:
@@ -256,6 +350,41 @@ def importar_datos_xlsx(db, path: str):
                         "INSERT INTO celdas_grafico (id, etiqueta, formula, orden, esquema_codigo) VALUES (?, ?, ?, ?, ?)",
                         (vals[0], vals[1], vals[2], vals[3] or 0, vals[4] or 'MENSUAL')
                     )
+
+        # Importar Variables Globales (NUEVO)
+        if "Variables Globales" in wb.sheetnames:
+            cur.execute("DELETE FROM variables_globales")
+            sheet = wb["Variables Globales"]
+            rows = list(sheet.rows)[1:]
+            for row in rows:
+                vals = [cell.value for cell in row]
+                if vals[1] is not None:  # codigo
+                    cur.execute(
+                        "INSERT INTO variables_globales (id, codigo, valor, descripcion) VALUES (?, ?, ?, ?)",
+                        (vals[0], vals[1], str(vals[2]), vals[3] or '')
+                    )
+
+        # Importar Empresa
+        if "Empresa" in wb.sheetnames:
+            cur.execute("DELETE FROM empresa")
+            sheet = wb["Empresa"]
+            rows = list(sheet.rows)[1:]
+            for row in rows:
+                vals = [cell.value for cell in row]
+                if vals[0] is not None:
+                    cur.execute("INSERT INTO empresa (id, razon_social, direccion, cuit, lugar_de_pago) VALUES (?, ?, ?, ?, ?)",
+                                (vals[0], vals[1] or '', vals[2] or '', vals[3] or '', vals[4] or ''))
+
+        # Importar Recibos
+        if "Recibos" in wb.sheetnames:
+            cur.execute("DELETE FROM recibos")
+            sheet = wb["Recibos"]
+            rows = list(sheet.rows)[1:]
+            for row in rows:
+                vals = [cell.value for cell in row]
+                if vals[0] is not None:
+                    cur.execute("INSERT INTO recibos (id, empleado_id, esquema_codigo, mes, anio, periodo, datos_json, fecha_emision) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                (vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6] or '{}', vals[7] or ''))
 
         db.conn.commit()
     except Exception as e:
@@ -295,37 +424,74 @@ def exportar_datos_csv(db, directorio: str):
 
     # 4. Empleados (Con columnas dinámicas j_)
     todas_claves = set()
-    rows_empleados = db.conn.execute("SELECT id, legajo, nombre_completo, tipo_liquidacion, esquema_codigo, categoria_jornal_id, variables_calculo FROM empleados").fetchall()
+    rows_empleados = db.conn.execute("SELECT id, legajo, nombre_completo, tipo_liquidacion, esquema_codigo, categoria_jornal_id, variables_calculo, fecha_ingreso, cuil FROM empleados").fetchall()
     for row in rows_empleados:
         try:
             d = json.loads(row["variables_calculo"])
-            todas_claves.update(d.keys())
+            if isinstance(d, dict):
+                if "quincenas" in d and isinstance(d["quincenas"], dict):
+                    for q_vars in d["quincenas"].values():
+                        if isinstance(q_vars, dict):
+                            todas_claves.update(q_vars.keys())
+                else:
+                    todas_claves.update(d.keys())
         except Exception:
             pass
     claves_ordenadas = sorted(list(todas_claves))
 
     with open(os.path.join(directorio, "empleados.csv"), "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        headers = ["id", "legajo", "nombre_completo", "tipo_liquidacion", "esquema_codigo", "categoria_jornal_id"]
+        headers = ["id", "legajo", "nombre_completo", "tipo_liquidacion", "esquema_codigo", "categoria_jornal_id", "fecha_ingreso", "cuil"]
         headers += [f"j_{k}" for k in claves_ordenadas]
         writer.writerow(headers)
 
         for row in rows_empleados:
-            vals = [
-                row["id"],
-                row["legajo"],
-                row["nombre_completo"],
-                row["tipo_liquidacion"],
-                row["esquema_codigo"],
-                row["categoria_jornal_id"]
-            ]
             try:
                 d_vars = json.loads(row["variables_calculo"])
             except Exception:
                 d_vars = {}
-            for k in claves_ordenadas:
-                vals.append(d_vars.get(k, ""))
-            writer.writerow(vals)
+                
+            es_jornal = row["tipo_liquidacion"] == "jornal"
+            
+            if es_jornal and isinstance(d_vars, dict) and "quincenas" in d_vars and isinstance(d_vars["quincenas"], dict):
+                qs = sorted(list(d_vars["quincenas"].keys()))
+                if not qs:
+                    qs = ["Q1"]
+                    d_vars["quincenas"] = {"Q1": {}}
+                
+                for idx, q_code in enumerate(qs):
+                    q_vars = d_vars["quincenas"].get(q_code, {})
+                    if idx == 0:
+                        vals = [
+                            row["id"],
+                            row["legajo"],
+                            row["nombre_completo"],
+                            row["tipo_liquidacion"],
+                            row["esquema_codigo"],
+                            row["categoria_jornal_id"],
+                            row["fecha_ingreso"],
+                            row["cuil"]
+                        ]
+                    else:
+                        vals = ["", "", "", "", "", "", "", ""]
+                    
+                    for k in claves_ordenadas:
+                        vals.append(q_vars.get(k, ""))
+                    writer.writerow(vals)
+            else:
+                vals = [
+                    row["id"],
+                    row["legajo"],
+                    row["nombre_completo"],
+                    row["tipo_liquidacion"],
+                    row["esquema_codigo"],
+                    row["categoria_jornal_id"],
+                    row["fecha_ingreso"],
+                    row["cuil"]
+                ]
+                for k in claves_ordenadas:
+                    vals.append(d_vars.get(k, ""))
+                writer.writerow(vals)
 
     # 5. Celdas Cálculo
     with open(os.path.join(directorio, "celdas_calculo.csv"), "w", newline="", encoding="utf-8") as f:
@@ -348,6 +514,27 @@ def exportar_datos_csv(db, directorio: str):
         writer = csv.writer(f)
         writer.writerow(["id", "etiqueta", "formula", "orden", "esquema_codigo"])
         for row in db.conn.execute("SELECT id, etiqueta, formula, orden, esquema_codigo FROM celdas_grafico").fetchall():
+            writer.writerow(list(row))
+
+    # 7. Variables Globales (NUEVO)
+    with open(os.path.join(directorio, "variables_globales.csv"), "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["id", "codigo", "valor", "descripcion"])
+        for row in db.conn.execute("SELECT id, codigo, valor, descripcion FROM variables_globales").fetchall():
+            writer.writerow(list(row))
+
+    # 8. Empresa
+    with open(os.path.join(directorio, "empresa.csv"), "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["id", "razon_social", "direccion", "cuit", "lugar_de_pago"])
+        for row in db.conn.execute("SELECT id, razon_social, direccion, cuit, lugar_de_pago FROM empresa").fetchall():
+            writer.writerow(list(row))
+
+    # 9. Recibos
+    with open(os.path.join(directorio, "recibos.csv"), "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["id", "empleado_id", "esquema_codigo", "mes", "anio", "periodo", "datos_json", "fecha_emision"])
+        for row in db.conn.execute("SELECT id, empleado_id, esquema_codigo, mes, anio, periodo, datos_json, fecha_emision FROM recibos").fetchall():
             writer.writerow(list(row))
 
 
@@ -400,11 +587,44 @@ def importar_datos_csv(db, directorio: str):
             cur.execute("DELETE FROM empleados")
             with open(p_emp, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
+                
+                current_emp = None
+                current_jornal_quincenas = []
+ 
+                def save_current_emp():
+                    if current_emp is None:
+                        return
+                    if current_emp["tipo_liquidacion"] == "jornal":
+                        q_dict = {}
+                        for idx, q_vars in enumerate(current_jornal_quincenas):
+                            q_code = f"Q{idx+1}"
+                            q_dict[q_code] = q_vars
+                        variables_json = json.dumps({"quincenas": q_dict})
+                    else:
+                        variables_json = json.dumps(current_emp["variables_calculo"])
+                    
+                    cur.execute(
+                        """INSERT INTO empleados (id, legajo, nombre_completo, tipo_liquidacion, variables_calculo, esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (current_emp["id"], current_emp["legajo"], current_emp["nombre_completo"], current_emp["tipo_liquidacion"],
+                         variables_json, current_emp["esquema_codigo"], current_emp["categoria_jornal_id"], current_emp["fecha_ingreso"], current_emp["cuil"])
+                    )
+ 
                 for row in reader:
+                    nombre_val = row.get("nombre_completo", "")
+                    id_val = row.get("id", "")
+                    
+                    is_new_emp = nombre_val is not None and str(nombre_val).strip() != "" and id_val is not None and str(id_val).strip() != ""
+                    
                     d_vars = {}
                     for k, val in row.items():
-                        if k.startswith("j_") and val != "":
-                            # Intentar conversión numérica
+                        if k.startswith("j_") and val != "" and val is not None:
+                            if isinstance(val, str) and (val.startswith("{") or val.startswith("[")):
+                                try:
+                                    d_vars[k[2:]] = json.loads(val)
+                                    continue
+                                except Exception:
+                                    pass
                             try:
                                 if "." in val:
                                     d_vars[k[2:]] = float(val)
@@ -417,15 +637,25 @@ def importar_datos_csv(db, directorio: str):
                                     d_vars[k[2:]] = False
                                 else:
                                     d_vars[k[2:]] = val
-
-                    cur.execute(
-                        """INSERT INTO empleados (id, legajo, nombre_completo, tipo_liquidacion, variables_calculo, esquema_codigo, categoria_jornal_id)
-                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                        (row["id"], row["legajo"], row["nombre_completo"], row["tipo_liquidacion"],
-                         json.dumps(d_vars),
-                         row.get("esquema_codigo", "MENSUAL"),
-                         row.get("categoria_jornal_id") or None)
-                    )
+ 
+                    if is_new_emp:
+                        save_current_emp()
+                        current_emp = {
+                            "id": row["id"],
+                            "legajo": row["legajo"],
+                            "nombre_completo": row["nombre_completo"],
+                            "tipo_liquidacion": row["tipo_liquidacion"],
+                            "esquema_codigo": row.get("esquema_codigo", "MENSUAL"),
+                            "categoria_jornal_id": row.get("categoria_jornal_id") if row.get("categoria_jornal_id") else None,
+                            "fecha_ingreso": row.get("fecha_ingreso") if row.get("fecha_ingreso") else '2020-01-01',
+                            "cuil": row.get("cuil") if row.get("cuil") else '',
+                            "variables_calculo": d_vars
+                        }
+                        current_jornal_quincenas = [d_vars]
+                    else:
+                        if current_emp and current_emp["tipo_liquidacion"] == "jornal":
+                            current_jornal_quincenas.append(d_vars)
+                save_current_emp()
 
         # 5. Celdas Cálculo
         p_cel = os.path.join(directorio, "celdas_calculo.csv")
@@ -460,6 +690,48 @@ def importar_datos_csv(db, directorio: str):
                             (vals[0], vals[1], vals[2], vals[3], vals[4])
                         )
 
+        # 7. Variables Globales (NUEVO)
+        p_glob = os.path.join(directorio, "variables_globales.csv")
+        if os.path.exists(p_glob):
+            cur.execute("DELETE FROM variables_globales")
+            with open(p_glob, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                next(reader)
+                for vals in reader:
+                    if vals:
+                        cur.execute(
+                            "INSERT INTO variables_globales (id, codigo, valor, descripcion) VALUES (?, ?, ?, ?)",
+                            (vals[0], vals[1], vals[2], vals[3])
+                        )
+
+        # 8. Empresa
+        p_empresa = os.path.join(directorio, "empresa.csv")
+        if os.path.exists(p_empresa):
+            cur.execute("DELETE FROM empresa")
+            with open(p_empresa, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                next(reader)
+                for vals in reader:
+                    if vals:
+                        cur.execute(
+                            "INSERT INTO empresa (id, razon_social, direccion, cuit, lugar_de_pago) VALUES (?, ?, ?, ?, ?)",
+                            (vals[0], vals[1], vals[2], vals[3], vals[4])
+                        )
+
+        # 9. Recibos
+        p_recibos = os.path.join(directorio, "recibos.csv")
+        if os.path.exists(p_recibos):
+            cur.execute("DELETE FROM recibos")
+            with open(p_recibos, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                next(reader)
+                for vals in reader:
+                    if vals:
+                        cur.execute(
+                            "INSERT INTO recibos (id, empleado_id, esquema_codigo, mes, anio, periodo, datos_json, fecha_emision) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            (vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6] or '{}', vals[7])
+                        )
+
         db.conn.commit()
     except Exception as e:
         db.conn.rollback()
@@ -485,7 +757,7 @@ def generar_grafico_torta(resultado: dict, seccion_codigo: str, path_imagen: str
         if not filas:
             return False
         ignorar = ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
-        items = [f for f in filas if f["codigo"] not in ignorar and f["monto"] > 0]
+        items = [f for f in filas if f["codigo"] not in ignorar and f["monto"] > 0 and f.get("visible_recibo", 1) == 1]
         if not items:
             return False
         labels = [f["descripcion"] for f in items]
@@ -517,7 +789,7 @@ def generar_grafico_torta(resultado: dict, seccion_codigo: str, path_imagen: str
         "COMPOSICION": "Distribución de Ingresos (Composición Salarial)",
         "RECIBO": "Distribución de Retenciones / Deducciones",
         "COSTO_EMP": "Distribución de Cargas Patronales",
-        "CUSTOM": "Distribución de Costos Personalizada (Fisco)"
+        "CUSTOM": "Distribución de Costos Personalizada"
     }
     ax.set_title(titulos.get(seccion_codigo, "Distribución de Costos"), fontsize=11, fontweight='bold', pad=15)
     
@@ -530,12 +802,19 @@ def generar_grafico_torta(resultado: dict, seccion_codigo: str, path_imagen: str
 # ======================================================================
 # Exportar Recibo: PDF (Usa QPrinter/QTextDocument con imagen embebida)
 # ======================================================================
-def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | None):
-    """Exporta el recibo detallado a un documento PDF."""
+def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | None,
+                        empresa: dict | None = None, mes_anio: dict | None = None):
+    """Exporta el recibo detallado a un documento PDF con cabecera industrial."""
     emp = resultado["empleado"]
     secciones_info = {s["codigo"]: s["titulo"] for s in db.listar_secciones()}
-    
-    # Obtener el esquema para el orden y nombres correctos
+
+    if empresa is None:
+        empresa = db.obtener_empresa()
+    if mes_anio is None:
+        from datetime import date
+        hoy = date.today()
+        mes_anio = {"mes": hoy.month, "anio": hoy.year, "periodo": "M"}
+
     esquema = emp.get("esquema_codigo") or "MENSUAL"
     orden_secciones = ["COMPOSICION", "RECIBO", "COSTO_EMP"]
 
@@ -543,7 +822,13 @@ def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | 
     rows_html = []
     for sec_codigo in orden_secciones:
         filas = resultado["resultados_por_seccion"].get(sec_codigo, [])
-        if not filas:
+        filas_visibles = []
+        for f in filas:
+            if f.get("visible_recibo", 1) == 1:
+                es_total = f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
+                if f["monto"] != 0 or es_total:
+                    filas_visibles.append(f)
+        if not filas_visibles:
             continue
 
         rows_html.append(f"""
@@ -552,10 +837,10 @@ def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | 
             </tr>
         """)
 
-        for f in filas:
+        for f in filas_visibles:
             es_total = f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
             style_row = "font-weight: bold; background-color: #F8FAFC;" if es_total else ""
-            
+
             u_val = _formato_porcentaje(f["unidad"]) if f["unidad"] is not None else ""
             b_val = _formato_moneda(f["base"]) if f["base"] is not None else ""
             m_val = _formato_moneda(f["monto"])
@@ -579,6 +864,29 @@ def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | 
         </div>
         """
 
+    # Datos de cabecera
+    razon_social = empresa.get("razon_social", "") or "—"
+    direccion = empresa.get("direccion", "") or ""
+    cuit_emp = empresa.get("cuit", "") or ""
+    lugar_pago = empresa.get("lugar_de_pago", "") or ""
+    cuil = emp.get("cuil", "") or ""
+    fecha_ingreso = emp.get("fecha_ingreso", "") or ""
+    cat_nombre = emp.get("categoria_nombre", "") or ""
+
+    # Antigüedad
+    from motor import calcular_antiguedad_anios
+    from datetime import date
+    antiguedad = calcular_antiguedad_anios(fecha_ingreso, date.today().strftime("%Y-%m-%d")) if fecha_ingreso else 0
+
+    # Período
+    meses_nombres = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+    mes_num = mes_anio.get("mes", 1)
+    mes_nombre = meses_nombres[mes_num] if 1 <= mes_num <= 12 else str(mes_num)
+    anio_str = str(mes_anio.get("anio", 2025))
+    periodo = mes_anio.get("periodo", "M")
+    periodo_str = f"Quincena {periodo}" if (periodo and periodo != "M") else "Mensual"
+
     html_content = f"""
     <html>
     <head>
@@ -586,34 +894,53 @@ def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | 
         body {{
             font-family: Arial, sans-serif;
             color: #334155;
-            margin: 20px;
-            font-size: 12px;
+            margin: 15px;
+            font-size: 11px;
         }}
-        h1 {{
+        .header-empresa {{
+            border: 2px solid #1E293B;
+            padding: 10px 15px;
+            margin-bottom: 12px;
+        }}
+        .header-empresa h2 {{
+            margin: 0 0 4px 0;
+            font-size: 16px;
             color: #0F172A;
-            font-size: 20px;
-            text-align: center;
-            margin-bottom: 5px;
         }}
-        .subtitle {{
-            text-align: center;
+        .header-empresa .subtitle {{
             color: #64748B;
-            font-size: 12px;
-            margin-bottom: 25px;
+            font-size: 10px;
+            margin: 0;
         }}
-        .info-table {{
+        .info-grid {{
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
-            font-size: 12px;
+            margin-bottom: 12px;
+            font-size: 11px;
         }}
-        .info-table td {{
-            padding: 4px 8px;
+        .info-grid td {{
+            padding: 3px 8px;
+            border: 1px solid #E2E8F0;
+        }}
+        .info-grid .label {{
+            font-weight: bold;
+            background-color: #F8FAFC;
+            width: 20%;
+            color: #475569;
+        }}
+        .periodo-bar {{
+            background-color: #1E293B;
+            color: #FFFFFF;
+            padding: 6px 12px;
+            font-weight: bold;
+            font-size: 12px;
+            margin-bottom: 12px;
+            text-align: center;
         }}
         .receipt-table {{
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             font-size: 11px;
         }}
         .receipt-table th {{
@@ -621,28 +948,64 @@ def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | 
             color: #FFFFFF;
             font-weight: bold;
             text-align: left;
-            padding: 6px;
-            font-size: 11px;
+            padding: 5px 6px;
+            font-size: 10px;
         }}
     </style>
     </head>
     <body>
-        <h1>RECIBO DE SUELDO Y COSTO LABORAL</h1>
-        <div class="subtitle">Esquema: {esquema}  •  República Argentina</div>
+        <!-- Cabecera Empresa -->
+        <div class="header-empresa">
+            <h2>RECIBO DE HABERES</h2>
+            <table style="width:100%; border-collapse:collapse; font-size:11px;">
+                <tr>
+                    <td style="width:60%;">
+                        <b>{razon_social}</b><br/>
+                        {f'{direccion}<br/>' if direccion else ''}
+                        {f'CUIT: {cuit_emp}' if cuit_emp else ''}
+                    </td>
+                    <td style="width:40%; text-align:right; vertical-align:top;">
+                        {f'Lugar de Pago: {lugar_pago}<br/>' if lugar_pago else ''}
+                        Esquema: {esquema}
+                    </td>
+                </tr>
+            </table>
+        </div>
 
-        <table class="info-table">
+        <!-- Barra de Período -->
+        <div class="periodo-bar">
+            {mes_nombre} {anio_str} — {periodo_str}
+        </div>
+
+        <!-- Datos del Empleado -->
+        <table class="info-grid">
             <tr>
-                <td width="15%"><b>Legajo:</b></td>
-                <td width="35%">{emp["legajo"]}</td>
-                <td width="20%"><b>Tipo Liquidación:</b></td>
-                <td width="30%">{emp["tipo_liquidacion"].capitalize()}</td>
+                <td class="label">Legajo</td>
+                <td>{emp["legajo"]}</td>
+                <td class="label">CUIL</td>
+                <td>{cuil}</td>
             </tr>
             <tr>
-                <td><b>Empleado:</b></td>
-                <td colspan="3">{emp["nombre_completo"]}</td>
+                <td class="label">Apellido y Nombre</td>
+                <td>{emp["nombre_completo"]}</td>
+                <td class="label">Categoría</td>
+                <td>{cat_nombre}</td>
+            </tr>
+            <tr>
+                <td class="label">Fecha de Ingreso</td>
+                <td>{fecha_ingreso}</td>
+                <td class="label">Antigüedad</td>
+                <td>{antiguedad} año(s)</td>
+            </tr>
+            <tr>
+                <td class="label">Tipo Liquidación</td>
+                <td>{emp["tipo_liquidacion"].capitalize()}</td>
+                <td class="label"></td>
+                <td></td>
             </tr>
         </table>
 
+        <!-- Tabla del Recibo -->
         <table class="receipt-table">
             <thead>
                 <tr>
@@ -668,8 +1031,8 @@ def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | 
     printer = QPrinter(QPrinter.PrinterMode.ScreenResolution)
     printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
     printer.setOutputFileName(pdf_path)
-    printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Unit.Millimeter)
-    
+    printer.setPageMargins(QMarginsF(12, 12, 12, 12), QPageLayout.Unit.Millimeter)
+
     doc.print(printer)
 
 
@@ -714,6 +1077,12 @@ def exportar_recibo_xlsx(resultado: dict, db, path: str, path_grafico: str | Non
     ws["B4"] = emp["nombre_completo"]
     ws["B4"].font = font_normal
 
+    if resultado.get("quincena_sel"):
+        ws["C4"] = "Quincena:"
+        ws["C4"].font = font_bold
+        ws["D4"] = resultado["quincena_sel"]
+        ws["D4"].font = font_normal
+
     headers = ["Concepto", "Unidad / %", "Base", "Monto"]
     ws.row_dimensions[6].height = 20
     for col_idx, text in enumerate(headers, 1):
@@ -728,7 +1097,13 @@ def exportar_recibo_xlsx(resultado: dict, db, path: str, path_grafico: str | Non
     row_num = 7
     for sec_codigo in orden_secciones:
         filas = resultado["resultados_por_seccion"].get(sec_codigo, [])
-        if not filas:
+        filas_visibles = []
+        for f in filas:
+            if f.get("visible_recibo", 1) == 1:
+                es_total = f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
+                if f["monto"] != 0 or es_total:
+                    filas_visibles.append(f)
+        if not filas_visibles:
             continue
 
         ws.row_dimensions[row_num].height = 20
@@ -739,7 +1114,7 @@ def exportar_recibo_xlsx(resultado: dict, db, path: str, path_grafico: str | Non
             ws.cell(row=row_num, column=col_i).fill = fill_section
         row_num += 1
 
-        for f in filas:
+        for f in filas_visibles:
             es_total = f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
             
             c_desc = ws.cell(row=row_num, column=1, value=f["descripcion"])
@@ -809,6 +1184,8 @@ def exportar_recibo_ods(resultado: dict, db, path: str, path_grafico: str | None
     add_row_info("Legajo:", emp["legajo"])
     add_row_info("Empleado:", emp["nombre_completo"])
     add_row_info("Tipo Liquidación:", emp["tipo_liquidacion"].capitalize())
+    if resultado.get("quincena_sel"):
+        add_row_info("Quincena:", resultado["quincena_sel"])
 
     table.addElement(TableRow())
 
@@ -824,7 +1201,13 @@ def exportar_recibo_ods(resultado: dict, db, path: str, path_grafico: str | None
 
     for sec_codigo in orden_secciones:
         filas = resultado["resultados_por_seccion"].get(sec_codigo, [])
-        if not filas:
+        filas_visibles = []
+        for f in filas:
+            if f.get("visible_recibo", 1) == 1:
+                es_total = f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
+                if f["monto"] != 0 or es_total:
+                    filas_visibles.append(f)
+        if not filas_visibles:
             continue
 
         r_sec = TableRow()
@@ -833,7 +1216,7 @@ def exportar_recibo_ods(resultado: dict, db, path: str, path_grafico: str | None
         r_sec.addElement(c_sec)
         table.addElement(r_sec)
 
-        for f in filas:
+        for f in filas_visibles:
             row = TableRow()
 
             c_desc = TableCell()

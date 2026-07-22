@@ -61,7 +61,8 @@ class DatabaseManager:
                 legajo              TEXT,
                 nombre_completo     TEXT    NOT NULL,
                 tipo_liquidacion    TEXT    NOT NULL DEFAULT 'mensual',
-                variables_calculo   TEXT    NOT NULL DEFAULT '{}'
+                variables_calculo   TEXT    NOT NULL DEFAULT '{}',
+                fecha_ingreso       TEXT    DEFAULT '2020-01-01'
             );
         """)
 
@@ -82,6 +83,7 @@ class DatabaseManager:
                 simple_porcentaje REAL,
                 simple_base_variable TEXT,
                 simple_monto_fijo REAL,
+                visible_recibo   INTEGER DEFAULT 1,
                 UNIQUE(esquema_codigo, codigo_variable)
             );
         """)
@@ -97,6 +99,43 @@ class DatabaseManager:
                 UNIQUE(esquema_codigo, etiqueta)
             );
         """)
+
+        # 7. Variables Globales de Sistema
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS variables_globales (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                codigo      TEXT    UNIQUE NOT NULL,
+                valor       TEXT    NOT NULL,
+                descripcion TEXT    DEFAULT ''
+            );
+        """)
+
+        # 8. Empresa (Singleton — datos para cabecera PDF)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS empresa (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                razon_social   TEXT    NOT NULL DEFAULT '',
+                direccion      TEXT    DEFAULT '',
+                cuit           TEXT    DEFAULT '',
+                lugar_de_pago  TEXT    DEFAULT ''
+            );
+        """)
+
+        # 9. Recibos (Patrón Snapshot — historial de liquidaciones)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS recibos (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                empleado_id    INTEGER NOT NULL REFERENCES empleados(id),
+                esquema_codigo TEXT    NOT NULL,
+                mes            INTEGER NOT NULL,
+                anio           INTEGER NOT NULL,
+                periodo        TEXT    NOT NULL DEFAULT 'M',
+                datos_json     TEXT    NOT NULL,
+                fecha_emision  TEXT    NOT NULL,
+                UNIQUE(empleado_id, esquema_codigo, mes, anio, periodo)
+            );
+        """)
+
         self.conn.commit()
 
         # --- Migraciones dinámicas: Añadir columnas nuevas si no existen ---
@@ -109,6 +148,9 @@ class DatabaseManager:
             ("celdas_calculo", "simple_base_variable", "TEXT"),
             ("celdas_calculo", "simple_monto_fijo", "REAL"),
             ("celdas_grafico", "esquema_codigo", "TEXT REFERENCES esquemas_calculo(codigo) DEFAULT 'MENSUAL'"),
+            ("empleados", "fecha_ingreso", "TEXT DEFAULT '2020-01-01'"),
+            ("celdas_calculo", "visible_recibo", "INTEGER DEFAULT 1"),
+            ("empleados", "cuil", "TEXT DEFAULT ''"),
         ]
 
         for tabla, columna, definicion in alteraciones:
@@ -122,6 +164,11 @@ class DatabaseManager:
         # Sembrar datos iniciales si la tabla de esquemas está vacía
         if cur.execute("SELECT COUNT(*) FROM esquemas_calculo").fetchone()[0] == 0:
             self._seed_datos_iniciales()
+
+        # Sembrar empresa singleton si no existe
+        if cur.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
+            cur.execute("INSERT INTO empresa (razon_social) VALUES ('')")
+            self.conn.commit()
 
     # ------------------------------------------------------------------
     # Seed de datos reales
@@ -262,6 +309,32 @@ class DatabaseManager:
         self.conn.commit()
 
     # ------------------------------------------------------------------
+    # CRUD Variables Globales (Campos Globales de Sistema)
+    # ------------------------------------------------------------------
+    def listar_variables_globales(self) -> list[dict]:
+        rows = self.conn.execute("SELECT * FROM variables_globales ORDER BY codigo").fetchall()
+        return [dict(r) for r in rows]
+
+    def guardar_variable_global(self, var_id: int | None, codigo: str, valor: str, descripcion: str) -> int:
+        if var_id:
+            self.conn.execute(
+                "UPDATE variables_globales SET codigo=?, valor=?, descripcion=? WHERE id=?",
+                (codigo, valor, descripcion, var_id),
+            )
+        else:
+            cur = self.conn.execute(
+                "INSERT INTO variables_globales (codigo, valor, descripcion) VALUES (?, ?, ?)",
+                (codigo, valor, descripcion),
+            )
+            var_id = cur.lastrowid
+        self.conn.commit()
+        return var_id
+
+    def eliminar_variable_global(self, var_id: int):
+        self.conn.execute("DELETE FROM variables_globales WHERE id = ?", (var_id,))
+        self.conn.commit()
+
+    # ------------------------------------------------------------------
     # CRUD Esquemas
     # ------------------------------------------------------------------
     def listar_esquemas(self) -> list[dict]:
@@ -309,25 +382,33 @@ class DatabaseManager:
 
     def obtener_empleado(self, emp_id: int) -> dict | None:
         row = self.conn.execute(
-            "SELECT * FROM empleados WHERE id = ?", (emp_id,)
+            """SELECT e.*, c.nombre AS categoria_nombre
+               FROM empleados e
+               LEFT JOIN categorias_jornal c ON c.id = e.categoria_jornal_id
+               WHERE e.id = ?""", (emp_id,)
         ).fetchone()
         return dict(row) if row else None
 
     def guardar_empleado(self, emp_id: int | None, legajo: str, nombre: str,
                          tipo_liq: str, variables_json: str, esquema_codigo: str,
-                         categoria_jornal_id: int | None) -> int:
+                         categoria_jornal_id: int | None, fecha_ingreso: str = "2020-01-01",
+                         cuil: str = "") -> int:
         if emp_id:
             self.conn.execute(
                 """UPDATE empleados
-                   SET legajo=?, nombre_completo=?, tipo_liquidacion=?, variables_calculo=?, esquema_codigo=?, categoria_jornal_id=?
+                   SET legajo=?, nombre_completo=?, tipo_liquidacion=?, variables_calculo=?,
+                       esquema_codigo=?, categoria_jornal_id=?, fecha_ingreso=?, cuil=?
                    WHERE id=?""",
-                (legajo, nombre, tipo_liq, variables_json, esquema_codigo, categoria_jornal_id, emp_id),
+                (legajo, nombre, tipo_liq, variables_json, esquema_codigo,
+                 categoria_jornal_id, fecha_ingreso, cuil, emp_id),
             )
         else:
             cur = self.conn.execute(
-                """INSERT INTO empleados (legajo, nombre_completo, tipo_liquidacion, variables_calculo, esquema_codigo, categoria_jornal_id)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (legajo, nombre, tipo_liq, variables_json, esquema_codigo, categoria_jornal_id),
+                """INSERT INTO empleados (legajo, nombre_completo, tipo_liquidacion, variables_calculo,
+                    esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (legajo, nombre, tipo_liq, variables_json, esquema_codigo,
+                 categoria_jornal_id, fecha_ingreso, cuil),
             )
             emp_id = cur.lastrowid
         self.conn.commit()
@@ -369,31 +450,31 @@ class DatabaseManager:
                       formula_unidad: str, formula_base: str, formula_monto: str,
                       orden: int, esquema_codigo: str, tipo_calculo: str,
                       simple_porcentaje: float | None, simple_base_variable: str | None,
-                      simple_monto_fijo: float | None) -> int:
+                      simple_monto_fijo: float | None, visible_recibo: int = 1) -> int:
         if celda_id:
             self.conn.execute(
                 """UPDATE celdas_calculo
                    SET seccion_codigo=?, codigo_variable=?, descripcion=?, condicion=?,
                        formula_unidad=?, formula_base=?, formula_monto=?, orden=?,
                        esquema_codigo=?, tipo_calculo=?, simple_porcentaje=?,
-                       simple_base_variable=?, simple_monto_fijo=?
+                       simple_base_variable=?, simple_monto_fijo=?, visible_recibo=?
                    WHERE id=?""",
                 (seccion_codigo, codigo_variable, descripcion, condicion,
                  formula_unidad, formula_base, formula_monto, orden,
                  esquema_codigo, tipo_calculo, simple_porcentaje,
-                 simple_base_variable, simple_monto_fijo, celda_id),
+                 simple_base_variable, simple_monto_fijo, visible_recibo, celda_id),
             )
         else:
             cur = self.conn.execute(
                 """INSERT INTO celdas_calculo
                    (seccion_codigo, codigo_variable, descripcion, condicion,
                     formula_unidad, formula_base, formula_monto, orden, esquema_codigo,
-                    tipo_calculo, simple_porcentaje, simple_base_variable, simple_monto_fijo)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    tipo_calculo, simple_porcentaje, simple_base_variable, simple_monto_fijo, visible_recibo)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (seccion_codigo, codigo_variable, descripcion, condicion,
                  formula_unidad, formula_base, formula_monto, orden,
                  esquema_codigo, tipo_calculo, simple_porcentaje,
-                 simple_base_variable, simple_monto_fijo),
+                 simple_base_variable, simple_monto_fijo, visible_recibo),
             )
             celda_id = cur.lastrowid
         self.conn.commit()
@@ -436,6 +517,268 @@ class DatabaseManager:
     def eliminar_celda_grafico(self, celda_id: int):
         self.conn.execute("DELETE FROM celdas_grafico WHERE id = ?", (celda_id,))
         self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # CRUD Esquemas Adicionales
+    # ------------------------------------------------------------------
+    def guardar_esquema(self, original_codigo: str | None, nuevo_codigo: str, nombre: str):
+        cur = self.conn.cursor()
+        if original_codigo:
+            cur.execute(
+                "UPDATE esquemas_calculo SET codigo=?, nombre=? WHERE codigo=?",
+                (nuevo_codigo, nombre, original_codigo)
+            )
+        else:
+            cur.execute(
+                "INSERT INTO esquemas_calculo (codigo, nombre) VALUES (?, ?)",
+                (nuevo_codigo, nombre)
+            )
+        self.conn.commit()
+
+    def eliminar_esquema(self, codigo: str):
+        cur = self.conn.cursor()
+        emp_count = cur.execute("SELECT COUNT(*) FROM empleados WHERE esquema_codigo = ?", (codigo,)).fetchone()[0]
+        if emp_count > 0:
+            raise ValueError(f"No se puede eliminar el esquema '{codigo}' porque está asignado a {emp_count} empleado(s).")
+            
+        celdas_count = cur.execute("SELECT COUNT(*) FROM celdas_calculo WHERE esquema_codigo = ?", (codigo,)).fetchone()[0]
+        if celdas_count > 0:
+            raise ValueError(f"No se puede eliminar el esquema '{codigo}' porque tiene {celdas_count} celda(s) de cálculo asociadas.")
+            
+        cur.execute("DELETE FROM esquemas_calculo WHERE codigo = ?", (codigo,))
+        self.conn.commit()
+
+    def crear_backup(self) -> str:
+        import shutil
+        from datetime import datetime
+        
+        dir_name = os.path.dirname(self.db_path)
+        base_name = os.path.basename(self.db_path)
+        name_no_ext, ext = os.path.splitext(base_name)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"{name_no_ext}_backup_{timestamp}{ext}"
+        backup_path = os.path.join(dir_name, backup_name)
+        
+        self.conn.close()
+        try:
+            shutil.copy2(self.db_path, backup_path)
+        finally:
+            self.conn = sqlite3.connect(self.db_path)
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA foreign_keys = ON")
+            
+        return backup_path
+
+    def reinicializar_nuevo_mes(self) -> str:
+        backup_path = self.crear_backup()
+        cur = self.conn.cursor()
+        empleados = cur.execute("SELECT id, tipo_liquidacion, variables_calculo FROM empleados").fetchall()
+        
+        keys_to_reset = {"horas_trabajadas", "horas_extras_50", "horas_extras_100", "dias_vacaciones"}
+        
+        for emp in empleados:
+            emp_id = emp["id"]
+            tipo = emp["tipo_liquidacion"]
+            try:
+                variables = json.loads(emp["variables_calculo"])
+            except Exception:
+                variables = {}
+                
+            if tipo == "jornal":
+                if "quincenas" in variables:
+                    q1 = variables["quincenas"].get("Q1", {})
+                else:
+                    q1 = variables
+                    
+                for k in keys_to_reset:
+                    if k in q1:
+                        q1[k] = 0
+                        
+                variables = {
+                    "quincenas": {
+                        "Q1": q1
+                    }
+                }
+            else:
+                if "quincenas" in variables:
+                    variables = variables["quincenas"].get("Q1", {})
+                    
+                for k in keys_to_reset:
+                    if k in variables:
+                        variables[k] = 0
+            
+            cur.execute(
+                "UPDATE empleados SET variables_calculo = ? WHERE id = ?",
+                (json.dumps(variables, ensure_ascii=False), emp_id)
+            )
+            
+        self.conn.commit()
+        return backup_path
+
+    def listar_quincenas_empleado(self, emp_id: int) -> list[dict]:
+        cur = self.conn.cursor()
+        row = cur.execute("SELECT variables_calculo FROM empleados WHERE id = ?", (emp_id,)).fetchone()
+        if not row:
+            return []
+        try:
+            data = json.loads(row["variables_calculo"]) if row["variables_calculo"] else {}
+        except Exception:
+            data = {}
+        
+        quincenas_list = []
+        if isinstance(data, dict) and "quincenas" in data:
+            for q_code, q_vars in sorted(data["quincenas"].items()):
+                quincenas_list.append({
+                    "codigo_quincena": q_code,
+                    "variables": q_vars
+                })
+        else:
+            quincenas_list.append({
+                "codigo_quincena": "Q1",
+                "variables": data if isinstance(data, dict) else {}
+            })
+        return quincenas_list
+
+    def guardar_quincena_empleado(self, emp_id: int, codigo_quincena: str, variables_input: str | dict):
+        cur = self.conn.cursor()
+        row = cur.execute("SELECT variables_calculo FROM empleados WHERE id = ?", (emp_id,)).fetchone()
+        if not row:
+            return
+        try:
+            data = json.loads(row["variables_calculo"]) if row["variables_calculo"] else {}
+        except Exception:
+            data = {}
+            
+        if not isinstance(data, dict):
+            data = {}
+            
+        if "quincenas" not in data:
+            data = {
+                "quincenas": {
+                    "Q1": data
+                }
+            }
+            
+        if isinstance(variables_input, str):
+            parsed_vars = {}
+            for line in variables_input.splitlines():
+                if "=" in line:
+                    parts = line.split("=", 1)
+                    k = parts[0].strip()
+                    v_raw = parts[1].strip()
+                    try:
+                        v = int(v_raw)
+                    except ValueError:
+                        try:
+                            v = float(v_raw)
+                        except ValueError:
+                            v = v_raw
+                    parsed_vars[k] = v
+        else:
+            parsed_vars = variables_input
+            
+        data["quincenas"][codigo_quincena] = parsed_vars
+        
+        cur.execute(
+            "UPDATE empleados SET variables_calculo = ? WHERE id = ?",
+            (json.dumps(data, ensure_ascii=False), emp_id)
+        )
+        self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # CRUD Empresa (Singleton)
+    # ------------------------------------------------------------------
+    def obtener_empresa(self) -> dict:
+        row = self.conn.execute("SELECT * FROM empresa LIMIT 1").fetchone()
+        if row:
+            return dict(row)
+        return {"id": None, "razon_social": "", "direccion": "", "cuit": "", "lugar_de_pago": ""}
+
+    def guardar_empresa(self, razon_social: str, direccion: str, cuit: str, lugar_de_pago: str):
+        emp = self.obtener_empresa()
+        if emp["id"]:
+            self.conn.execute(
+                "UPDATE empresa SET razon_social=?, direccion=?, cuit=?, lugar_de_pago=? WHERE id=?",
+                (razon_social, direccion, cuit, lugar_de_pago, emp["id"]),
+            )
+        else:
+            self.conn.execute(
+                "INSERT INTO empresa (razon_social, direccion, cuit, lugar_de_pago) VALUES (?, ?, ?, ?)",
+                (razon_social, direccion, cuit, lugar_de_pago),
+            )
+        self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # CRUD Recibos (Patrón Snapshot)
+    # ------------------------------------------------------------------
+    def persistir_recibo(self, empleado_id: int, esquema_codigo: str,
+                         mes: int, anio: int, periodo: str, datos_json: str) -> int:
+        """Persiste un snapshot de liquidación. Si ya existe para el mismo
+        empleado/esquema/mes/año/período, lo reemplaza."""
+        from datetime import datetime
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Intentar reemplazar si ya existe
+        existing = self.conn.execute(
+            """SELECT id FROM recibos
+               WHERE empleado_id=? AND esquema_codigo=? AND mes=? AND anio=? AND periodo=?""",
+            (empleado_id, esquema_codigo, mes, anio, periodo),
+        ).fetchone()
+        if existing:
+            self.conn.execute(
+                "UPDATE recibos SET datos_json=?, fecha_emision=? WHERE id=?",
+                (datos_json, fecha, existing["id"]),
+            )
+            self.conn.commit()
+            return existing["id"]
+        else:
+            cur = self.conn.execute(
+                """INSERT INTO recibos (empleado_id, esquema_codigo, mes, anio, periodo, datos_json, fecha_emision)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (empleado_id, esquema_codigo, mes, anio, periodo, datos_json, fecha),
+            )
+            self.conn.commit()
+            return cur.lastrowid
+
+    def listar_recibos_empleado(self, empleado_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT r.*, e.nombre_completo, e.legajo
+               FROM recibos r
+               JOIN empleados e ON e.id = r.empleado_id
+               WHERE r.empleado_id = ?
+               ORDER BY r.anio DESC, r.mes DESC, r.periodo""",
+            (empleado_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def obtener_recibo(self, recibo_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM recibos WHERE id = ?", (recibo_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def eliminar_recibo(self, recibo_id: int):
+        self.conn.execute("DELETE FROM recibos WHERE id = ?", (recibo_id,))
+        self.conn.commit()
+
+    def buscar_recibos(self, empleado_id: int, mes: int, anio: int) -> list[dict]:
+        """Busca todos los recibos de un empleado para un mes/año dados (Q1, Q2, M)."""
+        rows = self.conn.execute(
+            "SELECT * FROM recibos WHERE empleado_id=? AND mes=? AND anio=? ORDER BY periodo",
+            (empleado_id, mes, anio),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def buscar_recibos_rango(self, empleado_id: int, mes_desde: int, anio_desde: int,
+                             mes_hasta: int, anio_hasta: int) -> list[dict]:
+        """Busca recibos en un rango de meses para funciones históricas."""
+        rows = self.conn.execute(
+            """SELECT * FROM recibos
+               WHERE empleado_id = ?
+                 AND (anio * 100 + mes) BETWEEN ? AND ?
+               ORDER BY anio, mes, periodo""",
+            (empleado_id, anio_desde * 100 + mes_desde, anio_hasta * 100 + mes_hasta),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Utilidades
