@@ -8,19 +8,20 @@ import json
 import os
 import shutil
 
-from PyQt6.QtCore import Qt, QSize, QDate
+from PyQt6.QtCore import Qt, QSize, QDate, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QColor, QActionGroup
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QTabWidget, QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem,
     QComboBox, QPushButton, QLineEdit, QTextEdit, QLabel, QSplitter,
     QListWidget, QListWidgetItem, QMessageBox, QFileDialog, QHeaderView,
-    QFrame, QGroupBox, QAbstractItemView, QDoubleSpinBox, QRadioButton, QButtonGroup,
+    QFrame, QGroupBox, QAbstractItemView, QDoubleSpinBox, QSpinBox, QRadioButton, QButtonGroup,
     QStackedWidget, QScrollArea, QDialog, QToolButton, QDateEdit, QCheckBox
 )
 
 from database import DatabaseManager
 from motor import MotorLiquidacion
+from gemini_assistant import GeminiAssistantClient
 
 # Importar canvas de Matplotlib
 from matplotlib.figure import Figure
@@ -198,6 +199,118 @@ def _formato_porcentaje(valor) -> str:
 
 
 # ======================================================================
+# Worker Thread para Gemini API
+# ======================================================================
+class GeminiWorkerThread(QThread):
+    finished_signal = pyqtSignal(str, bool)
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, api_key: str, db: DatabaseManager, prompt: str, historial: list):
+        super().__init__()
+        self.api_key = api_key
+        self.db = db
+        self.prompt = prompt
+        self.historial = historial
+
+    def run(self):
+        try:
+            client = GeminiAssistantClient(self.api_key, self.db)
+            respuesta, db_modificada = client.enviar_mensaje(self.prompt, self.historial)
+            self.finished_signal.emit(respuesta, db_modificada)
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
+
+# ======================================================================
+# Diálogo de Configuración del Sistema
+# ======================================================================
+class ConfiguracionDialog(QDialog):
+    def __init__(self, parent, db: DatabaseManager):
+        super().__init__(parent)
+        self.db = db
+        self.parent_win = parent
+        self.setWindowTitle("Configuración del Sistema")
+        self.setMinimumWidth(500)
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+
+        group = QGroupBox("Opciones Generales de Operación")
+        form = QFormLayout(group)
+
+        # Modo de Vista
+        self.combo_modo = QComboBox()
+        self.combo_modo.addItems(["Administrador", "Usuario"])
+        current_modo = getattr(self.parent_win, "modo_actual", "Administrador")
+        idx_m = self.combo_modo.findText(current_modo)
+        if idx_m >= 0:
+            self.combo_modo.setCurrentIndex(idx_m)
+        form.addRow("Modo de Interfaz:", self.combo_modo)
+
+        # Modelo Inmutable por Esquema
+        self.chk_inmutable = QCheckBox("Modelo de variables inmutable por Esquema de Cálculo")
+        inmutable_val = self.db.obtener_config("modelo_empleado_inmutable", "false").lower() == "true"
+        self.chk_inmutable.setChecked(inmutable_val)
+        form.addRow(self.chk_inmutable)
+
+        lbl_desc = QLabel(
+            "<i>Al activar el modelo inmutable, al crear o modificar variables en un empleado, "
+            "esas variables se replicarán automáticamente en todos los demás empleados asignados al mismo Esquema de Cálculo "
+            "con su valor predeterminado inicial.</i>"
+        )
+        lbl_desc.setWordWrap(True)
+        lbl_desc.setStyleSheet("color: #9CA3AF; font-size: 11px; margin-top: 5px;")
+        form.addRow(lbl_desc)
+
+        # Activar Pestaña Asistente IA
+        self.chk_habilitar_ia = QCheckBox("Habilitar pestaña Asistente IA (Google Gemini)")
+        ia_val = self.db.obtener_config("habilitar_asistente_ia", "false").lower() == "true"
+        self.chk_habilitar_ia.setChecked(ia_val)
+        form.addRow(self.chk_habilitar_ia)
+
+        # Clave API de Gemini
+        self.inp_gemini_key = QLineEdit()
+        self.inp_gemini_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.inp_gemini_key.setPlaceholderText("AIzaSy...")
+        current_key = self.db.obtener_config("gemini_api_key", "")
+        self.inp_gemini_key.setText(current_key)
+        form.addRow("Clave API Google Gemini:", self.inp_gemini_key)
+
+        layout.addWidget(group)
+
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+
+        btn_guardar = QPushButton("Guardar Configuración")
+        btn_guardar.clicked.connect(self._guardar)
+        btn_box.addWidget(btn_guardar)
+
+        btn_cancelar = QPushButton("Cancelar")
+        btn_cancelar.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancelar)
+
+        layout.addLayout(btn_box)
+
+    def _guardar(self):
+        nuevo_modo = self.combo_modo.currentText()
+        if hasattr(self.parent_win, "_cambiar_modo"):
+            self.parent_win._cambiar_modo(nuevo_modo)
+
+        inmutable_str = "true" if self.chk_inmutable.isChecked() else "false"
+        ia_str = "true" if self.chk_habilitar_ia.isChecked() else "false"
+        self.db.guardar_config("modelo_empleado_inmutable", inmutable_str)
+        self.db.guardar_config("habilitar_asistente_ia", ia_str)
+        self.db.guardar_config("gemini_api_key", self.inp_gemini_key.text().strip())
+
+        if hasattr(self.parent_win, "_actualizar_modo_vista"):
+            self.parent_win._actualizar_modo_vista()
+
+        QMessageBox.information(self, "Configuración", "Configuración del sistema guardada correctamente.")
+        self.accept()
+
+
+# ======================================================================
 # Ventana Principal
 # ======================================================================
 class MainWindow(QMainWindow):
@@ -280,6 +393,11 @@ class MainWindow(QMainWindow):
         
         menu_modo.addAction(self.act_modo_admin)
         menu_modo.addAction(self.act_modo_usuario)
+        menu_modo.addSeparator()
+        
+        act_config = QAction("⚙ Configuración del Sistema…", self)
+        act_config.triggered.connect(self._abrir_configuracion)
+        menu_modo.addAction(act_config)
 
         # Inicializamos la variable de estado
         self.modo_actual = "Administrador"
@@ -309,6 +427,10 @@ class MainWindow(QMainWindow):
         
         # Insertar el widget (botón) en la esquina superior derecha del QMenuBar
         menubar.setCornerWidget(self.btn_nuevo_mes, Qt.Corner.TopRightCorner)
+
+    def _abrir_configuracion(self):
+        dlg = ConfiguracionDialog(self, self.db)
+        dlg.exec()
 
     # ------------------------------------------------------------------
     # UI principal
@@ -341,7 +463,12 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_esquemas, "Esquemas de Cálculo")
         self._build_tab_esquemas()
 
-        # 2b. Campos Globales
+        # 2b. Secciones (CRUD)
+        self.tab_secciones = QWidget()
+        self.tabs.addTab(self.tab_secciones, "Secciones")
+        self._build_tab_secciones()
+
+        # 2c. Campos Globales
         self.tab_globales = QWidget()
         self.tabs.addTab(self.tab_globales, "Campos Globales")
         self._build_tab_globales()
@@ -371,19 +498,29 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_consola, "Consola de Fórmulas")
         self._build_tab_consola()
 
+        # 8. Asistente IA (Google Gemini)
+        self.tab_asistente_ia = QWidget()
+        self.tabs.addTab(self.tab_asistente_ia, "🤖 Asistente IA")
+        self._build_tab_asistente_ia()
+
         # Guardamos la lista de todas las pestañas para poder reconstruirlas dinámicamente
         self.all_tabs = [
             (self.tab_empleados, "Empleados"),
             (self.tab_empresa, "Empresa"),
             (self.tab_categorias, "Categorías Jornal"),
             (self.tab_esquemas, "Esquemas de Cálculo"),
+            (self.tab_secciones, "Secciones"),
             (self.tab_globales, "Campos Globales"),
             (self.tab_estructura, "Estructura del Recibo"),
             (self.tab_graficos_config, "Estructura del Gráfico"),
             (self.tab_preview, "Vista Previa"),
             (self.tab_historial, "Historial de Recibos"),
-            (self.tab_consola, "Consola de Fórmulas")
+            (self.tab_consola, "Consola de Fórmulas"),
+            (self.tab_asistente_ia, "🤖 Asistente IA")
         ]
+
+        # Aplicar visibilidad inicial de pestañas según la configuración
+        self._actualizar_modo_vista()
 
     # ==================================================================
     # PESTAÑA 1 — EMPLEADOS
@@ -536,6 +673,7 @@ class MainWindow(QMainWindow):
             self._set_variables_json(current_json)
 
     def _cargar_lista_empleados(self):
+        current_row = self.lista_empleados.currentRow()
         self.lista_empleados.blockSignals(True)
         self.lista_empleados.clear()
         self._empleados_data = self.db.listar_empleados()
@@ -543,9 +681,10 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(f"[{emp['legajo']}]  {emp['nombre_completo']}")
             item.setData(Qt.ItemDataRole.UserRole, emp["id"])
             self.lista_empleados.addItem(item)
-        self.lista_empleados.blockSignals(False)
         if self._empleados_data:
-            self.lista_empleados.setCurrentRow(0)
+            target = current_row if (0 <= current_row < len(self._empleados_data)) else 0
+            self.lista_empleados.setCurrentRow(target)
+        self.lista_empleados.blockSignals(False)
 
     def _on_empleado_seleccionado(self, row: int):
         if row < 0 or row >= len(self._empleados_data):
@@ -578,41 +717,37 @@ class MainWindow(QMainWindow):
         """Toma el empleado seleccionado actualmente, copia sus datos y crea uno nuevo."""
         row = self.lista_empleados.currentRow()
         if row < 0 or row >= len(self._empleados_data):
-            QMessageBox.warning(self, "Atención", "Por favor, seleccione un empleado de la lista para duplicar.")
             return
-
-        emp_original = self._empleados_data[row]
-
-        original_legajo = emp_original["legajo"] or ""
-        nuevo_legajo = f"{original_legajo}_COPIA" if original_legajo else ""
-        nuevo_nombre = f"{emp_original['nombre_completo'] or 'Empleado'} (Copia)"
+        emp = self._empleados_data[row]
         
-        tipo_liq = emp_original["tipo_liquidacion"]
-        variables_json = emp_original["variables_calculo"] or "{}"
-        esquema = emp_original["esquema_codigo"]
-        cat_id = emp_original["categoria_jornal_id"]
-        fecha_ing = emp_original.get("fecha_ingreso") or "2020-01-01"
-        cuil = emp_original.get("cuil") or ""
-
-        self.db.guardar_empleado(
-            None, 
-            nuevo_legajo, 
-            nuevo_nombre, 
-            tipo_liq, 
-            variables_json, 
-            esquema, 
-            cat_id,
-            fecha_ing,
-            cuil
+        nuevo_legajo = f"{emp['legajo']}_copia" if emp['legajo'] else "0000"
+        nuevo_nombre = f"{emp['nombre_completo']} (Copia)"
+        
+        nuevo_id = self.db.guardar_empleado(
+            None,
+            nuevo_legajo,
+            nuevo_nombre,
+            emp["tipo_liquidacion"],
+            emp["variables_calculo"],
+            emp["esquema_codigo"],
+            emp["categoria_jornal_id"],
+            emp["fecha_ingreso"],
+            emp.get("cuil", "")
         )
-
-        self.statusBar().showMessage(f"Empleado '{emp_original['nombre_completo']}' duplicado con éxito.", 4000)
-
-        self._cargar_lista_empleados()
-        self.lista_empleados.setCurrentRow(self.lista_empleados.count() - 1)
         
+        self._cargar_lista_empleados()
+        
+        # Seleccionar el nuevo empleado duplicado en la lista
+        for i in range(self.lista_empleados.count()):
+            item = self.lista_empleados.item(i)
+            if item and item.data(Qt.ItemDataRole.UserRole) == nuevo_id:
+                self.lista_empleados.setCurrentRow(i)
+                break
+                
         if hasattr(self, "_cargar_combo_empleados"):
             self._cargar_combo_empleados()
+            
+        self.statusBar().showMessage(f"Empleado duplicado como '{nuevo_nombre}'.", 4000)
 
     def _guardar_empleado(self):
         row = self.lista_empleados.currentRow()
@@ -636,6 +771,16 @@ class MainWindow(QMainWindow):
             emp_id, self.inp_legajo.text().strip(),
             nombre, self.inp_tipo.currentText(), variables_txt, esquema, cat_id, fecha_ing, cuil
         )
+
+        # Si el modelo inmutable está activo, propagar variables al esquema
+        inmutable = self.db.obtener_config("modelo_empleado_inmutable", "false").lower() == "true"
+        if inmutable and esquema:
+            try:
+                d_vars = json.loads(variables_txt)
+                self.db.propagar_variables_esquema(esquema, d_vars)
+            except Exception:
+                pass
+
         self.statusBar().showMessage("Empleado guardado correctamente.", 4000)
         old_row = row
         self._cargar_lista_empleados()
@@ -668,7 +813,8 @@ class MainWindow(QMainWindow):
         if resp == QMessageBox.StandardButton.Yes:
             self.db.eliminar_empleado(emp["id"])
             self._cargar_lista_empleados()
-            self._cargar_combo_empleados()
+            if hasattr(self, "_cargar_combo_empleados"):
+                self._cargar_combo_empleados()
             self.statusBar().showMessage("Empleado eliminado.", 4000)
 
     # ------------------------------------------------------------------
@@ -741,7 +887,7 @@ class MainWindow(QMainWindow):
         btn_del = QPushButton("−")
         btn_del.setFixedWidth(30)
         btn_del.setToolTip("Eliminar esta variable")
-        btn_del.clicked.connect(lambda: self._remove_variable_row_from_tab(tab_name, row_widget))
+        btn_del.clicked.connect(lambda checked=False, t=tab_name, rw=row_widget: self._remove_variable_row_from_tab(t, rw))
 
         if is_user:
             btn_del.setVisible(False)
@@ -778,7 +924,22 @@ class MainWindow(QMainWindow):
         if idx < 0:
             return
         tab_name = self.tab_widget_vars.tabText(idx)
-        self._add_variable_row_to_tab(tab_name, "", "")
+        
+        tab_info = self.quincena_tabs.get(tab_name)
+        existing_keys = set()
+        if tab_info:
+            for item in tab_info["rows"]:
+                k = item["key_input"].text().strip()
+                if k:
+                    existing_keys.add(k)
+                    
+        count = 1
+        new_key = f"variable_{count}"
+        while new_key in existing_keys:
+            count += 1
+            new_key = f"variable_{count}"
+
+        self._add_variable_row_to_tab(tab_name, new_key, 0)
 
     def _on_agregar_quincena_click(self):
         q1_vars = self._get_tab_variables_dict("Q1")
@@ -1021,6 +1182,136 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage("Categoría eliminada.", 4000)
                 except Exception as e:
                     QMessageBox.warning(self, "Error", f"No se pudo eliminar la categoría: {e}")
+
+    # ==================================================================
+    # PESTAÑA SECCIONES (CRUD)
+    # ==================================================================
+    def _build_tab_secciones(self):
+        layout = QHBoxLayout(self.tab_secciones)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        layout.addWidget(splitter)
+
+        # Panel Izquierdo: Lista/Tabla de Secciones
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+
+        self.tabla_secciones = QTableWidget()
+        self.tabla_secciones.setColumnCount(4)
+        self.tabla_secciones.setHorizontalHeaderLabels(["ID", "Código", "Título", "Orden"])
+        self.tabla_secciones.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.tabla_secciones.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabla_secciones.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tabla_secciones.currentItemChanged.connect(self._on_seccion_seleccionada)
+        left_layout.addWidget(self.tabla_secciones)
+
+        btn_bar = QHBoxLayout()
+        btn_nueva_sec = QPushButton("+ Nueva Sección")
+        btn_nueva_sec.clicked.connect(self._nueva_seccion)
+        btn_elim_sec = QPushButton("− Eliminar Sección")
+        btn_elim_sec.clicked.connect(self._eliminar_seccion)
+        btn_bar.addWidget(btn_nueva_sec)
+        btn_bar.addWidget(btn_elim_sec)
+        left_layout.addLayout(btn_bar)
+
+        splitter.addWidget(left)
+
+        # Panel Derecho: Formulario Editor
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        group_edit = QGroupBox("Editor de Sección")
+        form = QFormLayout()
+
+        self.sec_inp_codigo = QLineEdit()
+        self.sec_inp_codigo.setPlaceholderText("Ej: PREMIOS (Mayúsculas sin espacios)")
+        form.addRow("Código:", self.sec_inp_codigo)
+
+        self.sec_inp_titulo = QLineEdit()
+        self.sec_inp_titulo.setPlaceholderText("Ej: Premios y Adicionales")
+        form.addRow("Título:", self.sec_inp_titulo)
+
+        self.sec_inp_orden = QSpinBox()
+        self.sec_inp_orden.setRange(0, 999)
+        form.addRow("Orden:", self.sec_inp_orden)
+
+        group_edit.setLayout(form)
+        right_layout.addWidget(group_edit)
+
+        btn_guardar_sec = QPushButton("Guardar Sección")
+        btn_guardar_sec.clicked.connect(self._guardar_seccion)
+        right_layout.addWidget(btn_guardar_sec)
+
+        right_layout.addStretch()
+        splitter.addWidget(right)
+
+        self._cargar_tabla_secciones()
+
+    def _cargar_tabla_secciones(self):
+        self.tabla_secciones.setRowCount(0)
+        self._secciones_data = self.db.listar_secciones()
+        for i, sec in enumerate(self._secciones_data):
+            self.tabla_secciones.insertRow(i)
+            self.tabla_secciones.setItem(i, 0, QTableWidgetItem(str(sec["id"])))
+            self.tabla_secciones.setItem(i, 1, QTableWidgetItem(sec["codigo"]))
+            self.tabla_secciones.setItem(i, 2, QTableWidgetItem(sec["titulo"]))
+            self.tabla_secciones.setItem(i, 3, QTableWidgetItem(str(sec.get("orden", 0))))
+            
+        self._refrescar_secciones_en_combos()
+
+    def _on_seccion_seleccionada(self, current, previous):
+        row = self.tabla_secciones.currentRow()
+        if 0 <= row < len(self._secciones_data):
+            sec = self._secciones_data[row]
+            self.sec_inp_codigo.setText(sec["codigo"])
+            self.sec_inp_titulo.setText(sec["titulo"])
+            self.sec_inp_orden.setValue(sec.get("orden", 0))
+
+    def _nueva_seccion(self):
+        self.tabla_secciones.clearSelection()
+        self.sec_inp_codigo.clear()
+        self.sec_inp_titulo.clear()
+        self.sec_inp_orden.setValue(len(self._secciones_data) * 10)
+        self.sec_inp_codigo.setFocus()
+
+    def _guardar_seccion(self):
+        row = self.tabla_secciones.currentRow()
+        sec_id = self._secciones_data[row]["id"] if (0 <= row < len(self._secciones_data)) else None
+
+        codigo = self.sec_inp_codigo.text().strip().upper()
+        titulo = self.sec_inp_titulo.text().strip()
+        orden = self.sec_inp_orden.value()
+
+        if not codigo or not titulo:
+            QMessageBox.warning(self, "Error", "El código y título de la sección son obligatorios.")
+            return
+
+        self.db.guardar_seccion(sec_id, codigo, titulo, orden)
+        self._cargar_tabla_secciones()
+        self.statusBar().showMessage("Sección guardada correctamente.", 4000)
+
+    def _eliminar_seccion(self):
+        row = self.tabla_secciones.currentRow()
+        if row < 0 or row >= len(self._secciones_data):
+            return
+        sec = self._secciones_data[row]
+        resp = QMessageBox.question(
+            self, "Confirmar",
+            f"¿Desea eliminar la sección '{sec['titulo']}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if resp == QMessageBox.StandardButton.Yes:
+            self.db.eliminar_seccion(sec["id"])
+            self._cargar_tabla_secciones()
+
+    def _refrescar_secciones_en_combos(self):
+        """Actualiza los desplegables de secciones en el editor de Estructura de Recibo"""
+        if hasattr(self, "combo_editor_seccion"):
+            current = self.combo_editor_seccion.currentText()
+            self.combo_editor_seccion.clear()
+            secciones = [s["codigo"] for s in self.db.listar_secciones()]
+            self.combo_editor_seccion.addItems(secciones)
+            idx = self.combo_editor_seccion.findText(current)
+            if idx >= 0:
+                self.combo_editor_seccion.setCurrentIndex(idx)
 
     # ==================================================================
     # PESTAÑA 2b — CAMPOS GLOBALES DE SISTEMA
@@ -2118,7 +2409,11 @@ class MainWindow(QMainWindow):
         self.tree_resultado.clear()
         secciones_info = {s["codigo"]: s["titulo"] for s in self.db.listar_secciones()}
 
-        orden_secciones = ["COMPOSICION", "RECIBO", "COSTO_EMP"]
+        orden_secciones = [s["codigo"] for s in self.db.listar_secciones()]
+        for s_cod in resultado["resultados_por_seccion"].keys():
+            if s_cod not in orden_secciones:
+                orden_secciones.append(s_cod)
+
         for sec_codigo in orden_secciones:
             filas = resultado["resultados_por_seccion"].get(sec_codigo, [])
             if not self.chk_debug_recibo.isChecked():
@@ -2138,7 +2433,7 @@ class MainWindow(QMainWindow):
             parent.setExpanded(True)
 
             for fila in filas_visibles:
-                es_total = fila["codigo"] in (
+                es_total = fila["codigo"].startswith("total_") or fila["codigo"] in (
                     "bruto", "total_deducciones", "neto",
                     "total_cargas_patronales", "costo_laboral_total",
                 )
@@ -2768,6 +3063,7 @@ class MainWindow(QMainWindow):
 
     def _actualizar_modo_vista(self):
         is_user = self.modo_actual == "Usuario"
+        habilitar_ia = self.db.obtener_config("habilitar_asistente_ia", "false").lower() == "true"
         
         # Guardar pestaña actual
         current_tab = self.tabs.currentWidget()
@@ -2782,6 +3078,8 @@ class MainWindow(QMainWindow):
             self.tabs.addTab(self.tab_preview, "Vista Previa")
             self.tabs.addTab(self.tab_historial, "Historial de Recibos")
             self.tabs.addTab(self.tab_consola, "Consola de Fórmulas")
+            if habilitar_ia:
+                self.tabs.addTab(self.tab_asistente_ia, "🤖 Asistente IA")
             
             # Controles Empleados
             if hasattr(self, "btn_nuevo"): self.btn_nuevo.setVisible(False)
@@ -2795,8 +3093,10 @@ class MainWindow(QMainWindow):
             if hasattr(self, "btn_del_global"): self.btn_del_global.setVisible(False)
             if hasattr(self, "btn_nuevo_mes"): self.btn_nuevo_mes.setVisible(False) # Ocultar en el menú
         else:
-            # En modo Administrador mostramos todo
+            # En modo Administrador mostramos todo lo habilitado
             for widget, name in self.all_tabs:
+                if widget == getattr(self, "tab_asistente_ia", None) and not habilitar_ia:
+                    continue
                 self.tabs.addTab(widget, name)
                 
             if hasattr(self, "btn_nuevo"): self.btn_nuevo.setVisible(True)
@@ -3337,3 +3637,146 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             self.txt_consola_output.append(f"<span style='color: #EF4444;'><b>Error de Evaluación:</b> {e}</span>")
+
+    # ==================================================================
+    # PESTAÑA ASISTENTE IA (GEMINI API)
+    # ==================================================================
+    def _build_tab_asistente_ia(self):
+        layout = QVBoxLayout(self.tab_asistente_ia)
+
+        # Header / Banner
+        header = QHBoxLayout()
+        lbl_title = QLabel("<b>🤖 Asistente Inteligente MiniERP & Liquidación (Google Gemini API)</b>")
+        lbl_title.setStyleSheet("font-size: 14px;")
+        header.addWidget(lbl_title)
+        header.addStretch()
+
+        btn_limpiar_chat = QPushButton("Limpiar Chat")
+        btn_limpiar_chat.clicked.connect(self._limpiar_chat_ia)
+        header.addWidget(btn_limpiar_chat)
+        layout.addLayout(header)
+
+        # Chat Log Viewer (HTML Formatted)
+        self.txt_chat_log = QTextEdit()
+        self.txt_chat_log.setReadOnly(True)
+        self.txt_chat_log.setStyleSheet("""
+            QTextEdit {
+                background-color: #1F2937;
+                color: #F3F4F6;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 13px;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                padding: 10px;
+            }
+        """)
+        layout.addWidget(self.txt_chat_log)
+
+        # Mensaje de bienvenida inicial
+        self.historial_gemini = []
+        self._append_chat_message("system", "<b>¡Hola! Bienvenido al Asistente IA de Liquidación de Sueldos y MiniERP.</b><br>Puedo ayudarte a crear esquemas de cálculo, agregar conceptos, registrar empleados, definir secciones o explicar fórmulas argentinas.<br><i>Sugerencia:</i> Podés usar las tarjetas rápidas de abajo o escribir directamente tu consulta.")
+
+        # Preset Prompts Quick Bar
+        presets_group = QGroupBox("Sugerencias de Peticiones Rápidas")
+        presets_layout = QHBoxLayout(presets_group)
+
+        btn_p1 = QPushButton("💡 Crear Esquema COMERCIO")
+        btn_p1.clicked.connect(lambda: self._enviar_prompt_ia("Por favor crea un nuevo esquema de cálculo llamado COMERCIO (Convenio Empleados de Comercio) con conceptos para sueldo básico y presentismo (8.33%)."))
+
+        btn_p2 = QPushButton("💡 Registrar empleado Carlos Gardel")
+        btn_p2.clicked.connect(lambda: self._enviar_prompt_ia("Por favor registra un nuevo empleado mensual llamado Carlos Gardel con legajo 0100, asignado al esquema MENSUAL y sueldo básico de 650000."))
+
+        btn_p3 = QPushButton("💡 Explicar cálculo del SAC (Aguinaldo)")
+        btn_p3.clicked.connect(lambda: self._enviar_prompt_ia("Explicame detalladamente cómo se calcula el Sueldo Anual Complementario (SAC / Aguinaldo) en Argentina según la ley y cómo se expresaría la fórmula en el sistema."))
+
+        btn_p4 = QPushButton("💡 Resumen del estado actual del ERP")
+        btn_p4.clicked.connect(lambda: self._enviar_prompt_ia("Por favor consulta el estado actual del ERP y dame un resumen de empleados, esquemas y secciones configuradas."))
+
+        presets_layout.addWidget(btn_p1)
+        presets_layout.addWidget(btn_p2)
+        presets_layout.addWidget(btn_p3)
+        presets_layout.addWidget(btn_p4)
+        layout.addWidget(presets_group)
+
+        # Bar Input bottom
+        input_bar = QHBoxLayout()
+        self.inp_prompt_ia = QLineEdit()
+        self.inp_prompt_ia.setPlaceholderText("Escribe tu instrucción para la IA (ej: 'Crear esquema UOCRA con básico e incentivo')...")
+        self.inp_prompt_ia.returnPressed.connect(self._enviar_prompt_ia)
+        input_bar.addWidget(self.inp_prompt_ia)
+
+        self.btn_enviar_ia = QPushButton("Enviar (Enter)")
+        self.btn_enviar_ia.clicked.connect(self._enviar_prompt_ia)
+        input_bar.addWidget(self.btn_enviar_ia)
+
+        layout.addLayout(input_bar)
+
+    def _append_chat_message(self, sender: str, text_html: str):
+        if sender == "user":
+            color_header = "#60A5FA"
+            title = "👤 Usuario"
+        elif sender == "system":
+            color_header = "#10B981"
+            title = "🤖 Asistente Gemini"
+        else:
+            color_header = "#F59E0B"
+            title = "⚙ Sistema"
+
+        formatted = f"""
+        <div style="margin-bottom: 12px; padding: 8px; border-radius: 6px; background-color: #111827;">
+            <b style="color: {color_header}; font-size: 13px;">{title}:</b><br>
+            <div style="color: #E5E7EB; margin-top: 4px;">{text_html}</div>
+        </div>
+        """
+        self.txt_chat_log.append(formatted)
+        sb = self.txt_chat_log.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _limpiar_chat_ia(self):
+        self.txt_chat_log.clear()
+        self.historial_gemini = []
+        self._append_chat_message("system", "Historial de conversación reiniciado.")
+
+    def _enviar_prompt_ia(self, prompt_override=None):
+        prompt = prompt_override if (prompt_override and isinstance(prompt_override, str)) else self.inp_prompt_ia.text().strip()
+        if not prompt:
+            return
+
+        self.inp_prompt_ia.clear()
+        self.btn_enviar_ia.setEnabled(False)
+        self._append_chat_message("user", prompt)
+        self._append_chat_message("info", "<i>Pensando y procesando respuesta con Gemini API...</i>")
+
+        api_key = self.db.obtener_config("gemini_api_key", "").strip()
+
+        # Iniciar Worker Thread asincrónico
+        self.gemini_worker = GeminiWorkerThread(api_key, self.db, prompt, self.historial_gemini)
+        self.gemini_worker.finished_signal.connect(self._on_gemini_response)
+        self.gemini_worker.error_signal.connect(self._on_gemini_error)
+        self.gemini_worker.start()
+
+    def _on_gemini_response(self, respuesta_text: str, db_modificada: bool):
+        self.btn_enviar_ia.setEnabled(True)
+        # Convertir Markdown básico a HTML para visualización rica en QTextEdit
+        html_resp = respuesta_text.replace("\n", "<br>").replace("**", "<b>").replace("`", "<code>")
+        self._append_chat_message("system", html_resp)
+
+        if db_modificada:
+            self.statusBar().showMessage(" Base de datos actualizada por el Asistente IA.", 5000)
+            self._refrescar_todas_las_vistas()
+
+    def _on_gemini_error(self, error_msg: str):
+        self.btn_enviar_ia.setEnabled(True)
+        self._append_chat_message("info", f"<span style='color: #EF4444;'>❌ Error: {error_msg}</span>")
+
+    def _refrescar_todas_las_vistas(self):
+        """Refresca todos los combos y tablas de la interfaz gráfica tras cambios realizados por IA"""
+        try:
+            if hasattr(self, "_cargar_combos_empleado"): self._cargar_combos_empleado()
+            if hasattr(self, "_cargar_lista_empleados"): self._cargar_lista_empleados()
+            if hasattr(self, "_cargar_tabla_esquemas"): self._cargar_tabla_esquemas()
+            if hasattr(self, "_cargar_tabla_secciones"): self._cargar_tabla_secciones()
+            if hasattr(self, "_cargar_tabla_celdas"): self._cargar_tabla_celdas()
+            if hasattr(self, "_cargar_combo_empleados"): self._cargar_combo_empleados()
+        except Exception:
+            pass

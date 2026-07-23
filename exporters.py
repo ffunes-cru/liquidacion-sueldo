@@ -816,7 +816,10 @@ def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | 
         mes_anio = {"mes": hoy.month, "anio": hoy.year, "periodo": "M"}
 
     esquema = emp.get("esquema_codigo") or "MENSUAL"
-    orden_secciones = ["COMPOSICION", "RECIBO", "COSTO_EMP"]
+    orden_secciones = [s["codigo"] for s in db.listar_secciones()]
+    for s_cod in resultado["resultados_por_seccion"].keys():
+        if s_cod not in orden_secciones:
+            orden_secciones.append(s_cod)
 
     # Construir filas de la tabla en HTML
     rows_html = []
@@ -825,7 +828,7 @@ def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | 
         filas_visibles = []
         for f in filas:
             if f.get("visible_recibo", 1) == 1:
-                es_total = f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
+                es_total = f["codigo"].startswith("total_") or f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
                 if f["monto"] != 0 or es_total:
                     filas_visibles.append(f)
         if not filas_visibles:
@@ -838,7 +841,7 @@ def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | 
         """)
 
         for f in filas_visibles:
-            es_total = f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
+            es_total = f["codigo"].startswith("total_") or f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
             style_row = "font-weight: bold; background-color: #F8FAFC;" if es_total else ""
 
             u_val = _formato_porcentaje(f["unidad"]) if f["unidad"] is not None else ""
@@ -1092,7 +1095,10 @@ def exportar_recibo_xlsx(resultado: dict, db, path: str, path_grafico: str | Non
         cell.alignment = align_center if col_idx > 1 else align_left
 
     secciones_info = {s["codigo"]: s["titulo"] for s in db.listar_secciones()}
-    orden_secciones = ["COMPOSICION", "RECIBO", "COSTO_EMP"]
+    orden_secciones = [s["codigo"] for s in db.listar_secciones()]
+    for s_cod in resultado["resultados_por_seccion"].keys():
+        if s_cod not in orden_secciones:
+            orden_secciones.append(s_cod)
 
     row_num = 7
     for sec_codigo in orden_secciones:
@@ -1100,7 +1106,7 @@ def exportar_recibo_xlsx(resultado: dict, db, path: str, path_grafico: str | Non
         filas_visibles = []
         for f in filas:
             if f.get("visible_recibo", 1) == 1:
-                es_total = f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
+                es_total = f["codigo"].startswith("total_") or f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
                 if f["monto"] != 0 or es_total:
                     filas_visibles.append(f)
         if not filas_visibles:
@@ -1115,7 +1121,7 @@ def exportar_recibo_xlsx(resultado: dict, db, path: str, path_grafico: str | Non
         row_num += 1
 
         for f in filas_visibles:
-            es_total = f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
+            es_total = f["codigo"].startswith("total_") or f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
             
             c_desc = ws.cell(row=row_num, column=1, value=f["descripcion"])
             c_u = ws.cell(row=row_num, column=2, value=f["unidad"])
@@ -1197,14 +1203,17 @@ def exportar_recibo_ods(resultado: dict, db, path: str, path_grafico: str | None
     table.addElement(r_h)
 
     secciones_info = {s["codigo"]: s["titulo"] for s in db.listar_secciones()}
-    orden_secciones = ["COMPOSICION", "RECIBO", "COSTO_EMP"]
+    orden_secciones = [s["codigo"] for s in db.listar_secciones()]
+    for s_cod in resultado["resultados_por_seccion"].keys():
+        if s_cod not in orden_secciones:
+            orden_secciones.append(s_cod)
 
     for sec_codigo in orden_secciones:
         filas = resultado["resultados_por_seccion"].get(sec_codigo, [])
         filas_visibles = []
         for f in filas:
             if f.get("visible_recibo", 1) == 1:
-                es_total = f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
+                es_total = f["codigo"].startswith("total_") or f["codigo"] in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total")
                 if f["monto"] != 0 or es_total:
                     filas_visibles.append(f)
         if not filas_visibles:

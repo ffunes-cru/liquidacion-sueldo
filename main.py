@@ -13,8 +13,17 @@ from ui import MainWindow
 def main():
     app = QApplication(sys.argv)
 
-    # Inicializar base de datos (se crea si no existe, con seed)
-    db = DatabaseManager()
+    # Inicializar base de datos con bloqueo exclusivo por instancia
+    try:
+        db = DatabaseManager()
+    except Exception as e:
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(
+            None,
+            "Base de Datos Bloqueada",
+            f"No se pudo iniciar la aplicación:\n\n{e}"
+        )
+        sys.exit(1)
 
     # Crear y mostrar ventana principal
     window = MainWindow(db)

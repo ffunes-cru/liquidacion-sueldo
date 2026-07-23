@@ -11,6 +11,11 @@ import sys
 DB_FILENAME = "liquidacion_sueldos.db"
 
 
+class DatabaseLockedError(RuntimeError):
+    """Excepción lanzada cuando la base de datos está bloqueada por otra instancia."""
+    pass
+
+
 class DatabaseManager:
     """Gestiona la conexión, creación de tablas, migraciones y CRUD sobre SQLite."""
 
@@ -21,11 +26,73 @@ class DatabaseManager:
             else:
                 base_dir = os.path.dirname(os.path.abspath(__file__))
             db_path = os.path.join(base_dir, DB_FILENAME)
-        self.db_path = db_path
-        self.conn = sqlite3.connect(self.db_path)
+        self.db_path = os.path.abspath(db_path)
+        self._lock_path = self.db_path + ".lock"
+        self._lock_file = None
+
+        self._adquirir_bloqueo_exclusivo()
+
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self._crear_tablas()
+
+    def _adquirir_bloqueo_exclusivo(self):
+        try:
+            self._lock_file = open(self._lock_path, "a+")
+            self._lock_file.seek(0)
+            
+            try:
+                import fcntl
+                fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except (ImportError, AttributeError):
+                try:
+                    import msvcrt
+                    msvcrt.locking(self._lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                except Exception:
+                    pass
+
+            self._lock_file.seek(0)
+            self._lock_file.truncate()
+            self._lock_file.write(str(os.getpid()))
+            self._lock_file.flush()
+        except (IOError, OSError):
+            if hasattr(self, "_lock_file") and self._lock_file:
+                try:
+                    self._lock_file.close()
+                except Exception:
+                    pass
+                self._lock_file = None
+            nombre_db = os.path.basename(self.db_path)
+            raise DatabaseLockedError(
+                f"La base de datos '{nombre_db}' ya está siendo utilizada por otra instancia de la aplicación.\n\n"
+                f"Solo se permite abrir una instancia simultánea por archivo de base de datos."
+            )
+
+    def cerrar(self):
+        conn = getattr(self, "conn", None)
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self.conn = None
+
+        lock_file = getattr(self, "_lock_file", None)
+        if lock_file:
+            try:
+                try:
+                    import fcntl
+                    fcntl.flock(lock_file, fcntl.LOCK_UN)
+                except Exception:
+                    pass
+                lock_file.close()
+            except Exception:
+                pass
+            self._lock_file = None
+
+    def __del__(self):
+        self.cerrar()
 
     # ------------------------------------------------------------------
     # Creación de tablas y Migraciones
@@ -55,7 +122,8 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS secciones (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 codigo      TEXT    UNIQUE NOT NULL,
-                titulo      TEXT    NOT NULL
+                titulo      TEXT    NOT NULL,
+                orden       INTEGER NOT NULL DEFAULT 0
             );
         """)
 
@@ -141,6 +209,14 @@ class DatabaseManager:
             );
         """)
 
+        # 10. Configuraciones de Sistema
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS configuraciones (
+                clave TEXT PRIMARY KEY,
+                valor TEXT NOT NULL
+            );
+        """)
+
         self.conn.commit()
 
         # --- Migraciones dinámicas: Añadir columnas nuevas si no existen ---
@@ -156,6 +232,7 @@ class DatabaseManager:
             ("empleados", "fecha_ingreso", "TEXT DEFAULT '2020-01-01'"),
             ("celdas_calculo", "visible_recibo", "INTEGER DEFAULT 1"),
             ("empleados", "cuil", "TEXT DEFAULT ''"),
+            ("secciones", "orden", "INTEGER DEFAULT 0"),
         ]
 
         for tabla, columna, definicion in alteraciones:
@@ -427,8 +504,143 @@ class DatabaseManager:
     # CRUD Secciones
     # ------------------------------------------------------------------
     def listar_secciones(self) -> list[dict]:
-        rows = self.conn.execute("SELECT * FROM secciones ORDER BY id").fetchall()
+        rows = self.conn.execute("SELECT * FROM secciones ORDER BY orden, id").fetchall()
         return [dict(r) for r in rows]
+
+    def obtener_seccion(self, sec_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM secciones WHERE id = ?", (sec_id,)).fetchone()
+        return dict(row) if row else None
+
+    def guardar_seccion(self, sec_id: int | None, codigo: str, titulo: str, orden: int = 0) -> int:
+        if sec_id:
+            self.conn.execute(
+                "UPDATE secciones SET codigo=?, titulo=?, orden=? WHERE id=?",
+                (codigo, titulo, orden, sec_id)
+            )
+        else:
+            cur = self.conn.execute(
+                "INSERT INTO secciones (codigo, titulo, orden) VALUES (?, ?, ?)",
+                (codigo, titulo, orden)
+            )
+            sec_id = cur.lastrowid
+        self.conn.commit()
+        return sec_id
+
+    def eliminar_seccion(self, sec_id: int):
+        self.conn.execute("DELETE FROM secciones WHERE id = ?", (sec_id,))
+        self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # Configuraciones de Sistema & Propagación de Variables
+    # ------------------------------------------------------------------
+    def obtener_config(self, clave: str, default: str = "") -> str:
+        row = self.conn.execute("SELECT valor FROM configuraciones WHERE clave = ?", (clave,)).fetchone()
+        return row["valor"] if row else default
+
+    def guardar_config(self, clave: str, valor: str):
+        self.conn.execute(
+            "INSERT OR REPLACE INTO configuraciones (clave, valor) VALUES (?, ?)",
+            (clave, str(valor))
+        )
+        self.conn.commit()
+
+    def propagar_variables_esquema(self, esquema_codigo: str, variables_ref: dict):
+        """Cuando el modelo de empleado es inmutable por esquema, sincroniza tanto las variables
+        agregadas como las eliminadas en todos los demás empleados asignados a esquema_codigo."""
+        rows = self.conn.execute(
+            "SELECT id, tipo_liquidacion, variables_calculo FROM empleados WHERE esquema_codigo = ?",
+            (esquema_codigo,)
+        ).fetchall()
+
+        tiene_quincenas_ref = "quincenas" in variables_ref and isinstance(variables_ref["quincenas"], dict)
+        
+        if tiene_quincenas_ref:
+            q_ref_map = {}
+            todas_claves_ref = set()
+            for q_code, q_dict in variables_ref["quincenas"].items():
+                if isinstance(q_dict, dict):
+                    q_keys = set(q_dict.keys())
+                    q_ref_map[q_code] = (q_keys, q_dict)
+                    todas_claves_ref.update(q_keys)
+        else:
+            todas_claves_ref = set(k for k in variables_ref.keys() if k != "quincenas")
+            q_ref_map = {}
+
+        for r in rows:
+            emp_id = r["id"]
+            es_jornal = r["tipo_liquidacion"] == "jornal"
+            try:
+                data = json.loads(r["variables_calculo"] or "{}")
+            except Exception:
+                data = {}
+                
+            modificado = False
+            
+            if es_jornal:
+                if not isinstance(data, dict):
+                    data = {}
+                quincenas = data.setdefault("quincenas", {"Q1": {}})
+                if not isinstance(quincenas, dict):
+                    quincenas = {"Q1": {}}
+                    data["quincenas"] = quincenas
+                    
+                for q_code, target_q in quincenas.items():
+                    if not isinstance(target_q, dict):
+                        continue
+                    
+                    if tiene_quincenas_ref and q_code in q_ref_map:
+                        ref_keys, ref_sample_dict = q_ref_map[q_code]
+                    else:
+                        ref_keys = todas_claves_ref
+                        ref_sample_dict = variables_ref
+
+                    # 1. Eliminar variables que ya no están en la referencia
+                    keys_to_delete = [k for k in target_q.keys() if k not in ref_keys]
+                    for k in keys_to_delete:
+                        del target_q[k]
+                        modificado = True
+
+                    # 2. Agregar variables nuevas que faltan en la quincena
+                    for k in ref_keys:
+                        if k not in target_q:
+                            sample_v = ref_sample_dict.get(k)
+                            if isinstance(sample_v, bool):
+                                init_v = False
+                            elif isinstance(sample_v, (int, float)):
+                                init_v = 0
+                            else:
+                                init_v = ""
+                            target_q[k] = init_v
+                            modificado = True
+            else:
+                if not isinstance(data, dict):
+                    data = {}
+                
+                # 1. Eliminar variables que ya no están en la referencia
+                keys_to_delete = [k for k in data.keys() if k != "quincenas" and k not in todas_claves_ref]
+                for k in keys_to_delete:
+                    del data[k]
+                    modificado = True
+
+                # 2. Agregar variables nuevas que faltan
+                for k in todas_claves_ref:
+                    if k not in data:
+                        sample_v = variables_ref.get(k)
+                        if isinstance(sample_v, bool):
+                            init_v = False
+                        elif isinstance(sample_v, (int, float)):
+                            init_v = 0
+                        else:
+                            init_v = ""
+                        data[k] = init_v
+                        modificado = True
+                        
+            if modificado:
+                self.conn.execute(
+                    "UPDATE empleados SET variables_calculo = ? WHERE id = ?",
+                    (json.dumps(data, ensure_ascii=False), emp_id)
+                )
+        self.conn.commit()
 
     # ------------------------------------------------------------------
     # CRUD Celdas de Cálculo
@@ -790,6 +1002,3 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     def ruta_db(self) -> str:
         return self.db_path
-
-    def cerrar(self):
-        self.conn.close()
