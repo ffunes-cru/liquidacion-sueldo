@@ -118,3 +118,12 @@ Para empaquetar la aplicación en un único archivo ejecutable portátil:
    pyinstaller liquidacion.spec
    ```
 3. **Resultado**: El ejecutable generado estará disponible en la carpeta `dist/` (`dist/LiquidacionSueldos.exe` en Windows o `dist/LiquidacionSueldos` en Linux).
+
+### Generación de Instalador para Windows (`installer.iss` con Inno Setup)
+Para crear un instalador ejecutable profesional (`LiquidacionSueldos_Setup_v2.0.exe`) que evite bloqueos agresivos de navegadores y SmartScreen:
+
+1. Instalar [Inno Setup 6.x](https://jrsoftware.org/isinfo.php).
+2. Abrir el archivo `installer.iss` en Inno Setup Compiler (o hacer clic derecho ➔ *Compile*).
+3. El instalador final `LiquidacionSueldos_Setup_v2.0.exe` se generará en el directorio raíz.
+4. Instala por defecto en la carpeta local de usuario `{localappdata}\Programs\LiquidacionSueldos`, lo que garantiza permisos de escritura sobre la base de datos sin requerir elevación de administrador (UAC).
+

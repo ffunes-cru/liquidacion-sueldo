@@ -6,7 +6,7 @@ from PyInstaller.utils.hooks import collect_data_files
 # --- CONFIGURACIÓN DE TU PROYECTO ---
 ENTRY_POINT = 'main.py'             # <-- CAMBIÁ esto por tu script de inicio (ej. 'app.py' o 'main.py')
 APP_NAME = 'LiquidacionSueldos'     # Nombre del ejecutable final
-ONE_FILE = True                     # True para un solo ejecutable portable (.bin en Linux, .exe en Win)
+ONE_FILE = False                    # False genera carpeta dist/LiquidacionSueldos/ (Evita falsos positivos de antivirus con Inno Setup)
 # ------------------------------------
 
 block_cipher = None
@@ -59,8 +59,8 @@ if ONE_FILE:
         name=APP_NAME,
         debug=False,
         bootloader_ignore_signals=False,
-        strip=True,  # Strip remueve símbolos de depuración en Linux para achicar el peso enormemente
-        upx=False,   # Desactivado por defecto (a veces rompe Qt en Linux si no se configura con cuidado)
+        strip=False, # Strip desactivado para evitar advertencias/errores con DLLs de Windows y Qt
+        upx=False,   # Desactivado por defecto (a veces rompe Qt si no se configura con cuidado)
         upx_exclude=[],
         runtime_tmpdir=None,
         console=False, # <-- FALSE oculta la terminal de fondo al ejecutar el programa
@@ -79,7 +79,7 @@ else:
         name=APP_NAME,
         debug=False,
         bootloader_ignore_signals=False,
-        strip=True,
+        strip=False,
         upx=False,
         console=False,
     )
@@ -88,7 +88,7 @@ else:
         a.binaries,
         a.zipfiles,
         a.datas,
-        strip=True,
+        strip=False,
         upx=False,
         upx_exclude=[],
         name=APP_NAME,
