@@ -19,7 +19,7 @@ class DatabaseLockedError(RuntimeError):
 class DatabaseManager:
     """Gestiona la conexión, creación de tablas, migraciones y CRUD sobre SQLite."""
 
-    def __init__(self, db_path: str | None = None):
+    def __init__(self, db_path: str | None = None, skip_lock: bool = False):
         if db_path is None:
             if getattr(sys, "frozen", False):
                 base_dir = os.path.dirname(os.path.abspath(sys.executable))
@@ -30,7 +30,8 @@ class DatabaseManager:
         self._lock_path = self.db_path + ".lock"
         self._lock_file = None
 
-        self._adquirir_bloqueo_exclusivo()
+        if not skip_lock:
+            self._adquirir_bloqueo_exclusivo()
 
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
@@ -513,6 +514,13 @@ class DatabaseManager:
 
     def guardar_seccion(self, sec_id: int | None, codigo: str, titulo: str, orden: int = 0) -> int:
         if sec_id:
+            old_sec = self.obtener_seccion(sec_id)
+            if old_sec and old_sec["codigo"] != codigo:
+                # Actualizar celdas_calculo que referencian el código de sección anterior
+                self.conn.execute(
+                    "UPDATE celdas_calculo SET seccion_codigo = ? WHERE seccion_codigo = ?",
+                    (codigo, old_sec["codigo"])
+                )
             self.conn.execute(
                 "UPDATE secciones SET codigo=?, titulo=?, orden=? WHERE id=?",
                 (codigo, titulo, orden, sec_id)
@@ -544,27 +552,152 @@ class DatabaseManager:
         )
         self.conn.commit()
 
-    def propagar_variables_esquema(self, esquema_codigo: str, variables_ref: dict):
-        """Cuando el modelo de empleado es inmutable por esquema, sincroniza tanto las variables
-        agregadas como las eliminadas en todos los demás empleados asignados a esquema_codigo."""
+    def obtener_plantilla_variables_esquema(self, esquema_codigo: str, emp_id_excluir: int | None = None) -> dict:
+        """Devuelve la estructura de plantilla canónica de variables para un esquema_codigo
+        consolidando las variables existentes de los empleados pertenecientes a ese esquema."""
+        query = "SELECT id, tipo_liquidacion, variables_calculo FROM empleados WHERE esquema_codigo = ?"
+        params = [esquema_codigo]
+        if emp_id_excluir:
+            query += " AND id != ?"
+            params.append(emp_id_excluir)
+
+        rows = self.conn.execute(query, tuple(params)).fetchall()
+
+        template_mensual = {}
+        template_quincenas = {}
+
+        for r in rows:
+            try:
+                v_data = json.loads(r["variables_calculo"] or "{}")
+            except Exception:
+                continue
+
+            if isinstance(v_data, dict):
+                if "quincenas" in v_data and isinstance(v_data["quincenas"], dict):
+                    for q_code, q_dict in v_data["quincenas"].items():
+                        if isinstance(q_dict, dict):
+                            t_q = template_quincenas.setdefault(q_code, {})
+                            for k, val in q_dict.items():
+                                if k not in t_q:
+                                    t_q[k] = val
+                else:
+                    for k, val in v_data.items():
+                        if k != "quincenas" and k not in template_mensual:
+                            template_mensual[k] = val
+
+        if template_quincenas:
+            return {"quincenas": template_quincenas}
+        elif template_mensual:
+            return template_mensual
+        else:
+            celdas = self.listar_celdas_por_esquema(esquema_codigo)
+            base_vars = {}
+            for c in celdas:
+                var = c["codigo_variable"]
+                if var not in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total"):
+                    base_vars[var] = 0
+            return base_vars
+
+    def adaptar_variables_a_esquema(self, variables_actuales: dict, nuevo_esquema: str, es_jornal: bool, emp_id: int | None = None) -> dict:
+        """Adapta el diccionario de variables del empleado al esquema de cálculo destino sin corromper el esquema."""
+        plantilla = self.obtener_plantilla_variables_esquema(nuevo_esquema, emp_id_excluir=emp_id)
+
+        if es_jornal:
+            res_quincenas = {}
+            p_quincenas = plantilla.get("quincenas", {})
+            if not p_quincenas:
+                p_quincenas = {"Q1": {}, "Q2": {}}
+
+            current_q = variables_actuales.get("quincenas", {}) if isinstance(variables_actuales, dict) else {}
+
+            for q_code, q_template in p_quincenas.items():
+                res_q = {}
+                c_q = current_q.get(q_code, {}) if isinstance(current_q, dict) else {}
+
+                for k, default_val in q_template.items():
+                    if isinstance(c_q, dict) and k in c_q:
+                        res_q[k] = c_q[k]
+                    elif isinstance(variables_actuales, dict) and k in variables_actuales and k != "quincenas":
+                        res_q[k] = variables_actuales[k]
+                    else:
+                        if isinstance(default_val, bool):
+                            res_q[k] = False
+                        elif isinstance(default_val, (int, float)):
+                            res_q[k] = 0
+                        else:
+                            res_q[k] = ""
+                res_quincenas[q_code] = res_q
+            return {"quincenas": res_quincenas}
+        else:
+            res_mensual = {}
+            current_flat = {}
+            if isinstance(variables_actuales, dict):
+                if "quincenas" in variables_actuales and isinstance(variables_actuales["quincenas"], dict):
+                    for q_code, q_dict in variables_actuales["quincenas"].items():
+                        if isinstance(q_dict, dict):
+                            current_flat.update(q_dict)
+                else:
+                    current_flat = variables_actuales
+
+            for k, default_val in plantilla.items():
+                if k == "quincenas":
+                    continue
+                if k in current_flat:
+                    res_mensual[k] = current_flat[k]
+                else:
+                    if isinstance(default_val, bool):
+                        res_mensual[k] = False
+                    elif isinstance(default_val, (int, float)):
+                        res_mensual[k] = 0
+                    else:
+                        res_mensual[k] = ""
+            return res_mensual
+
+    def propagar_variables_esquema(self, esquema_codigo: str, variables_ref: dict, emp_id_modificado: int | None = None):
+        """Sincroniza las variables entre todos los empleados de un esquema sin destruir datos al cambiar de esquema."""
         rows = self.conn.execute(
             "SELECT id, tipo_liquidacion, variables_calculo FROM empleados WHERE esquema_codigo = ?",
             (esquema_codigo,)
         ).fetchall()
 
-        tiene_quincenas_ref = "quincenas" in variables_ref and isinstance(variables_ref["quincenas"], dict)
-        
+        es_transicion_esquema = False
+        if emp_id_modificado:
+            emp_rec = self.obtener_empleado(emp_id_modificado)
+            if emp_rec and emp_rec.get("esquema_codigo") != esquema_codigo:
+                es_transicion_esquema = True
+
+        if es_transicion_esquema:
+            plantilla = self.obtener_plantilla_variables_esquema(esquema_codigo, emp_id_excluir=emp_id_modificado)
+            if not plantilla:
+                plantilla = variables_ref
+        else:
+            plantilla = variables_ref
+
+        tiene_quincenas_ref = "quincenas" in plantilla and isinstance(plantilla["quincenas"], dict)
+
         if tiene_quincenas_ref:
             q_ref_map = {}
             todas_claves_ref = set()
-            for q_code, q_dict in variables_ref["quincenas"].items():
+            for q_code, q_dict in plantilla["quincenas"].items():
                 if isinstance(q_dict, dict):
                     q_keys = set(q_dict.keys())
                     q_ref_map[q_code] = (q_keys, q_dict)
                     todas_claves_ref.update(q_keys)
         else:
-            todas_claves_ref = set(k for k in variables_ref.keys() if k != "quincenas")
+            todas_claves_ref = set(k for k in plantilla.keys() if k != "quincenas")
             q_ref_map = {}
+
+        if es_transicion_esquema:
+            if "quincenas" in variables_ref and isinstance(variables_ref["quincenas"], dict):
+                for q_code, q_dict in variables_ref["quincenas"].items():
+                    if isinstance(q_dict, dict):
+                        if q_code in q_ref_map:
+                            q_ref_map[q_code][0].update(q_dict.keys())
+                        else:
+                            q_ref_map[q_code] = (set(q_dict.keys()), q_dict)
+                        todas_claves_ref.update(q_dict.keys())
+            else:
+                todas_claves_ref.update(k for k in variables_ref.keys() if k != "quincenas")
 
         for r in rows:
             emp_id = r["id"]
@@ -573,9 +706,9 @@ class DatabaseManager:
                 data = json.loads(r["variables_calculo"] or "{}")
             except Exception:
                 data = {}
-                
+
             modificado = False
-            
+
             if es_jornal:
                 if not isinstance(data, dict):
                     data = {}
@@ -583,27 +716,28 @@ class DatabaseManager:
                 if not isinstance(quincenas, dict):
                     quincenas = {"Q1": {}}
                     data["quincenas"] = quincenas
-                    
+
                 for q_code, target_q in quincenas.items():
                     if not isinstance(target_q, dict):
                         continue
-                    
-                    if tiene_quincenas_ref and q_code in q_ref_map:
-                        ref_keys, ref_sample_dict = q_ref_map[q_code]
-                    else:
-                        ref_keys = todas_claves_ref
-                        ref_sample_dict = variables_ref
 
-                    # 1. Eliminar variables que ya no están en la referencia
+                    # Todas las quincenas deben tener las mismas claves (inmutabilidad)
+                    ref_keys = todas_claves_ref
+
                     keys_to_delete = [k for k in target_q.keys() if k not in ref_keys]
                     for k in keys_to_delete:
                         del target_q[k]
                         modificado = True
 
-                    # 2. Agregar variables nuevas que faltan en la quincena
                     for k in ref_keys:
                         if k not in target_q:
-                            sample_v = ref_sample_dict.get(k)
+                            # Buscar valor de muestra en variables_ref
+                            sample_v = None
+                            if "quincenas" in variables_ref and isinstance(variables_ref["quincenas"], dict):
+                                for _, sample_q in variables_ref["quincenas"].items():
+                                    if isinstance(sample_q, dict) and k in sample_q:
+                                        sample_v = sample_q[k]
+                                        break
                             if isinstance(sample_v, bool):
                                 init_v = False
                             elif isinstance(sample_v, (int, float)):
@@ -615,14 +749,12 @@ class DatabaseManager:
             else:
                 if not isinstance(data, dict):
                     data = {}
-                
-                # 1. Eliminar variables que ya no están en la referencia
+
                 keys_to_delete = [k for k in data.keys() if k != "quincenas" and k not in todas_claves_ref]
                 for k in keys_to_delete:
                     del data[k]
                     modificado = True
 
-                # 2. Agregar variables nuevas que faltan
                 for k in todas_claves_ref:
                     if k not in data:
                         sample_v = variables_ref.get(k)
@@ -634,7 +766,7 @@ class DatabaseManager:
                             init_v = ""
                         data[k] = init_v
                         modificado = True
-                        
+
             if modificado:
                 self.conn.execute(
                     "UPDATE empleados SET variables_calculo = ? WHERE id = ?",

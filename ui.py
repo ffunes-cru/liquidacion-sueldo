@@ -16,7 +16,8 @@ from PyQt6.QtWidgets import (
     QComboBox, QPushButton, QLineEdit, QTextEdit, QLabel, QSplitter,
     QListWidget, QListWidgetItem, QMessageBox, QFileDialog, QHeaderView,
     QFrame, QGroupBox, QAbstractItemView, QDoubleSpinBox, QSpinBox, QRadioButton, QButtonGroup,
-    QStackedWidget, QScrollArea, QDialog, QToolButton, QDateEdit, QCheckBox
+    QStackedWidget, QScrollArea, QDialog, QToolButton, QDateEdit, QCheckBox,
+    QProgressDialog
 )
 
 from database import DatabaseManager
@@ -170,6 +171,119 @@ class MasivoPdfExportDialog(QDialog):
         layout.addLayout(btn_layout)
 
 
+# ======================================================================
+# Worker Thread para Exportación Masiva a PDF
+# ======================================================================
+class ExportacionMasivaWorkerThread(QThread):
+    progress_signal = pyqtSignal(int, int, str)
+    finished_signal = pyqtSignal(int, int, list, str)
+
+    def __init__(self, ruta_db: str, dir_path: str, periodo_sel: str, fecha_str: str, date_val):
+        super().__init__()
+        self.ruta_db = ruta_db
+        self.dir_path = dir_path
+        self.periodo_sel = periodo_sel
+        self.fecha_str = fecha_str
+        self.date_val = date_val
+
+    def run(self):
+        db = DatabaseManager(self.ruta_db, skip_lock=True)
+        motor = MotorLiquidacion(db)
+        empleados = db.listar_empleados()
+
+        if not empleados:
+            self.finished_signal.emit(0, 0, ["No hay empleados en la base de datos."], self.dir_path)
+            return
+
+        tareas = []
+        for emp in empleados:
+            legajo = emp["legajo"] or f"ID_{emp['id']}"
+            nombre = emp["nombre_completo"] or "Empleado"
+            es_jornal = emp["tipo_liquidacion"] == "jornal"
+
+            quincenas_a_liquidar = []
+            if es_jornal:
+                try:
+                    variables_emp = json.loads(emp["variables_calculo"] or "{}")
+                except Exception:
+                    variables_emp = {}
+
+                if isinstance(variables_emp, dict) and "quincenas" in variables_emp:
+                    qs_existentes = list(variables_emp["quincenas"].keys())
+                else:
+                    qs_existentes = ["Q1"]
+
+                if not qs_existentes:
+                    qs_existentes = ["Q1"]
+
+                if self.periodo_sel == "TODO":
+                    quincenas_a_liquidar = qs_existentes
+                elif self.periodo_sel == "MENSUALES":
+                    quincenas_a_liquidar = []
+                else:
+                    if self.periodo_sel in qs_existentes:
+                        quincenas_a_liquidar = [self.periodo_sel]
+            else:
+                if self.periodo_sel in ("TODO", "MENSUALES"):
+                    quincenas_a_liquidar = ["Mensual"]
+
+            for q_sel in quincenas_a_liquidar:
+                tareas.append((emp, legajo, nombre, es_jornal, q_sel))
+
+        total_tareas = len(tareas)
+        if total_tareas == 0:
+            self.finished_signal.emit(0, 0, ["No hay recibos que coincidan con la selección."], self.dir_path)
+            return
+
+        success_count = 0
+        error_count = 0
+        error_msgs = []
+        temp_chart = os.path.join(os.path.dirname(self.ruta_db), "temp_chart_export_masivo.png")
+
+        empresa_dict = db.obtener_empresa()
+
+        for idx, (emp, legajo, nombre, es_jornal, q_sel) in enumerate(tareas, 1):
+            if self.isInterruptionRequested():
+                break
+
+            msg_status = f"Exportando ({idx}/{total_tareas}): {nombre} [{q_sel}]"
+            self.progress_signal.emit(idx, total_tareas, msg_status)
+
+            try:
+                q_param = q_sel if es_jornal else None
+                liq_res = motor.procesar_liquidacion(emp["id"], quincena_sel=q_param, fecha_calculo=self.fecha_str)
+
+                q_suffix = f"_{q_sel}" if es_jornal else ""
+                pdf_filename = f"recibo_{legajo}{q_suffix}.pdf"
+                pdf_path = os.path.join(self.dir_path, pdf_filename)
+
+                chart_generado = exporters.generar_grafico_torta(liq_res, "Composición Salarial", temp_chart)
+
+                mes_anio_dict = {
+                    "mes": self.date_val.month(),
+                    "anio": self.date_val.year(),
+                    "periodo": q_sel if es_jornal else "M"
+                }
+
+                exporters.exportar_recibo_pdf(
+                    liq_res, db, pdf_path,
+                    temp_chart if chart_generado else None,
+                    empresa=empresa_dict, mes_anio=mes_anio_dict
+                )
+                success_count += 1
+            except Exception as e:
+                error_count += 1
+                error_msgs.append(f"Empleado {nombre} ({legajo}) {q_sel}: {str(e)}")
+            finally:
+                if os.path.exists(temp_chart):
+                    try:
+                        os.remove(temp_chart)
+                    except Exception:
+                        pass
+
+        self.finished_signal.emit(success_count, error_count, error_msgs, self.dir_path)
+
+
 def _formato_moneda(valor) -> str:
     if valor is None:
         return ""
@@ -263,6 +377,12 @@ class ConfiguracionDialog(QDialog):
         lbl_desc.setStyleSheet("color: #9CA3AF; font-size: 11px; margin-top: 5px;")
         form.addRow(lbl_desc)
 
+        # Usar Editor Visual de Esquemas (📋 Esquema Visual vs Estructura del Recibo)
+        self.chk_usar_esquema_visual = QCheckBox("Usar editor visual intuitivo para Esquemas de Cálculo (📋 Esquema Visual)")
+        visual_val = self.db.obtener_config("usar_esquema_visual", "true").lower() == "true"
+        self.chk_usar_esquema_visual.setChecked(visual_val)
+        form.addRow(self.chk_usar_esquema_visual)
+
         # Activar Pestaña Asistente IA
         self.chk_habilitar_ia = QCheckBox("Habilitar pestaña Asistente IA (Google Gemini)")
         ia_val = self.db.obtener_config("habilitar_asistente_ia", "false").lower() == "true"
@@ -298,8 +418,10 @@ class ConfiguracionDialog(QDialog):
             self.parent_win._cambiar_modo(nuevo_modo)
 
         inmutable_str = "true" if self.chk_inmutable.isChecked() else "false"
+        visual_str = "true" if self.chk_usar_esquema_visual.isChecked() else "false"
         ia_str = "true" if self.chk_habilitar_ia.isChecked() else "false"
         self.db.guardar_config("modelo_empleado_inmutable", inmutable_str)
+        self.db.guardar_config("usar_esquema_visual", visual_str)
         self.db.guardar_config("habilitar_asistente_ia", ia_str)
         self.db.guardar_config("gemini_api_key", self.inp_gemini_key.text().strip())
 
@@ -308,6 +430,425 @@ class ConfiguracionDialog(QDialog):
 
         QMessageBox.information(self, "Configuración", "Configuración del sistema guardada correctamente.")
         self.accept()
+
+
+# ======================================================================
+# Diálogo de Concepto de Cálculo — Wizard Intuitivo
+# ======================================================================
+class ConceptoDialog(QDialog):
+    """Diálogo tipo wizard para crear o editar un concepto de cálculo de forma intuitiva."""
+
+    def __init__(self, parent, db: DatabaseManager, esquema_codigo: str, celda_data: dict | None = None):
+        super().__init__(parent)
+        self.db = db
+        self.esquema_codigo = esquema_codigo
+        self.celda_data = celda_data  # None = nuevo, dict = edición
+        self.resultado = None  # Se llena al aceptar
+
+        self.setWindowTitle("Editar Concepto" if celda_data else "Nuevo Concepto de Cálculo")
+        self.setModal(True)
+        self.setMinimumWidth(560)
+        self.resize(620, 580)
+
+        main_layout = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+
+        # ── Paso 1: Identificación ──
+        grp_id = QGroupBox("1. Identificación")
+        form_id = QFormLayout()
+
+        self.combo_seccion = QComboBox()
+        secciones = self.db.listar_secciones()
+        for sec in secciones:
+            self.combo_seccion.addItem(f"{sec['titulo']} ({sec['codigo']})", sec["codigo"])
+        form_id.addRow("Sección:", self.combo_seccion)
+
+        self.inp_nombre = QLineEdit()
+        self.inp_nombre.setPlaceholderText("Ej: Sueldo Básico, Antigüedad, Jubilación...")
+        self.inp_nombre.textChanged.connect(self._auto_generar_codigo)
+        form_id.addRow("Nombre del concepto:", self.inp_nombre)
+
+        self.inp_codigo = QLineEdit()
+        self.inp_codigo.setPlaceholderText("Se genera automáticamente del nombre")
+        self.inp_codigo.setToolTip("Código interno de la variable. Se usa en fórmulas.")
+        form_id.addRow("Código variable:", self.inp_codigo)
+
+        grp_id.setLayout(form_id)
+        layout.addWidget(grp_id)
+
+        # ── Paso 2: Tipo de Cálculo ──
+        grp_tipo = QGroupBox("2. ¿Cómo se calcula este concepto?")
+        tipo_layout = QVBoxLayout()
+
+        self.btn_group_tipo = QButtonGroup(self)
+        self.btn_group_tipo.setExclusive(True)
+
+        tipos = [
+            ("variable", "Variable del empleado", "El valor viene de una variable cargada en la ficha del empleado (ej: basico, horas_trabajadas)"),
+            ("porcentaje", "Porcentaje de otro concepto", "Calcula un porcentaje sobre otro concepto ya definido (ej: 11% del Bruto)"),
+            ("fijo", "Monto fijo", "Un valor fijo en pesos que no depende de otras variables"),
+            ("formula", "Fórmula personalizada", "Para cálculos avanzados con expresiones matemáticas")
+        ]
+
+        for i, (value, label, tooltip) in enumerate(tipos):
+            radio = QRadioButton(label)
+            radio.setToolTip(tooltip)
+            radio.setProperty("tipo_value", value)
+            self.btn_group_tipo.addButton(radio, i)
+            tipo_layout.addWidget(radio)
+
+            desc_label = QLabel(f"    <i>{tooltip}</i>")
+            desc_label.setWordWrap(True)
+            tipo_layout.addWidget(desc_label)
+
+        self.btn_group_tipo.buttonClicked.connect(self._on_tipo_cambiado)
+        grp_tipo.setLayout(tipo_layout)
+        layout.addWidget(grp_tipo)
+
+        # ── Paso 3: Configuración (stacked) ──
+        grp_config = QGroupBox("3. Configuración")
+        config_layout = QVBoxLayout()
+
+        self.stack_config = QStackedWidget()
+
+        # 3a. Variable del empleado
+        pane_var = QWidget()
+        pv_layout = QFormLayout(pane_var)
+        self.combo_emp_var = QComboBox()
+        self.combo_emp_var.setEditable(True)
+        self.combo_emp_var.setToolTip("Seleccione la variable del empleado o escriba el nombre")
+        self._cargar_variables_empleado()
+        pv_layout.addRow("Variable:", self.combo_emp_var)
+        pv_layout.addRow("", QLabel("<i>El valor del concepto será directamente el valor de esta variable.</i>"))
+        self.stack_config.addWidget(pane_var)
+
+        # 3b. Porcentaje
+        pane_pct = QWidget()
+        pp_layout = QFormLayout(pane_pct)
+        self.spin_pct = QDoubleSpinBox()
+        self.spin_pct.setRange(0, 100)
+        self.spin_pct.setDecimals(2)
+        self.spin_pct.setSuffix(" %")
+        self.spin_pct.setValue(11.0)
+        pp_layout.addRow("Porcentaje:", self.spin_pct)
+
+        self.combo_pct_base = QComboBox()
+        self._cargar_conceptos_esquema()
+        pp_layout.addRow("Sobre el concepto:", self.combo_pct_base)
+        pp_layout.addRow("", QLabel("<i>Monto = concepto_base × porcentaje / 100</i>"))
+        self.stack_config.addWidget(pane_pct)
+
+        # 3c. Monto fijo
+        pane_fijo = QWidget()
+        pf_layout = QFormLayout(pane_fijo)
+        self.spin_fijo = QDoubleSpinBox()
+        self.spin_fijo.setRange(0, 99999999)
+        self.spin_fijo.setDecimals(2)
+        self.spin_fijo.setPrefix("$ ")
+        pf_layout.addRow("Monto:", self.spin_fijo)
+        pf_layout.addRow("", QLabel("<i>El monto es un valor fijo en pesos.</i>"))
+        self.stack_config.addWidget(pane_fijo)
+
+        # 3d. Fórmula avanzada
+        pane_formula = QWidget()
+        pform_layout = QFormLayout(pane_formula)
+
+        self.inp_f_unidad = QLineEdit()
+        self.inp_f_unidad.setPlaceholderText("Ej: antiguedad_anios")
+        btn_f_unidad = QToolButton()
+        btn_f_unidad.setText("⚡")
+        btn_f_unidad.setToolTip("Insertar variable")
+        btn_f_unidad.clicked.connect(lambda: self._abrir_asistente(self.inp_f_unidad))
+        w_unidad = QWidget()
+        hl_u = QHBoxLayout(w_unidad)
+        hl_u.setContentsMargins(0, 0, 0, 0)
+        hl_u.addWidget(self.inp_f_unidad)
+        hl_u.addWidget(btn_f_unidad)
+        pform_layout.addRow("Fórmula Unidad:", w_unidad)
+
+        self.inp_f_base = QLineEdit()
+        self.inp_f_base.setPlaceholderText("Ej: basico_categoria")
+        btn_f_base = QToolButton()
+        btn_f_base.setText("⚡")
+        btn_f_base.setToolTip("Insertar variable")
+        btn_f_base.clicked.connect(lambda: self._abrir_asistente(self.inp_f_base))
+        w_base = QWidget()
+        hl_b = QHBoxLayout(w_base)
+        hl_b.setContentsMargins(0, 0, 0, 0)
+        hl_b.addWidget(self.inp_f_base)
+        hl_b.addWidget(btn_f_base)
+        pform_layout.addRow("Fórmula Base:", w_base)
+
+        self.inp_f_monto = QLineEdit()
+        self.inp_f_monto.setPlaceholderText("Ej: unidad * base  o  bruto * 0.11")
+        btn_f_monto = QToolButton()
+        btn_f_monto.setText("⚡")
+        btn_f_monto.setToolTip("Insertar variable")
+        btn_f_monto.clicked.connect(lambda: self._abrir_asistente(self.inp_f_monto))
+        w_monto = QWidget()
+        hl_m = QHBoxLayout(w_monto)
+        hl_m.setContentsMargins(0, 0, 0, 0)
+        hl_m.addWidget(self.inp_f_monto)
+        hl_m.addWidget(btn_f_monto)
+        pform_layout.addRow("Fórmula Monto:", w_monto)
+
+        pform_layout.addRow("", QLabel("<i>Monto = resultado de evaluar la fórmula de monto.</i>"))
+        self.stack_config.addWidget(pane_formula)
+
+        config_layout.addWidget(self.stack_config)
+        grp_config.setLayout(config_layout)
+        layout.addWidget(grp_config)
+
+        # ── Paso 4: Opciones ──
+        grp_opts = QGroupBox("4. Opciones")
+        form_opts = QFormLayout()
+
+        self.inp_condicion = QLineEdit()
+        self.inp_condicion.setPlaceholderText("Dejar vacío para que aplique siempre")
+        btn_cond = QToolButton()
+        btn_cond.setText("⚡")
+        btn_cond.setToolTip("Insertar variable en condición")
+        btn_cond.clicked.connect(lambda: self._abrir_asistente(self.inp_condicion))
+        w_cond = QWidget()
+        hl_c = QHBoxLayout(w_cond)
+        hl_c.setContentsMargins(0, 0, 0, 0)
+        hl_c.addWidget(self.inp_condicion)
+        hl_c.addWidget(btn_cond)
+        form_opts.addRow("Condición de aplicación:", w_cond)
+
+        self.chk_visible = QCheckBox("Mostrar en el recibo de sueldo")
+        self.chk_visible.setChecked(True)
+        form_opts.addRow("Visibilidad:", self.chk_visible)
+
+        self.spin_orden = QSpinBox()
+        self.spin_orden.setRange(0, 9999)
+        self.spin_orden.setValue(10)
+        self.spin_orden.setToolTip("Orden de aparición en el recibo (menor = primero)")
+        form_opts.addRow("Orden:", self.spin_orden)
+
+        grp_opts.setLayout(form_opts)
+        layout.addWidget(grp_opts)
+
+        layout.addStretch()
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
+
+        # Botones de acción
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(btn_cancel)
+
+        btn_ok = QPushButton("Guardar Concepto")
+        btn_ok.setDefault(True)
+        btn_ok.clicked.connect(self._aceptar)
+        btn_layout.addWidget(btn_ok)
+        main_layout.addLayout(btn_layout)
+
+        # Seleccionar tipo por defecto
+        self.btn_group_tipo.button(0).setChecked(True)
+        self._on_tipo_cambiado()
+
+        # Si es edición, rellenar campos
+        if celda_data:
+            self._rellenar_desde_datos(celda_data)
+
+    def _auto_generar_codigo(self, text: str):
+        """Genera un código de variable limpio a partir del nombre."""
+        import re
+        import unicodedata
+        # Normalizar: quitar acentos
+        nfkd = unicodedata.normalize('NFKD', text)
+        ascii_text = nfkd.encode('ascii', 'ignore').decode('ascii')
+        # Reemplazar espacios y chars especiales
+        code = re.sub(r'[^a-zA-Z0-9_]', '_', ascii_text.lower()).strip('_')
+        code = re.sub(r'_+', '_', code)
+        self.inp_codigo.setText(code)
+
+    def _on_tipo_cambiado(self):
+        checked = self.btn_group_tipo.checkedButton()
+        if not checked:
+            return
+        tipo = checked.property("tipo_value")
+        idx_map = {"variable": 0, "porcentaje": 1, "fijo": 2, "formula": 3}
+        self.stack_config.setCurrentIndex(idx_map.get(tipo, 3))
+
+    def _cargar_variables_empleado(self):
+        """Carga las variables disponibles en los JSON de los empleados."""
+        emp_vars = set()
+        try:
+            for emp in self.db.listar_empleados():
+                try:
+                    import json
+                    data = json.loads(emp["variables_calculo"] or "{}")
+                    if isinstance(data, dict):
+                        if "quincenas" in data:
+                            for q_name, q_vars in data["quincenas"].items():
+                                if isinstance(q_vars, dict):
+                                    emp_vars.update(q_vars.keys())
+                        else:
+                            emp_vars.update(k for k in data.keys() if k != "quincenas")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        
+        # Variables del sistema
+        sys_vars = ["basico", "valor_hora", "antiguedad_anios"]
+        for v in sys_vars:
+            if v not in emp_vars:
+                emp_vars.add(v)
+
+        self.combo_emp_var.clear()
+        for v in sorted(emp_vars):
+            self.combo_emp_var.addItem(v, v)
+
+    def _cargar_conceptos_esquema(self):
+        """Carga los conceptos existentes en este esquema para usar como base de porcentaje."""
+        self.combo_pct_base.clear()
+        celdas = self.db.listar_celdas_por_esquema(self.esquema_codigo)
+        for c in celdas:
+            label = f"{c['descripcion']}  ({c['codigo_variable']})" if c['descripcion'] else c['codigo_variable']
+            self.combo_pct_base.addItem(label, c["codigo_variable"])
+
+    def _abrir_asistente(self, line_edit):
+        """Abre el asistente de variables para un campo de fórmula."""
+        parent_win = self.parent()
+        if hasattr(parent_win, "_obtener_todas_las_variables_para_esquema"):
+            sys_vars, glob_vars, emp_vars, esq_vars = parent_win._obtener_todas_las_variables_para_esquema(self.esquema_codigo)
+        else:
+            sys_vars, glob_vars, emp_vars, esq_vars = {}, {}, [], []
+        dialog = VariableAssistantDialog(self, sys_vars, glob_vars, emp_vars, esq_vars, line_edit)
+        dialog.exec()
+
+    def _rellenar_desde_datos(self, c: dict):
+        """Rellena los campos del diálogo con los datos de una celda existente."""
+        # Sección
+        idx = self.combo_seccion.findData(c.get("seccion_codigo"))
+        if idx >= 0:
+            self.combo_seccion.setCurrentIndex(idx)
+
+        # Nombre y código
+        self.inp_nombre.blockSignals(True)
+        self.inp_nombre.setText(c.get("descripcion", ""))
+        self.inp_nombre.blockSignals(False)
+        self.inp_codigo.setText(c.get("codigo_variable", ""))
+
+        # Tipo de cálculo
+        tipo = c.get("tipo_calculo", "formula")
+        tipo_map = {"variable": 0, "porcentaje": 1, "fijo": 2, "formula": 3}
+
+        # Si es tipo "formula" pero solo usa una variable del empleado directamente
+        # (fórmula monto es un solo nombre de variable), detectarlo como tipo "variable"
+        if tipo == "formula":
+            f_monto = (c.get("formula_monto") or "").strip()
+            f_unidad = (c.get("formula_unidad") or "").strip()
+            f_base = (c.get("formula_base") or "").strip()
+            # Si la fórmula es solo el nombre de una variable simple (sin operadores)
+            import re
+            if f_monto and re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', f_monto) and not f_unidad and not f_base:
+                tipo = "variable"
+                idx_var = self.combo_emp_var.findData(f_monto)
+                if idx_var < 0:
+                    self.combo_emp_var.addItem(f_monto, f_monto)
+                    idx_var = self.combo_emp_var.count() - 1
+                self.combo_emp_var.setCurrentIndex(idx_var)
+
+        btn_idx = tipo_map.get(tipo, 3)
+        self.btn_group_tipo.button(btn_idx).setChecked(True)
+        self._on_tipo_cambiado()
+
+        # Configuración según tipo
+        if tipo == "porcentaje":
+            self.spin_pct.setValue(c.get("simple_porcentaje") or 0.0)
+            idx_base = self.combo_pct_base.findData(c.get("simple_base_variable"))
+            if idx_base >= 0:
+                self.combo_pct_base.setCurrentIndex(idx_base)
+        elif tipo == "fijo":
+            self.spin_fijo.setValue(c.get("simple_monto_fijo") or 0.0)
+        elif tipo == "formula":
+            self.inp_f_unidad.setText(c.get("formula_unidad") or "")
+            self.inp_f_base.setText(c.get("formula_base") or "")
+            self.inp_f_monto.setText(c.get("formula_monto") or "")
+
+        # Opciones
+        self.inp_condicion.setText(c.get("condicion") or "")
+        self.chk_visible.setChecked(c.get("visible_recibo", 1) == 1)
+        self.spin_orden.setValue(c.get("orden", 10))
+
+    def _aceptar(self):
+        """Valida y guarda el concepto."""
+        codigo = self.inp_codigo.text().strip()
+        nombre = self.inp_nombre.text().strip()
+
+        if not codigo:
+            QMessageBox.warning(self, "Error", "El código de variable es obligatorio.")
+            return
+        if not nombre:
+            QMessageBox.warning(self, "Error", "El nombre del concepto es obligatorio.")
+            return
+
+        checked = self.btn_group_tipo.checkedButton()
+        tipo = checked.property("tipo_value") if checked else "formula"
+
+        seccion = self.combo_seccion.currentData() or "COMPOSICION"
+        condicion = self.inp_condicion.text().strip()
+        visible = 1 if self.chk_visible.isChecked() else 0
+        orden = self.spin_orden.value()
+
+        # Construir datos según el tipo
+        f_unidad = ""
+        f_base = ""
+        f_monto = ""
+        simple_pct = None
+        simple_base = None
+        simple_fijo = None
+        tipo_db = tipo
+
+        if tipo == "variable":
+            # Una variable directa: se guarda como fórmula simple
+            var_name = self.combo_emp_var.currentText().strip()
+            if not var_name:
+                QMessageBox.warning(self, "Error", "Seleccione una variable del empleado.")
+                return
+            tipo_db = "formula"
+            f_monto = var_name
+        elif tipo == "porcentaje":
+            tipo_db = "porcentaje"
+            simple_pct = self.spin_pct.value()
+            simple_base = self.combo_pct_base.currentData()
+            if not simple_base:
+                QMessageBox.warning(self, "Error", "Seleccione un concepto base para el porcentaje.")
+                return
+        elif tipo == "fijo":
+            tipo_db = "fijo"
+            simple_fijo = self.spin_fijo.value()
+        elif tipo == "formula":
+            tipo_db = "formula"
+            f_unidad = self.inp_f_unidad.text().strip()
+            f_base = self.inp_f_base.text().strip()
+            f_monto = self.inp_f_monto.text().strip()
+            if not f_monto:
+                QMessageBox.warning(self, "Error", "La fórmula de monto es obligatoria en modo avanzado.")
+                return
+
+        celda_id = self.celda_data.get("id") if self.celda_data else None
+
+        try:
+            self.db.guardar_celda(
+                celda_id, seccion, codigo, nombre, condicion,
+                f_unidad, f_base, f_monto, orden, self.esquema_codigo,
+                tipo_db, simple_pct, simple_base, simple_fijo, visible
+            )
+            self.resultado = True
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Error al guardar", str(e))
 
 
 # ======================================================================
@@ -478,6 +1019,11 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_estructura, "Estructura del Recibo")
         self._build_tab_estructura()
 
+        # 3b. Esquema Visual (Interfaz intuitiva)
+        self.tab_esquema_visual = QWidget()
+        self.tabs.addTab(self.tab_esquema_visual, "📋 Esquema Visual")
+        self._build_tab_esquema_visual()
+
         # 4. Estructura de Gráficos Custom
         self.tab_graficos_config = QWidget()
         self.tabs.addTab(self.tab_graficos_config, "Estructura del Gráfico")
@@ -512,6 +1058,7 @@ class MainWindow(QMainWindow):
             (self.tab_secciones, "Secciones"),
             (self.tab_globales, "Campos Globales"),
             (self.tab_estructura, "Estructura del Recibo"),
+            (self.tab_esquema_visual, "📋 Esquema Visual"),
             (self.tab_graficos_config, "Estructura del Gráfico"),
             (self.tab_preview, "Vista Previa"),
             (self.tab_historial, "Historial de Recibos"),
@@ -584,6 +1131,7 @@ class MainWindow(QMainWindow):
         form.addRow("Tipo Liquidación:", self.inp_tipo)
 
         self.inp_esquema = QComboBox()
+        self.inp_esquema.currentIndexChanged.connect(self._on_esquema_empleado_cambiado)
         form.addRow("Esquema de Cálculo:", self.inp_esquema)
 
         self.inp_categoria_jornal = QComboBox()
@@ -689,29 +1237,75 @@ class MainWindow(QMainWindow):
     def _on_empleado_seleccionado(self, row: int):
         if row < 0 or row >= len(self._empleados_data):
             return
+        self._cargando_empleado = True
+        try:
+            emp = self._empleados_data[row]
+            self.inp_legajo.setText(emp["legajo"] or "")
+            self.inp_nombre.setText(emp["nombre_completo"] or "")
+            self.inp_cuil.setText(emp.get("cuil") or "")
+            
+            idx_tipo = self.inp_tipo.findText(emp["tipo_liquidacion"])
+            if idx_tipo >= 0:
+                self.inp_tipo.setCurrentIndex(idx_tipo)
+
+            idx_esq = self.inp_esquema.findData(emp["esquema_codigo"])
+            if idx_esq >= 0:
+                self.inp_esquema.setCurrentIndex(idx_esq)
+
+            idx_cat = self.inp_categoria_jornal.findData(emp["categoria_jornal_id"])
+            if idx_cat >= 0:
+                self.inp_categoria_jornal.setCurrentIndex(idx_cat)
+
+            # Cargar Fecha de Ingreso
+            f_ing_str = emp.get("fecha_ingreso") or "2020-01-01"
+            qdate = QDate.fromString(f_ing_str, "yyyy-MM-dd")
+            self.inp_fecha_ingreso.setDate(qdate if qdate.isValid() else QDate(2020, 1, 1))
+
+            self._set_variables_json(emp["variables_calculo"] or "{}")
+        finally:
+            self._cargando_empleado = False
+
+    def _on_esquema_empleado_cambiado(self):
+        if getattr(self, "_cargando_empleado", False):
+            return
+
+        row = self.lista_empleados.currentRow()
+        if row < 0 or row >= len(self._empleados_data):
+            return
+
         emp = self._empleados_data[row]
-        self.inp_legajo.setText(emp["legajo"] or "")
-        self.inp_nombre.setText(emp["nombre_completo"] or "")
-        self.inp_cuil.setText(emp.get("cuil") or "")
-        
-        idx_tipo = self.inp_tipo.findText(emp["tipo_liquidacion"])
-        if idx_tipo >= 0:
-            self.inp_tipo.setCurrentIndex(idx_tipo)
+        esq_anterior = emp.get("esquema_codigo", "")
+        nuevo_esquema = self.inp_esquema.currentData()
 
-        idx_esq = self.inp_esquema.findData(emp["esquema_codigo"])
-        if idx_esq >= 0:
-            self.inp_esquema.setCurrentIndex(idx_esq)
+        if not nuevo_esquema or nuevo_esquema == esq_anterior:
+            return
 
-        idx_cat = self.inp_categoria_jornal.findData(emp["categoria_jornal_id"])
-        if idx_cat >= 0:
-            self.inp_categoria_jornal.setCurrentIndex(idx_cat)
+        resp = QMessageBox.warning(
+            self,
+            "⚠ Advertencia: Cambio de Esquema de Cálculo",
+            f"Está a punto de cambiar el Esquema de Cálculo del empleado '{emp['nombre_completo']}' de '{esq_anterior}' a '{nuevo_esquema}'.\n\n"
+            f"Las variables del empleado se adaptarán a la plantilla del esquema '{nuevo_esquema}' sin alterar ni corromper los datos de los otros empleados.\n\n"
+            "¿Desea continuar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
 
-        # Cargar Fecha de Ingreso
-        f_ing_str = emp.get("fecha_ingreso") or "2020-01-01"
-        qdate = QDate.fromString(f_ing_str, "yyyy-MM-dd")
-        self.inp_fecha_ingreso.setDate(qdate if qdate.isValid() else QDate(2020, 1, 1))
+        if resp == QMessageBox.StandardButton.Yes:
+            current_vars_txt = self._get_variables_json()
+            try:
+                current_dict = json.loads(current_vars_txt)
+            except Exception:
+                current_dict = {}
 
-        self._set_variables_json(emp["variables_calculo"] or "{}")
+            es_jornal = self.inp_tipo.currentText() == "jornal"
+            vars_adaptadas = self.db.adaptar_variables_a_esquema(current_dict, nuevo_esquema, es_jornal, emp_id=emp["id"])
+            self._set_variables_json(json.dumps(vars_adaptadas, ensure_ascii=False))
+            self.statusBar().showMessage(f"Variables adaptadas al esquema '{nuevo_esquema}'. Guarde los cambios para confirmar.", 5000)
+        else:
+            self._cargando_empleado = True
+            idx_ant = self.inp_esquema.findData(esq_anterior)
+            if idx_ant >= 0:
+                self.inp_esquema.setCurrentIndex(idx_ant)
+            self._cargando_empleado = False
 
     def _duplicar_empleado(self):
         """Toma el empleado seleccionado actualmente, copia sus datos y crea uno nuevo."""
@@ -772,11 +1366,14 @@ class MainWindow(QMainWindow):
             nombre, self.inp_tipo.currentText(), variables_txt, esquema, cat_id, fecha_ing, cuil
         )
 
-        # Si el modelo inmutable está activo, propagar variables al esquema
+        # Si el modelo inmutable está activo, propagar variables al esquema de forma segura
         inmutable = self.db.obtener_config("modelo_empleado_inmutable", "false").lower() == "true"
         if inmutable and esquema:
             try:
                 d_vars = json.loads(variables_txt)
+                self.db.propagar_variables_esquema(esquema, d_vars, emp_id_modificado=emp_id)
+            except Exception:
+                passoads(variables_txt)
                 self.db.propagar_variables_esquema(esquema, d_vars)
             except Exception:
                 pass
@@ -857,8 +1454,7 @@ class MainWindow(QMainWindow):
         is_user = hasattr(self, "modo_actual") and self.modo_actual == "Usuario"
         
         if is_user:
-            inp_key.setReadOnly(True)
-            inp_key.setStyleSheet("background-color: #374151; color: #9CA3AF; border: 1px solid #4B5563; padding: 2px;")
+            inp_key.setEnabled(False)
             
             # Determinar control para el valor
             if isinstance(val, bool) or str(val).lower() in ("true", "false"):
@@ -908,12 +1504,34 @@ class MainWindow(QMainWindow):
         tab_info = self.quincena_tabs.get(tab_name)
         if not tab_info:
             return
+
+        # Obtener la clave de la variable que se está eliminando
+        removed_key = ""
         for item in tab_info["rows"]:
             if item["widget"] == row_widget:
+                removed_key = item["key_input"].text().strip()
                 tab_info["rows"].remove(item)
                 break
         tab_info["scroll_layout"].removeWidget(row_widget)
         row_widget.deleteLater()
+
+        # Si modelo inmutable y es jornal, eliminar la misma clave de las demás quincenas
+        if removed_key and self._es_inmutable_jornal():
+            for other_tab_name, other_info in self.quincena_tabs.items():
+                if other_tab_name == tab_name or other_tab_name == "Mensual":
+                    continue
+                for item in list(other_info["rows"]):
+                    if item["key_input"].text().strip() == removed_key:
+                        other_info["rows"].remove(item)
+                        other_info["scroll_layout"].removeWidget(item["widget"])
+                        item["widget"].deleteLater()
+                        break
+
+    def _es_inmutable_jornal(self) -> bool:
+        """Verifica si el modelo inmutable está activo y el empleado actual es jornal."""
+        inmutable = self.db.obtener_config("modelo_empleado_inmutable", "false").lower() == "true"
+        es_jornal = self.inp_tipo.currentText() == "jornal"
+        return inmutable and es_jornal
 
     def _clear_quincena_tabs(self):
         self.tab_widget_vars.clear()
@@ -925,10 +1543,10 @@ class MainWindow(QMainWindow):
             return
         tab_name = self.tab_widget_vars.tabText(idx)
         
-        tab_info = self.quincena_tabs.get(tab_name)
+        # Recopilar claves existentes en todas las quincenas para evitar duplicados
         existing_keys = set()
-        if tab_info:
-            for item in tab_info["rows"]:
+        for t_name, t_info in self.quincena_tabs.items():
+            for item in t_info["rows"]:
                 k = item["key_input"].text().strip()
                 if k:
                     existing_keys.add(k)
@@ -940,6 +1558,13 @@ class MainWindow(QMainWindow):
             new_key = f"variable_{count}"
 
         self._add_variable_row_to_tab(tab_name, new_key, 0)
+
+        # Si modelo inmutable y es jornal, agregar la misma variable a las demás quincenas
+        if self._es_inmutable_jornal():
+            for other_tab_name in self.quincena_tabs.keys():
+                if other_tab_name == tab_name or other_tab_name == "Mensual":
+                    continue
+                self._add_variable_row_to_tab(other_tab_name, new_key, 0)
 
     def _on_agregar_quincena_click(self):
         q1_vars = self._get_tab_variables_dict("Q1")
@@ -1284,9 +1909,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", "El código y título de la sección son obligatorios.")
             return
 
-        self.db.guardar_seccion(sec_id, codigo, titulo, orden)
-        self._cargar_tabla_secciones()
-        self.statusBar().showMessage("Sección guardada correctamente.", 4000)
+        try:
+            self.db.guardar_seccion(sec_id, codigo, titulo, orden)
+            self._cargar_tabla_secciones()
+            self._refrescar_secciones_en_combos()
+            self.statusBar().showMessage("Sección guardada correctamente.", 4000)
+        except Exception as e:
+            QMessageBox.warning(self, "Error al guardar sección", f"No se pudo guardar la sección: {e}")
 
     def _eliminar_seccion(self):
         row = self.tabla_secciones.currentRow()
@@ -2011,6 +2640,281 @@ class MainWindow(QMainWindow):
                     
         return sys_vars, glob_vars, sorted(list(emp_vars)), sorted(esq_vars)
 
+    def _obtener_todas_las_variables_para_esquema(self, esquema_codigo: str):
+        sys_vars, glob_vars, emp_vars, _ = self._obtener_todas_las_variables()
+        celdas = self.db.listar_celdas_por_esquema(esquema_codigo)
+        esq_vars = [c["codigo_variable"] for c in celdas if c.get("codigo_variable")]
+        return sys_vars, glob_vars, emp_vars, sorted(esq_vars)
+
+    # ==================================================================
+    # PESTAÑA 3b — ESQUEMA VISUAL (INTERFAZ INTUITIVA DRAG & DROP)
+    # ==================================================================
+    def _build_tab_esquema_visual(self):
+        layout = QVBoxLayout(self.tab_esquema_visual)
+
+        # Header bar
+        header = QHBoxLayout()
+        header.addWidget(QLabel("Esquema de Cálculo:"))
+
+        self.combo_visual_esquema = QComboBox()
+        self.combo_visual_esquema.setMinimumWidth(220)
+        self._recargar_combo_visual_esquema()
+        self.combo_visual_esquema.currentIndexChanged.connect(self._cargar_esquema_visual)
+        header.addWidget(self.combo_visual_esquema)
+
+        header.addStretch()
+
+        btn_refrescar = QPushButton("Actualizar")
+        btn_refrescar.setToolTip("Refrescar vista")
+        btn_refrescar.clicked.connect(self._cargar_esquema_visual)
+        header.addWidget(btn_refrescar)
+
+        btn_nuevo = QPushButton("Nuevo Concepto")
+        btn_nuevo.clicked.connect(self._nuevo_concepto_visual)
+        header.addWidget(btn_nuevo)
+
+        layout.addLayout(header)
+
+        # Scroll area para el lienzo de secciones
+        self.scroll_visual = QScrollArea()
+        self.scroll_visual.setWidgetResizable(True)
+        self.scroll_visual.setFrameShape(QFrame.Shape.NoFrame)
+
+        self.container_visual = QWidget()
+        self.layout_visual = QVBoxLayout(self.container_visual)
+        self.layout_visual.setContentsMargins(4, 4, 4, 4)
+        self.layout_visual.setSpacing(12)
+
+        self.scroll_visual.setWidget(self.container_visual)
+        layout.addWidget(self.scroll_visual)
+
+        self._cargar_esquema_visual()
+
+    def _recargar_combo_visual_esquema(self):
+        if not hasattr(self, "combo_visual_esquema"):
+            return
+        self.combo_visual_esquema.blockSignals(True)
+        self.combo_visual_esquema.clear()
+        for esq in self.db.listar_esquemas():
+            self.combo_visual_esquema.addItem(esq["nombre"], esq["codigo"])
+        self.combo_visual_esquema.blockSignals(False)
+
+    def _cargar_esquema_visual(self):
+        """Carga y renderiza los conceptos en una lista nativa unificada Drag & Drop sin doble dibujo."""
+        if not hasattr(self, "combo_visual_esquema"):
+            return
+
+        # Limpiar layout previo
+        while self.layout_visual.count():
+            item = self.layout_visual.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        esq_code = self.combo_visual_esquema.currentData()
+        if not esq_code:
+            lbl_empty = QLabel("Selecciona o crea un Esquema de Cálculo")
+            lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.layout_visual.addWidget(lbl_empty)
+            return
+
+        secciones = self.db.listar_secciones()
+        celdas = self.db.listar_celdas_por_esquema(esq_code)
+
+        # QListWidget único nativo para todo el esquema
+        self.list_visual = QListWidget()
+        self.list_visual.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.list_visual.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.list_visual.setDragEnabled(True)
+        self.list_visual.setAcceptDrops(True)
+        self.list_visual.setDropIndicatorShown(True)
+        self.list_visual.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.list_visual.setAlternatingRowColors(True)
+
+        # Agrupar celdas por sección
+        celdas_por_sec = {}
+        for c in celdas:
+            sec_code = c.get("seccion_codigo", "COMPOSICION")
+            celdas_por_sec.setdefault(sec_code, []).append(c)
+
+        for sec in secciones:
+            sec_code = sec["codigo"]
+            sec_titulo = sec["titulo"]
+            items_sec = celdas_por_sec.get(sec_code, [])
+
+            # Item Encabezado de Sección (no arrastrable)
+            hdr_item = QListWidgetItem()
+            hdr_item.setFlags(Qt.ItemFlag.NoItemFlags)
+            hdr_item.setData(Qt.ItemDataRole.UserRole, None)
+            hdr_item.setData(Qt.ItemDataRole.UserRole + 1, sec_code)
+            hdr_item.setText("")  # Texto vacío para evitar doble dibujo
+
+            hdr_widget = QWidget()
+            hdr_layout = QHBoxLayout(hdr_widget)
+            hdr_layout.setContentsMargins(6, 6, 6, 4)
+
+            lbl_hdr = QLabel(f"<b>--- {sec_titulo.upper()} ---</b>")
+            lbl_hdr.setFont(self._bold_font())
+            hdr_layout.addWidget(lbl_hdr, 1)
+
+            btn_add_sec = QPushButton(f"+ Agregar a {sec_titulo}")
+            btn_add_sec.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn_add_sec.clicked.connect(lambda checked=False, s=sec_code: self._nuevo_concepto_visual(seccion_codigo=s))
+            hdr_layout.addWidget(btn_add_sec)
+
+            hdr_item.setSizeHint(hdr_widget.sizeHint())
+            self.list_visual.addItem(hdr_item)
+            self.list_visual.setItemWidget(hdr_item, hdr_widget)
+
+            # Items de conceptos de esta sección
+            for celda in items_sec:
+                item = QListWidgetItem()
+                item.setData(Qt.ItemDataRole.UserRole, celda)
+                item.setText("")  # Texto vacío para evitar doble dibujo
+
+                desc = celda.get("descripcion") or celda["codigo_variable"]
+                code = celda["codigo_variable"]
+                tipo = celda.get("tipo_calculo", "formula")
+
+                if tipo == "porcentaje":
+                    regla = f"{celda.get('simple_porcentaje', 0)}% sobre {celda.get('simple_base_variable', '')}"
+                elif tipo == "fijo":
+                    regla = f"Fijo: ${celda.get('simple_monto_fijo', 0):,.2f}"
+                else:
+                    regla = celda.get("formula_monto", "")
+
+                row_widget = QWidget()
+                row_layout = QHBoxLayout(row_widget)
+                row_layout.setContentsMargins(8, 4, 8, 4)
+
+                drag_icon = QLabel("⠿")
+                row_layout.addWidget(drag_icon)
+
+                label_text = f"<b>{desc}</b> (<code>{code}</code>)   —   Regla: {regla}"
+                if celda.get("visible_recibo", 1) == 0:
+                    label_text += " <i>[Oculto]</i>"
+
+                lbl_info = QLabel(label_text)
+                row_layout.addWidget(lbl_info, 1)
+
+                btn_edit = QPushButton("Editar")
+                btn_edit.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                btn_edit.clicked.connect(lambda checked=False, c=celda: self._editar_concepto_visual(c))
+                row_layout.addWidget(btn_edit)
+
+                btn_del = QPushButton("Eliminar")
+                btn_del.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                btn_del.clicked.connect(lambda checked=False, cid=celda["id"], cd=code: self._eliminar_concepto_visual(cid, cd))
+                row_layout.addWidget(btn_del)
+
+                item.setSizeHint(row_widget.sizeHint())
+                self.list_visual.addItem(item)
+                self.list_visual.setItemWidget(item, row_widget)
+
+        # Persistir reordenamiento al arrastrar y soltar
+        self.list_visual.model().rowsMoved.connect(
+            lambda p, s, e, d, r, eq=esq_code: self._on_conceptos_reordered(eq)
+        )
+
+        self.layout_visual.addWidget(self.list_visual)
+
+    def _on_conceptos_reordered(self, esquema_codigo: str):
+        """Actualiza el orden y la sección de los conceptos en la DB tras arrastrar y soltar."""
+        if not hasattr(self, "list_visual"):
+            return
+
+        current_sec = "COMPOSICION"
+        concept_count = 0
+
+        for i in range(self.list_visual.count()):
+            item = self.list_visual.item(i)
+            if not item:
+                continue
+
+            sec_header_code = item.data(Qt.ItemDataRole.UserRole + 1)
+            if sec_header_code:
+                current_sec = sec_header_code
+                continue
+
+            celda = item.data(Qt.ItemDataRole.UserRole)
+            if not celda:
+                continue
+
+            concept_count += 1
+            new_orden = concept_count * 10
+            sec_changed = celda.get("seccion_codigo") != current_sec
+            orden_changed = celda.get("orden") != new_orden
+
+            if sec_changed or orden_changed:
+                celda["seccion_codigo"] = current_sec
+                celda["orden"] = new_orden
+                try:
+                    self.db.guardar_celda(
+                        celda.get("id"),
+                        current_sec,
+                        celda["codigo_variable"],
+                        celda.get("descripcion", ""),
+                        celda.get("condicion", ""),
+                        celda.get("formula_unidad", ""),
+                        celda.get("formula_base", ""),
+                        celda.get("formula_monto", ""),
+                        new_orden,
+                        esquema_codigo,
+                        celda.get("tipo_calculo", "formula"),
+                        celda.get("simple_porcentaje"),
+                        celda.get("simple_base_variable"),
+                        celda.get("simple_monto_fijo"),
+                        celda.get("visible_recibo", 1)
+                    )
+                except Exception as e:
+                    print(f"Error guardando orden: {e}")
+
+        self.statusBar().showMessage("Orden actualizado tras arrastrar y soltar.", 3000)
+        if hasattr(self, "_cargar_tabla_celdas"):
+            self._cargar_tabla_celdas()
+
+    def _nuevo_concepto_visual(self, seccion_codigo: str | None = None):
+        """Abre el diálogo wizard para crear un nuevo concepto."""
+        esq_code = self.combo_visual_esquema.currentData()
+        if not esq_code:
+            QMessageBox.warning(self, "Atención", "Seleccione un esquema de cálculo primero.")
+            return
+
+        celda_init = None
+        if seccion_codigo:
+            celda_init = {"seccion_codigo": seccion_codigo}
+
+        dlg = ConceptoDialog(self, self.db, esq_code, celda_data=celda_init)
+        if dlg.exec() and dlg.resultado:
+            self._cargar_esquema_visual()
+            self._cargar_tabla_celdas()
+            self.statusBar().showMessage("Concepto creado con éxito.", 4000)
+
+    def _editar_concepto_visual(self, celda: dict):
+        """Abre el diálogo wizard para editar un concepto existente."""
+        esq_code = self.combo_visual_esquema.currentData()
+        dlg = ConceptoDialog(self, self.db, esq_code, celda_data=celda)
+        if dlg.exec() and dlg.resultado:
+            self._cargar_esquema_visual()
+            self._cargar_tabla_celdas()
+            self.statusBar().showMessage("Concepto actualizado con éxito.", 4000)
+
+    def _eliminar_concepto_visual(self, celda_id: int, codigo_var: str):
+        """Elimina un concepto tras confirmación."""
+        resp = QMessageBox.question(
+            self, "Confirmar eliminación",
+            f"¿Está seguro de eliminar el concepto '{codigo_var}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if resp == QMessageBox.StandardButton.Yes:
+            try:
+                self.db.eliminar_celda(celda_id)
+                self._cargar_esquema_visual()
+                self._cargar_tabla_celdas()
+                self.statusBar().showMessage(f"Concepto '{codigo_var}' eliminado.", 4000)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
     # ==================================================================
     # PESTAÑA 4 — ESTRUCTURA DEL GRÁFICO (CRUD)
     # ==================================================================
@@ -2117,9 +3021,21 @@ class MainWindow(QMainWindow):
             return
         celdas = self.db.listar_celdas_grafico_por_esquema(esq)
         max_orden = max((c["orden"] for c in celdas), default=0)
-        self.db.guardar_celda_grafico(None, "Nueva Categoría", "0", max_orden + 10, esq)
-        self._cargar_tabla_grafico()
-        self.tabla_grafico.scrollToBottom()
+
+        base_etiqueta = "Nueva Categoría"
+        existing_etiquetas = {c["etiqueta"] for c in celdas}
+        etiqueta = base_etiqueta
+        count = 1
+        while etiqueta in existing_etiquetas:
+            count += 1
+            etiqueta = f"{base_etiqueta} {count}"
+
+        try:
+            self.db.guardar_celda_grafico(None, etiqueta, "0", max_orden + 10, esq)
+            self._cargar_tabla_grafico()
+            self.tabla_grafico.scrollToBottom()
+        except Exception as e:
+            QMessageBox.warning(self, "Error al agregar porción", f"No se pudo agregar la categoría: {e}")
 
     def _eliminar_porcion_grafico(self):
         row = self.tabla_grafico.currentRow()
@@ -2546,99 +3462,60 @@ class MainWindow(QMainWindow):
             dial.inp_fecha.setDate(self.inp_fecha_hoy.date())
         if dial.exec() != QDialog.DialogCode.Accepted:
             return
-            
+
         periodo_sel = dial.combo_quincena.currentData()
         fecha_str = dial.inp_fecha.date().toString("yyyy-MM-dd")
-        
+        date_val = dial.inp_fecha.date()
+
         dir_path = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta para Guardar los PDFs")
         if not dir_path:
             return
-            
+
         empleados = self.db.listar_empleados()
         if not empleados:
             QMessageBox.warning(self, "Sin Empleados", "No hay empleados registrados en la base de datos.")
             return
-            
-        success_count = 0
-        error_count = 0
-        error_msgs = []
-        
-        temp_chart = os.path.join(os.path.dirname(self.db.ruta_db()), "temp_chart_export_masivo.png")
-        motor = MotorLiquidacion(self.db)
-        
-        for emp in empleados:
-            legajo = emp["legajo"] or f"ID_{emp['id']}"
-            nombre = emp["nombre_completo"] or "Empleado"
-            es_jornal = emp["tipo_liquidacion"] == "jornal"
-            
-            quincenas_a_liquidar = []
-            if es_jornal:
-                try:
-                    variables_emp = json.loads(emp["variables_calculo"] or "{}")
-                except Exception:
-                    variables_emp = {}
-                
-                if isinstance(variables_emp, dict) and "quincenas" in variables_emp:
-                    qs_existentes = list(variables_emp["quincenas"].keys())
-                else:
-                    qs_existentes = ["Q1"]
-                
-                if not qs_existentes:
-                    qs_existentes = ["Q1"]
-                    
-                if periodo_sel == "TODO":
-                    quincenas_a_liquidar = qs_existentes
-                elif periodo_sel == "MENSUALES":
-                    quincenas_a_liquidar = []
-                else:
-                    if periodo_sel in qs_existentes:
-                        quincenas_a_liquidar = [periodo_sel]
-            else:
-                # Mensual
-                if periodo_sel in ("TODO", "MENSUALES"):
-                    quincenas_a_liquidar = ["Mensual"]
-            for q_sel in quincenas_a_liquidar:
-                try:
-                    q_param = q_sel if es_jornal else None
-                    liq_res = motor.procesar_liquidacion(emp["id"], quincena_sel=q_param, fecha_calculo=fecha_str)
-                    
-                    q_suffix = f"_{q_sel}" if es_jornal else ""
-                    pdf_filename = f"recibo_{legajo}{q_suffix}.pdf"
-                    pdf_path = os.path.join(dir_path, pdf_filename)
-                    
-                    chart_generado = exporters.generar_grafico_torta(liq_res, "Composición Salarial", temp_chart)
-                    
-                    date_val = dial.inp_fecha.date()
-                    mes_anio_dict = {
-                        "mes": date_val.month(),
-                        "anio": date_val.year(),
-                        "periodo": q_sel if es_jornal else "M"
-                    }
-                    empresa_dict = self.db.obtener_empresa()
-                    
-                    exporters.exportar_recibo_pdf(liq_res, self.db, pdf_path, temp_chart if chart_generado else None, empresa=empresa_dict, mes_anio=mes_anio_dict)
-                    success_count += 1
-                except Exception as e:
-                    error_count += 1
-                    error_msgs.append(f"Empleado {nombre} ({legajo}) {q_sel}: {str(e)}")
-                finally:
-                    if os.path.exists(temp_chart):
-                        try:
-                            os.remove(temp_chart)
-                        except Exception:
-                            pass
-                            
-        if error_count == 0:
-            QMessageBox.information(
-                self, "Exportación Completada", 
-                f"Se han exportado exitosamente {success_count} recibos a PDF en la carpeta:\n{dir_path}"
-            )
-        else:
-            msg = f"Se exportaron {success_count} recibos correctamente.\n\nHubo {error_count} errores:\n"
-            msg += "\n".join(error_msgs[:10])
-            if len(error_msgs) > 10:
-                msg += f"\n... y {len(error_msgs) - 10} errores más."
-            QMessageBox.warning(self, "Exportación con Errores", msg)
+
+        # Crear barra de progreso modal
+        progress = QProgressDialog("Preparando exportación masiva...", "Cancelar", 0, 0, self)
+        progress.setWindowTitle("Exportación Masiva a PDF")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+
+        # Hilo de trabajo en segundo plano
+        self._export_worker = ExportacionMasivaWorkerThread(
+            self.db.ruta_db(), dir_path, periodo_sel, fecha_str, date_val
+        )
+
+        def on_progress(current, total, status_text):
+            progress.setMaximum(total)
+            progress.setValue(current)
+            progress.setLabelText(status_text)
+
+        def on_finished(success_count, error_count, error_msgs, dir_p):
+            progress.close()
+            if error_count == 0 and success_count > 0:
+                QMessageBox.information(
+                    self, "Exportación Completada",
+                    f"Se han exportado exitosamente {success_count} recibos a PDF en la carpeta:\n{dir_p}"
+                )
+            elif success_count > 0:
+                msg = f"Se exportaron {success_count} recibos correctamente.\n\nHubo {error_count} errores:\n"
+                msg += "\n".join(error_msgs[:10])
+                if len(error_msgs) > 10:
+                    msg += f"\n... y {len(error_msgs) - 10} errores más."
+                QMessageBox.warning(self, "Exportación con Errores", msg)
+            elif error_msgs:
+                QMessageBox.warning(self, "Exportación", "\n".join(error_msgs[:10]))
+
+        progress.canceled.connect(self._export_worker.requestInterruption)
+        self._export_worker.progress_signal.connect(on_progress)
+        self._export_worker.finished_signal.connect(on_finished)
+
+        self._export_worker.start()
 
     def _exportar_recibo_pdf(self):
         if not self.ultimo_resultado:
@@ -3056,6 +3933,21 @@ class MainWindow(QMainWindow):
             self.combo_filter_esquema_g.setCurrentIndex(0)
         self.combo_filter_esquema_g.blockSignals(False)
 
+        # 4. Combo en el Esquema Visual
+        if hasattr(self, "combo_visual_esquema"):
+            current_esq_vis = self.combo_visual_esquema.currentData()
+            self.combo_visual_esquema.blockSignals(True)
+            self.combo_visual_esquema.clear()
+            for esq in esquemas:
+                self.combo_visual_esquema.addItem(esq["nombre"], esq["codigo"])
+            idx_v = self.combo_visual_esquema.findData(current_esq_vis)
+            if idx_v >= 0:
+                self.combo_visual_esquema.setCurrentIndex(idx_v)
+            else:
+                self.combo_visual_esquema.setCurrentIndex(0)
+            self.combo_visual_esquema.blockSignals(False)
+            self._cargar_esquema_visual()
+
     def _cambiar_modo(self, modo):
         """Método auxiliar llamado por las acciones del menú"""
         self.modo_actual = modo
@@ -3093,9 +3985,14 @@ class MainWindow(QMainWindow):
             if hasattr(self, "btn_del_global"): self.btn_del_global.setVisible(False)
             if hasattr(self, "btn_nuevo_mes"): self.btn_nuevo_mes.setVisible(False) # Ocultar en el menú
         else:
-            # En modo Administrador mostramos todo lo habilitado
+            # En modo Administrador mostramos todo lo habilitado según la configuración
+            usar_visual = self.db.obtener_config("usar_esquema_visual", "true").lower() == "true"
             for widget, name in self.all_tabs:
                 if widget == getattr(self, "tab_asistente_ia", None) and not habilitar_ia:
+                    continue
+                if widget == getattr(self, "tab_esquema_visual", None) and not usar_visual:
+                    continue
+                if widget == getattr(self, "tab_estructura", None) and usar_visual:
                     continue
                 self.tabs.addTab(widget, name)
                 
