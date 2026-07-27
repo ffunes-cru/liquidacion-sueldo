@@ -105,7 +105,8 @@ class DatabaseManager:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS esquemas_calculo (
                 codigo TEXT PRIMARY KEY,
-                nombre TEXT NOT NULL
+                nombre TEXT NOT NULL,
+                tipo_liquidacion TEXT NOT NULL DEFAULT 'mensual'
             );
         """)
 
@@ -234,6 +235,7 @@ class DatabaseManager:
             ("celdas_calculo", "visible_recibo", "INTEGER DEFAULT 1"),
             ("empleados", "cuil", "TEXT DEFAULT ''"),
             ("secciones", "orden", "INTEGER DEFAULT 0"),
+            ("esquemas_calculo", "tipo_liquidacion", "TEXT NOT NULL DEFAULT 'mensual'"),
         ]
 
         for tabla, columna, definicion in alteraciones:
@@ -248,6 +250,10 @@ class DatabaseManager:
         if cur.execute("SELECT COUNT(*) FROM esquemas_calculo").fetchone()[0] == 0:
             self._seed_datos_iniciales()
 
+        # Migración: Asegurar que esquemas con código JORNAL tengan tipo_liquidacion='jornal'
+        cur.execute("UPDATE esquemas_calculo SET tipo_liquidacion='jornal' WHERE codigo='JORNAL' AND tipo_liquidacion='mensual'")
+        self.conn.commit()
+
         # Sembrar empresa singleton si no existe
         if cur.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
             cur.execute("INSERT INTO empresa (razon_social) VALUES ('')")
@@ -261,10 +267,10 @@ class DatabaseManager:
 
         # 1. Sembrar Esquemas de Cálculo
         esquemas = [
-            ("MENSUAL", "Comercio Mensualizado"),
-            ("JORNAL", "Comercio Jornalero (Por hora)"),
+            ("MENSUAL", "Comercio Mensualizado", "mensual"),
+            ("JORNAL", "Comercio Jornalero (Por hora)", "jornal"),
         ]
-        cur.executemany("INSERT INTO esquemas_calculo (codigo, nombre) VALUES (?, ?)", esquemas)
+        cur.executemany("INSERT INTO esquemas_calculo (codigo, nombre, tipo_liquidacion) VALUES (?, ?, ?)", esquemas)
 
         # 2. Sembrar Categorías Jornaleras
         categorias = [
@@ -422,7 +428,6 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     def listar_esquemas(self) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM esquemas_calculo ORDER BY codigo").fetchall()
-        print(rows)
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
@@ -476,6 +481,14 @@ class DatabaseManager:
                          tipo_liq: str, variables_json: str, esquema_codigo: str,
                          categoria_jornal_id: int | None, fecha_ingreso: str = "2020-01-01",
                          cuil: str = "") -> int:
+        es_jornal = (tipo_liq.lower() == "jornal")
+        try:
+            raw_v = json.loads(variables_json or "{}")
+        except Exception:
+            raw_v = {}
+        clean_v = self.adaptar_variables_a_esquema(raw_v, esquema_codigo, es_jornal, emp_id=emp_id)
+        variables_json = json.dumps(clean_v, ensure_ascii=False)
+
         if emp_id:
             self.conn.execute(
                 """UPDATE empleados
@@ -544,7 +557,6 @@ class DatabaseManager:
     def obtener_config(self, clave: str, default: str = "") -> str:
         row = self.conn.execute("SELECT valor FROM configuraciones WHERE clave = ?", (clave,)).fetchone()
         return row["valor"] if row else default
-
     def guardar_config(self, clave: str, valor: str):
         self.conn.execute(
             "INSERT OR REPLACE INTO configuraciones (clave, valor) VALUES (?, ?)",
@@ -553,79 +565,122 @@ class DatabaseManager:
         self.conn.commit()
 
     def obtener_plantilla_variables_esquema(self, esquema_codigo: str, emp_id_excluir: int | None = None) -> dict:
-        """Devuelve la estructura de plantilla canónica de variables para un esquema_codigo
-        consolidando las variables existentes de los empleados pertenecientes a ese esquema."""
-        query = "SELECT id, tipo_liquidacion, variables_calculo FROM empleados WHERE esquema_codigo = ?"
-        params = [esquema_codigo]
-        if emp_id_excluir:
-            query += " AND id != ?"
-            params.append(emp_id_excluir)
+        """Devuelve la plantilla de VARIABLES DE ENTRADA de un esquema_codigo.
+        Diferencia strictly las variables de entrada de los conceptos calculados y de las variables globales/motor del sistema."""
+        # 1. Obtener conceptos calculados (tipo_calculo != 'variable')
+        rows_calc = self.conn.execute("SELECT codigo_variable FROM celdas_calculo WHERE tipo_calculo != 'variable'").fetchall()
+        conceptos_calculados = set(r["codigo_variable"] for r in rows_calc if r["codigo_variable"])
 
-        rows = self.conn.execute(query, tuple(params)).fetchall()
+        # 2. Obtener variables globales registradas en la tabla variables_globales
+        rows_glob = self.conn.execute("SELECT codigo FROM variables_globales").fetchall()
+        vars_globales_db = set(r["codigo"] for r in rows_glob if r["codigo"])
 
-        template_mensual = {}
-        template_quincenas = {}
+        # 3. Constantes globales y acumuladores del motor de cálculo
+        sistema_engine = {
+            'Contrib_ANSSAL', 'Contrib_Asig_Fam', 'Contrib_OS', 'Contrib_PAMI', 'Contrib_Previsional',
+            'Detraccion_Aplicable', 'Fondo_Nac_Empleo', 'Tope_Maximo', 'Tope_Minimo', 'Q_sum_bruto',
+            'Q1_bruto', 'Q2_bruto', 'bruto_acum', 'remun_1', 'remun_2', 'remun_3', 'remun_4', 'remun_5',
+            'remun_6', 'remun_7', 'remun_8', 'remun_9', 'remun_10', 'base_ss', 'contrib_prev',
+            'contrib_pami', 'fondo_emp', 'contrib_asig', 'contrib_anssal', 'contrib_os', 'base', 'unidad',
+            'seccion_codigo', 'codigo_variable', 'visible_recibo'
+        }
 
-        for r in rows:
+        excluidas_del_empleado = conceptos_calculados | vars_globales_db | sistema_engine
+
+        celdas = self.listar_celdas_por_esquema(esquema_codigo)
+        vars_de_entrada = set()
+
+        # 4. Variables de entrada explícitas del esquema (tipo_calculo == 'variable')
+        for c in celdas:
+            if c.get("tipo_calculo") == "variable" and c.get("codigo_variable"):
+                c_var = c["codigo_variable"]
+                if not c_var.isdigit() and c_var not in excluidas_del_empleado:
+                    vars_de_entrada.add(c_var)
+
+        # 5. Escanear fórmulas del esquema por variables que NO sean globales ni conceptos calculados
+        import re
+        for c in celdas:
+            for f_key in ("formula_monto", "formula_base", "formula_unidad"):
+                formula = c.get(f_key) or ""
+                tokens = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', formula)
+                for t in tokens:
+                    if (
+                        not t.isdigit() and
+                        t not in excluidas_del_empleado and
+                        t not in (
+                            'if', 'else', 'and', 'or', 'not', 'min', 'max', 'abs', 'round',
+                            'True', 'False', 'None'
+                        )
+                    ):
+                        vars_de_entrada.add(t)
+
+        # 6. Preservar variables de entrada existentes en los empleados del esquema (filtrando las excluidas)
+        rows_emp = self.conn.execute(
+            "SELECT id, variables_calculo FROM empleados WHERE esquema_codigo = ?",
+            (esquema_codigo,)
+        ).fetchall()
+
+        for r in rows_emp:
+            if emp_id_excluir and r["id"] == emp_id_excluir:
+                continue
             try:
                 v_data = json.loads(r["variables_calculo"] or "{}")
             except Exception:
                 continue
-
             if isinstance(v_data, dict):
                 if "quincenas" in v_data and isinstance(v_data["quincenas"], dict):
                     for q_code, q_dict in v_data["quincenas"].items():
                         if isinstance(q_dict, dict):
-                            t_q = template_quincenas.setdefault(q_code, {})
-                            for k, val in q_dict.items():
-                                if k not in t_q:
-                                    t_q[k] = val
+                            for k in q_dict:
+                                if k not in excluidas_del_empleado and k != "quincenas":
+                                    vars_de_entrada.add(k)
                 else:
-                    for k, val in v_data.items():
-                        if k != "quincenas" and k not in template_mensual:
-                            template_mensual[k] = val
+                    for k in v_data:
+                        if k not in excluidas_del_empleado and k != "quincenas":
+                            vars_de_entrada.add(k)
 
-        if template_quincenas:
-            return {"quincenas": template_quincenas}
-        elif template_mensual:
-            return template_mensual
+        res = {}
+        for v in sorted(list(vars_de_entrada)):
+            if v == "asistencia_perfecta":
+                res[v] = False
+            else:
+                res[v] = 0
+
+        esq_row = self.conn.execute("SELECT tipo_liquidacion FROM esquemas_calculo WHERE codigo = ?", (esquema_codigo,)).fetchone()
+        es_j = (esq_row["tipo_liquidacion"] == "jornal") if esq_row else False
+
+        if es_j:
+            return {"quincenas": {"Q1": dict(res), "Q2": dict(res)}}
         else:
-            celdas = self.listar_celdas_por_esquema(esquema_codigo)
-            base_vars = {}
-            for c in celdas:
-                var = c["codigo_variable"]
-                if var not in ("bruto", "total_deducciones", "neto", "total_cargas_patronales", "costo_laboral_total"):
-                    base_vars[var] = 0
-            return base_vars
+            return res
 
     def adaptar_variables_a_esquema(self, variables_actuales: dict, nuevo_esquema: str, es_jornal: bool, emp_id: int | None = None) -> dict:
-        """Adapta el diccionario de variables del empleado al esquema de cálculo destino sin corromper el esquema."""
+        """Adapta las variables del empleado estricta y únicamente a las requeridas por el esquema_codigo seleccionado."""
         plantilla = self.obtener_plantilla_variables_esquema(nuevo_esquema, emp_id_excluir=emp_id)
 
         if es_jornal:
             res_quincenas = {}
-            p_quincenas = plantilla.get("quincenas", {})
+            p_quincenas = plantilla.get("quincenas", {}) if isinstance(plantilla, dict) else {}
             if not p_quincenas:
-                p_quincenas = {"Q1": {}, "Q2": {}}
+                p_quincenas = {"Q1": {"horas_trabajadas": 0}, "Q2": {"horas_trabajadas": 0}}
 
             current_q = variables_actuales.get("quincenas", {}) if isinstance(variables_actuales, dict) else {}
+            if not isinstance(current_q, dict):
+                current_q = {"Q1": variables_actuales if isinstance(variables_actuales, dict) else {}}
 
             for q_code, q_template in p_quincenas.items():
                 res_q = {}
-                c_q = current_q.get(q_code, {}) if isinstance(current_q, dict) else {}
+                c_q = current_q.get(q_code, current_q.get("Q1", {}))
 
+                # Asignar estrictamente las claves requeridas por la plantilla del esquema
                 for k, default_val in q_template.items():
                     if isinstance(c_q, dict) and k in c_q:
                         res_q[k] = c_q[k]
                     elif isinstance(variables_actuales, dict) and k in variables_actuales and k != "quincenas":
                         res_q[k] = variables_actuales[k]
                     else:
-                        if isinstance(default_val, bool):
-                            res_q[k] = False
-                        elif isinstance(default_val, (int, float)):
-                            res_q[k] = 0
-                        else:
-                            res_q[k] = ""
+                        res_q[k] = default_val
+
                 res_quincenas[q_code] = res_q
             return {"quincenas": res_quincenas}
         else:
@@ -633,24 +688,22 @@ class DatabaseManager:
             current_flat = {}
             if isinstance(variables_actuales, dict):
                 if "quincenas" in variables_actuales and isinstance(variables_actuales["quincenas"], dict):
-                    for q_code, q_dict in variables_actuales["quincenas"].items():
+                    for q_code, q_dict in sorted(variables_actuales["quincenas"].items()):
                         if isinstance(q_dict, dict):
                             current_flat.update(q_dict)
                 else:
                     current_flat = variables_actuales
 
-            for k, default_val in plantilla.items():
-                if k == "quincenas":
-                    continue
-                if k in current_flat:
-                    res_mensual[k] = current_flat[k]
-                else:
-                    if isinstance(default_val, bool):
-                        res_mensual[k] = False
-                    elif isinstance(default_val, (int, float)):
-                        res_mensual[k] = 0
+            # Asignar estrictamente las claves requeridas por la plantilla del esquema
+            if isinstance(plantilla, dict):
+                for k, default_val in plantilla.items():
+                    if k == "quincenas":
+                        continue
+                    if k in current_flat:
+                        res_mensual[k] = current_flat[k]
                     else:
-                        res_mensual[k] = ""
+                        res_mensual[k] = default_val
+
             return res_mensual
 
     def propagar_variables_esquema(self, esquema_codigo: str, variables_ref: dict, emp_id_modificado: int | None = None):
@@ -774,6 +827,70 @@ class DatabaseManager:
                 )
         self.conn.commit()
 
+    def renombrar_variable_esquema(self, esquema_codigo: str, clave_vieja: str, clave_nueva: str) -> None:
+        """Renombra una variable de entrada de un esquema_codigo en celdas_calculo y en las variables de todos los empleados asignados."""
+        clave_vieja = clave_vieja.strip()
+        clave_nueva = clave_nueva.strip().lower().replace(" ", "_")
+
+        if not clave_vieja or not clave_nueva or clave_vieja == clave_nueva:
+            return
+
+        # 1. Actualizar celdas_calculo del esquema
+        self.conn.execute(
+            "UPDATE celdas_calculo SET codigo_variable = ? WHERE esquema_codigo = ? AND codigo_variable = ?",
+            (clave_nueva, esquema_codigo, clave_vieja)
+        )
+
+        # 2. Actualizar apariciones en fórmulas del esquema
+        celdas = self.conn.execute(
+            "SELECT id, formula_monto, formula_base, formula_unidad FROM celdas_calculo WHERE esquema_codigo = ?",
+            (esquema_codigo,)
+        ).fetchall()
+
+        import re
+        pattern = r'\b' + re.escape(clave_vieja) + r'\b'
+        for c in celdas:
+            c_id = c["id"]
+            fm = re.sub(pattern, clave_nueva, c["formula_monto"] or "")
+            fb = re.sub(pattern, clave_nueva, c["formula_base"] or "")
+            fu = re.sub(pattern, clave_nueva, c["formula_unidad"] or "")
+            self.conn.execute(
+                "UPDATE celdas_calculo SET formula_monto=?, formula_base=?, formula_unidad=? WHERE id=?",
+                (fm, fb, fu, c_id)
+            )
+
+        # 3. Actualizar variables_calculo en todos los empleados pertenecientes a este esquema
+        rows = self.conn.execute(
+            "SELECT id, variables_calculo FROM empleados WHERE esquema_codigo = ?",
+            (esquema_codigo,)
+        ).fetchall()
+
+        for r in rows:
+            emp_id = r["id"]
+            try:
+                data = json.loads(r["variables_calculo"] or "{}")
+            except Exception:
+                data = {}
+
+            modificado = False
+            if isinstance(data, dict):
+                if "quincenas" in data and isinstance(data["quincenas"], dict):
+                    for q_code, q_dict in data["quincenas"].items():
+                        if isinstance(q_dict, dict) and clave_vieja in q_dict:
+                            q_dict[clave_nueva] = q_dict.pop(clave_vieja)
+                            modificado = True
+                elif clave_vieja in data:
+                    data[clave_nueva] = data.pop(clave_vieja)
+                    modificado = True
+
+            if modificado:
+                self.conn.execute(
+                    "UPDATE empleados SET variables_calculo = ? WHERE id = ?",
+                    (json.dumps(data, ensure_ascii=False), emp_id)
+                )
+
+        self.conn.commit()
+
     # ------------------------------------------------------------------
     # CRUD Celdas de Cálculo
     # ------------------------------------------------------------------
@@ -870,30 +987,34 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     # CRUD Esquemas Adicionales
     # ------------------------------------------------------------------
-    def guardar_esquema(self, original_codigo: str | None, nuevo_codigo: str, nombre: str):
+    def guardar_esquema(self, original_codigo: str | None, nuevo_codigo: str, nombre: str, tipo_liquidacion: str = "mensual"):
         cur = self.conn.cursor()
         if original_codigo:
             cur.execute(
-                "UPDATE esquemas_calculo SET codigo=?, nombre=? WHERE codigo=?",
-                (nuevo_codigo, nombre, original_codigo)
+                "UPDATE esquemas_calculo SET codigo=?, nombre=?, tipo_liquidacion=? WHERE codigo=?",
+                (nuevo_codigo, nombre, tipo_liquidacion, original_codigo)
             )
         else:
             cur.execute(
-                "INSERT INTO esquemas_calculo (codigo, nombre) VALUES (?, ?)",
-                (nuevo_codigo, nombre)
+                "INSERT INTO esquemas_calculo (codigo, nombre, tipo_liquidacion) VALUES (?, ?, ?)",
+                (nuevo_codigo, nombre, tipo_liquidacion)
             )
         self.conn.commit()
 
     def eliminar_esquema(self, codigo: str):
+        if codigo == "MENSUAL":
+            raise ValueError("El esquema por defecto 'MENSUAL' no puede ser eliminado.")
+
         cur = self.conn.cursor()
         emp_count = cur.execute("SELECT COUNT(*) FROM empleados WHERE esquema_codigo = ?", (codigo,)).fetchone()[0]
         if emp_count > 0:
-            raise ValueError(f"No se puede eliminar el esquema '{codigo}' porque está asignado a {emp_count} empleado(s).")
-            
-        celdas_count = cur.execute("SELECT COUNT(*) FROM celdas_calculo WHERE esquema_codigo = ?", (codigo,)).fetchone()[0]
-        if celdas_count > 0:
-            raise ValueError(f"No se puede eliminar el esquema '{codigo}' porque tiene {celdas_count} celda(s) de cálculo asociadas.")
-            
+            raise ValueError(f"No se puede eliminar el esquema '{codigo}' porque está asignado a {emp_count} empleado(s). Reasigne los empleados antes de borrarlo.")
+
+        # 1. Eliminar celdas de cálculo y celdas de gráfico asociadas al esquema
+        cur.execute("DELETE FROM celdas_calculo WHERE esquema_codigo = ?", (codigo,))
+        cur.execute("DELETE FROM celdas_grafico WHERE esquema_codigo = ?", (codigo,))
+
+        # 2. Eliminar el esquema de esquemas_calculo
         cur.execute("DELETE FROM esquemas_calculo WHERE codigo = ?", (codigo,))
         self.conn.commit()
 

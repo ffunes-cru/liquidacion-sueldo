@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QMessageBox, QFileDialog, QHeaderView,
     QFrame, QGroupBox, QAbstractItemView, QDoubleSpinBox, QSpinBox, QRadioButton, QButtonGroup,
     QStackedWidget, QScrollArea, QDialog, QToolButton, QDateEdit, QCheckBox,
-    QProgressDialog
+    QProgressDialog, QInputDialog
 )
 
 from database import DatabaseManager
@@ -851,6 +851,257 @@ class ConceptoDialog(QDialog):
             QMessageBox.critical(self, "Error al guardar", str(e))
 
 
+class ConfigurarEsquemaDialog(QDialog):
+    """Diálogo modal para configurar las variables de entrada y quincenas de un Esquema de Cálculo."""
+
+    def __init__(self, parent, db: DatabaseManager, esquema_codigo: str, tipo_liquidacion: str):
+        super().__init__(parent)
+        self.db = db
+        self.esquema_codigo = esquema_codigo
+        self.tipo_liquidacion = tipo_liquidacion.lower()
+
+        self.setWindowTitle(f"Configurar Variables — Esquema '{self.esquema_codigo}' ({self.tipo_liquidacion.upper()})")
+        self.setModal(True)
+        self.resize(560, 420)
+
+        main_layout = QVBoxLayout(self)
+
+        lbl_title = QLabel(f"<h3>Configuración de Esquema: {self.esquema_codigo} ({self.tipo_liquidacion.upper()})</h3>")
+        main_layout.addWidget(lbl_title)
+
+        # Botonera
+        btn_bar = QHBoxLayout()
+
+        self.btn_add_var = QPushButton("+ Agregar Variable")
+        self.btn_add_var.setToolTip("Agregar una variable de entrada a este esquema")
+        self.btn_add_var.clicked.connect(self._agregar_variable)
+        btn_bar.addWidget(self.btn_add_var)
+
+        self.btn_renam_var = QPushButton("✏ Renombrar Variable")
+        self.btn_renam_var.setToolTip("Renombrar la variable seleccionada en todo el esquema y empleados")
+        self.btn_renam_var.clicked.connect(self._renombrar_variable)
+        btn_bar.addWidget(self.btn_renam_var)
+
+        self.btn_del_var = QPushButton("− Eliminar Variable")
+        self.btn_del_var.setToolTip("Eliminar la variable seleccionada")
+        self.btn_del_var.clicked.connect(self._eliminar_variable)
+        btn_bar.addWidget(self.btn_del_var)
+
+        if self.tipo_liquidacion == "jornal":
+            self.btn_add_q = QPushButton("+ Agregar Quincena")
+            self.btn_add_q.setToolTip("Agregar una nueva quincena a este esquema jornal")
+            self.btn_add_q.clicked.connect(self._agregar_quincena)
+            btn_bar.addWidget(self.btn_add_q)
+
+            self.btn_del_q = QPushButton("− Eliminar Quincena")
+            self.btn_del_q.setToolTip("Eliminar la última quincena de este esquema jornal")
+            self.btn_del_q.clicked.connect(self._eliminar_quincena)
+            btn_bar.addWidget(self.btn_del_q)
+
+        btn_bar.addStretch()
+        main_layout.addLayout(btn_bar)
+
+        # Tabs de variables/quincenas
+        self.tab_widget = QTabWidget()
+        main_layout.addWidget(self.tab_widget)
+
+        # Botón guardar/cerrar
+        btn_close = QPushButton("Guardar y Cerrar")
+        btn_close.clicked.connect(self.accept)
+        main_layout.addWidget(btn_close)
+
+        self._cargando = False
+        self._cargar_variables()
+
+    def _cargar_variables(self):
+        self._cargando = True
+        self.tab_widget.clear()
+        plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
+
+        if self.tipo_liquidacion == "jornal":
+            q_dict = plantilla.get("quincenas", {"Q1": {}})
+            for q_code, vars_map in sorted(q_dict.items()):
+                tab = QWidget()
+                t_lay = QVBoxLayout(tab)
+                table = QTableWidget()
+                table.setAlternatingRowColors(True)
+                table.setColumnCount(2)
+                table.setHorizontalHeaderLabels(["Nombre Variable / Clave", "Valor por defecto"])
+                table.horizontalHeader().setStretchLastSection(True)
+                table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+                table.setRowCount(len(vars_map))
+                for i, (k, val) in enumerate(vars_map.items()):
+                    item_k = QTableWidgetItem(k)
+                    item_k.setData(Qt.ItemDataRole.UserRole, k)
+                    table.setItem(i, 0, item_k)
+                    table.setItem(i, 1, QTableWidgetItem(str(val)))
+                table.itemChanged.connect(self._on_table_item_changed)
+                t_lay.addWidget(table)
+                tab.setProperty("table_vars", table)
+                self.tab_widget.addTab(tab, q_code)
+        else:
+            keys_list = [k for k in plantilla.keys() if k != "quincenas"]
+            tab = QWidget()
+            t_lay = QVBoxLayout(tab)
+            table = QTableWidget()
+            table.setAlternatingRowColors(True)
+            table.setColumnCount(2)
+            table.setHorizontalHeaderLabels(["Nombre Variable / Clave", "Valor por defecto"])
+            table.horizontalHeader().setStretchLastSection(True)
+            table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            table.setRowCount(len(keys_list))
+            for i, k in enumerate(keys_list):
+                val = plantilla.get(k, 0)
+                item_k = QTableWidgetItem(k)
+                item_k.setData(Qt.ItemDataRole.UserRole, k)
+                table.setItem(i, 0, item_k)
+                table.setItem(i, 1, QTableWidgetItem(str(val)))
+            table.itemChanged.connect(self._on_table_item_changed)
+            t_lay.addWidget(table)
+            tab.setProperty("table_vars", table)
+            self.tab_widget.addTab(tab, "Variables Mensuales")
+        self._cargando = False
+
+    def _on_table_item_changed(self, item: QTableWidgetItem):
+        if getattr(self, "_cargando", False):
+            return
+        if item.column() != 0:
+            return
+        clave_vieja = item.data(Qt.ItemDataRole.UserRole)
+        clave_nueva = item.text().strip().lower().replace(" ", "_")
+        if clave_vieja and clave_nueva and clave_vieja != clave_nueva:
+            self.db.renombrar_variable_esquema(self.esquema_codigo, clave_vieja, clave_nueva)
+            self._cargar_variables()
+
+    def _renombrar_variable(self):
+        current_tab = self.tab_widget.currentWidget()
+        if not current_tab:
+            return
+        table = current_tab.property("table_vars")
+        if not table or table.currentRow() < 0:
+            QMessageBox.warning(self, "Atención", "Seleccione la variable que desea renombrar.")
+            return
+
+        item = table.item(table.currentRow(), 0)
+        if not item:
+            return
+        clave_vieja = item.data(Qt.ItemDataRole.UserRole) or item.text().strip()
+
+        nueva_clave, ok = QInputDialog.getText(
+            self, "Renombrar Variable",
+            f"Ingrese el nuevo nombre/código para la variable '{clave_vieja}':",
+            text=clave_vieja
+        )
+        if ok and nueva_clave.strip():
+            nueva_clave = nueva_clave.strip().lower().replace(" ", "_")
+            if nueva_clave != clave_vieja:
+                self.db.renombrar_variable_esquema(self.esquema_codigo, clave_vieja, nueva_clave)
+                self._cargar_variables()
+
+    def _agregar_variable(self):
+        var_name, ok = QInputDialog.getText(self, "Nueva Variable al Esquema", "Nombre o código de la variable de entrada (ej: presentismo):")
+        if not ok or not var_name.strip():
+            return
+        var_code = var_name.strip().lower().replace(" ", "_")
+
+        plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
+        if self.tipo_liquidacion == "jornal":
+            q_dict = plantilla.get("quincenas", {"Q1": {}})
+            for q in q_dict:
+                q_dict[q][var_code] = 0
+            plantilla["quincenas"] = q_dict
+        else:
+            plantilla[var_code] = 0
+
+        secciones = self.db.listar_secciones()
+        if not secciones:
+            self.db.conn.execute("INSERT OR IGNORE INTO secciones (codigo, titulo, orden) VALUES ('COMPOSICION', 'Composición del Recibo', 10)")
+            self.db.conn.commit()
+            secciones = self.db.listar_secciones()
+        sec_code = secciones[0]["codigo"]
+        max_orden = self.db.conn.execute("SELECT MAX(orden) FROM celdas_calculo WHERE esquema_codigo = ?", (self.esquema_codigo,)).fetchone()[0] or 0
+
+        self.db.guardar_celda(
+            celda_id=None,
+            seccion_codigo=sec_code,
+            codigo_variable=var_code,
+            descripcion=var_name.strip(),
+            condicion="",
+            formula_unidad="",
+            formula_base="",
+            formula_monto=var_code,
+            orden=max_orden + 10,
+            esquema_codigo=self.esquema_codigo,
+            tipo_calculo="variable",
+            simple_porcentaje=None,
+            simple_base_variable=None,
+            simple_monto_fijo=None,
+            visible_recibo=1
+        )
+
+        self.db.propagar_variables_esquema(self.esquema_codigo, plantilla)
+        self._cargar_variables()
+
+    def _eliminar_variable(self):
+        current_tab = self.tab_widget.currentWidget()
+        if not current_tab:
+            return
+        table = current_tab.property("table_vars")
+        if not table or table.currentRow() < 0:
+            QMessageBox.warning(self, "Atención", "Seleccione la variable que desea eliminar de la tabla.")
+            return
+
+        item = table.item(table.currentRow(), 0)
+        if not item:
+            return
+        var_code = item.text().strip()
+
+        resp = QMessageBox.question(
+            self, "Confirmar Eliminación",
+            f"¿Desea eliminar la variable '{var_code}' del esquema '{self.esquema_codigo}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if resp == QMessageBox.StandardButton.Yes:
+            plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
+            if "quincenas" in plantilla and isinstance(plantilla["quincenas"], dict):
+                for q in plantilla["quincenas"]:
+                    plantilla["quincenas"][q].pop(var_code, None)
+            else:
+                plantilla.pop(var_code, None)
+
+            self.db.conn.execute("DELETE FROM celdas_calculo WHERE esquema_codigo = ? AND codigo_variable = ?", (self.esquema_codigo, var_code))
+            self.db.conn.commit()
+
+            self.db.propagar_variables_esquema(self.esquema_codigo, plantilla)
+            self._cargar_variables()
+
+    def _agregar_quincena(self):
+        plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
+        q_dict = plantilla.get("quincenas", {"Q1": {}})
+        num_q = len(q_dict) + 1
+        new_q = f"Q{num_q}"
+        ref_q = q_dict.get("Q1", {})
+        q_dict[new_q] = {k: (False if isinstance(v, bool) else 0) for k, v in ref_q.items()}
+        plantilla["quincenas"] = q_dict
+
+        self.db.propagar_variables_esquema(self.esquema_codigo, plantilla)
+        self._cargar_variables()
+
+    def _eliminar_quincena(self):
+        plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
+        q_dict = plantilla.get("quincenas", {})
+        if len(q_dict) <= 1:
+            QMessageBox.warning(self, "Atención", "No se puede eliminar la única quincena restante.")
+            return
+
+        last_q = sorted(q_dict.keys())[-1]
+        del q_dict[last_q]
+        plantilla["quincenas"] = q_dict
+
+        self.db.propagar_variables_esquema(self.esquema_codigo, plantilla)
+        self._cargar_variables()
+
+
 # ======================================================================
 # Ventana Principal
 # ======================================================================
@@ -1158,18 +1409,21 @@ class MainWindow(QMainWindow):
         # Diccionario para trackear quincenas y sus filas
         self.quincena_tabs = {}
 
-        # Botonera inferior para añadir variables y quincenas
+        # Botonera inferior (oculta ya que la estructura pertenece al Esquema de Cálculo)
         btn_vars_bar = QHBoxLayout()
         self.btn_add_var = QPushButton("+ Agregar Variable")
         self.btn_add_var.clicked.connect(self._on_agregar_variable_click)
+        self.btn_add_var.setVisible(False)
         btn_vars_bar.addWidget(self.btn_add_var)
 
         self.btn_add_quincena = QPushButton("+ Agregar Quincena")
         self.btn_add_quincena.clicked.connect(self._on_agregar_quincena_click)
+        self.btn_add_quincena.setVisible(False)
         btn_vars_bar.addWidget(self.btn_add_quincena)
 
         self.btn_del_quincena = QPushButton("− Eliminar Quincena")
         self.btn_del_quincena.clicked.connect(self._on_eliminar_quincena_click)
+        self.btn_del_quincena.setVisible(False)
         btn_vars_bar.addWidget(self.btn_del_quincena)
 
         btn_vars_bar.addStretch()
@@ -1189,10 +1443,18 @@ class MainWindow(QMainWindow):
         self._cargar_combos_empleado()
 
     def _cargar_combos_empleado(self):
-        # Cargar Esquemas
+        # Cargar Esquemas (filtrados por tipo de liquidación actual)
+        es_jornal = self.inp_tipo.currentText() == "jornal"
+        tipo_filtro = "jornal" if es_jornal else "mensual"
+        self.inp_esquema.blockSignals(True)
         self.inp_esquema.clear()
         for esq in self.db.listar_esquemas():
-            self.inp_esquema.addItem(esq["nombre"], esq["codigo"])
+            esq_tipo = esq["tipo_liquidacion"]
+            if esq_tipo == tipo_filtro:
+                self.inp_esquema.addItem(esq["nombre"], esq["codigo"])
+        if self.inp_esquema.count() > 0:
+            self.inp_esquema.setCurrentIndex(0)
+        self.inp_esquema.blockSignals(False)
 
         # Cargar Categorías Jornaleras
         self.inp_categoria_jornal.clear()
@@ -1203,22 +1465,72 @@ class MainWindow(QMainWindow):
     def _on_tipo_liquidacion_cambiado(self):
         es_jornal = self.inp_tipo.currentText() == "jornal"
         self.inp_categoria_jornal.setEnabled(es_jornal)
-        if es_jornal:
-            # Seleccionar esquema JORNAL automáticamente si existe
-            idx = self.inp_esquema.findData("JORNAL")
-            if idx >= 0:
-                self.inp_esquema.setCurrentIndex(idx)
-        else:
-            # Seleccionar esquema MENSUAL
+
+        # Filtrar esquemas disponibles según el nuevo tipo
+        self._filtrar_esquemas_por_tipo(es_jornal)
+
+        if not es_jornal:
             self.inp_categoria_jornal.setCurrentIndex(0)  # Ninguno
-            idx = self.inp_esquema.findData("MENSUAL")
-            if idx >= 0:
-                self.inp_esquema.setCurrentIndex(idx)
-                
-        # Reconstruir dinámicamente el layout de variables
-        if hasattr(self, "quincena_tabs") and self.quincena_tabs:
-            current_json = self._get_variables_json()
-            self._set_variables_json(current_json)
+
+        # Si estamos cargando un empleado, no adaptar dinámicamente
+        if getattr(self, "_cargando_empleado", False):
+            return
+
+        self._actualizar_variables_segun_esquema()
+
+    def _on_esquema_empleado_cambiado(self):
+        if getattr(self, "_cargando_empleado", False):
+            return
+
+        self._actualizar_variables_segun_esquema()
+
+    def _actualizar_variables_segun_esquema(self):
+        """Adapta automáticamente las variables de la interfaz al esquema de cálculo seleccionado."""
+        esquema_cod = self.inp_esquema.currentData()
+        if not esquema_cod:
+            return
+
+        es_jornal = self.inp_tipo.currentText() == "jornal"
+
+        row = self.lista_empleados.currentRow()
+        emp_id = None
+        if hasattr(self, "_empleados_data") and 0 <= row < len(self._empleados_data):
+            emp_id = self._empleados_data[row]["id"]
+
+        current_vars_txt = self._get_variables_json()
+        try:
+            current_dict = json.loads(current_vars_txt)
+        except Exception:
+            current_dict = {}
+
+        vars_adaptadas = self.db.adaptar_variables_a_esquema(
+            current_dict, esquema_cod, es_jornal, emp_id=emp_id
+        )
+        self._set_variables_json(json.dumps(vars_adaptadas, ensure_ascii=False))
+        self.statusBar().showMessage(
+            f"Variables actualizadas según el esquema '{esquema_cod}'. Guarde los cambios para confirmar.", 4000
+        )
+
+    def _filtrar_esquemas_por_tipo(self, es_jornal: bool):
+        """Filtra el combo de esquemas para mostrar solo los del tipo correspondiente."""
+        tipo = "jornal" if es_jornal else "mensual"
+        current_data = self.inp_esquema.currentData()
+
+        self.inp_esquema.blockSignals(True)
+        self.inp_esquema.clear()
+        for esq in self.db.listar_esquemas():
+            esq_tipo = esq["tipo_liquidacion"]
+            if esq_tipo == tipo:
+                self.inp_esquema.addItem(esq["nombre"], esq["codigo"])
+
+        # Intentar restaurar la selección anterior si sigue siendo compatible
+        idx = self.inp_esquema.findData(current_data)
+        if idx >= 0:
+            self.inp_esquema.setCurrentIndex(idx)
+        elif self.inp_esquema.count() > 0:
+            self.inp_esquema.setCurrentIndex(0)
+        self.inp_esquema.blockSignals(False)
+
 
     def _cargar_lista_empleados(self):
         current_row = self.lista_empleados.currentRow()
@@ -1229,10 +1541,12 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(f"[{emp['legajo']}]  {emp['nombre_completo']}")
             item.setData(Qt.ItemDataRole.UserRole, emp["id"])
             self.lista_empleados.addItem(item)
+        target = current_row if (0 <= current_row < len(self._empleados_data)) else 0
         if self._empleados_data:
-            target = current_row if (0 <= current_row < len(self._empleados_data)) else 0
             self.lista_empleados.setCurrentRow(target)
         self.lista_empleados.blockSignals(False)
+        if self._empleados_data and target >= 0:
+            self._on_empleado_seleccionado(target)
 
     def _on_empleado_seleccionado(self, row: int):
         if row < 0 or row >= len(self._empleados_data):
@@ -1244,6 +1558,9 @@ class MainWindow(QMainWindow):
             self.inp_nombre.setText(emp["nombre_completo"] or "")
             self.inp_cuil.setText(emp.get("cuil") or "")
             
+            es_jornal = emp["tipo_liquidacion"] == "jornal"
+            self._filtrar_esquemas_por_tipo(es_jornal)
+
             idx_tipo = self.inp_tipo.findText(emp["tipo_liquidacion"])
             if idx_tipo >= 0:
                 self.inp_tipo.setCurrentIndex(idx_tipo)
@@ -1261,50 +1578,13 @@ class MainWindow(QMainWindow):
             qdate = QDate.fromString(f_ing_str, "yyyy-MM-dd")
             self.inp_fecha_ingreso.setDate(qdate if qdate.isValid() else QDate(2020, 1, 1))
 
-            self._set_variables_json(emp["variables_calculo"] or "{}")
-        finally:
-            self._cargando_empleado = False
-
-    def _on_esquema_empleado_cambiado(self):
-        if getattr(self, "_cargando_empleado", False):
-            return
-
-        row = self.lista_empleados.currentRow()
-        if row < 0 or row >= len(self._empleados_data):
-            return
-
-        emp = self._empleados_data[row]
-        esq_anterior = emp.get("esquema_codigo", "")
-        nuevo_esquema = self.inp_esquema.currentData()
-
-        if not nuevo_esquema or nuevo_esquema == esq_anterior:
-            return
-
-        resp = QMessageBox.warning(
-            self,
-            "⚠ Advertencia: Cambio de Esquema de Cálculo",
-            f"Está a punto de cambiar el Esquema de Cálculo del empleado '{emp['nombre_completo']}' de '{esq_anterior}' a '{nuevo_esquema}'.\n\n"
-            f"Las variables del empleado se adaptarán a la plantilla del esquema '{nuevo_esquema}' sin alterar ni corromper los datos de los otros empleados.\n\n"
-            "¿Desea continuar?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-
-        if resp == QMessageBox.StandardButton.Yes:
-            current_vars_txt = self._get_variables_json()
             try:
-                current_dict = json.loads(current_vars_txt)
+                v_raw = json.loads(emp["variables_calculo"] or "{}")
             except Exception:
-                current_dict = {}
-
-            es_jornal = self.inp_tipo.currentText() == "jornal"
-            vars_adaptadas = self.db.adaptar_variables_a_esquema(current_dict, nuevo_esquema, es_jornal, emp_id=emp["id"])
-            self._set_variables_json(json.dumps(vars_adaptadas, ensure_ascii=False))
-            self.statusBar().showMessage(f"Variables adaptadas al esquema '{nuevo_esquema}'. Guarde los cambios para confirmar.", 5000)
-        else:
-            self._cargando_empleado = True
-            idx_ant = self.inp_esquema.findData(esq_anterior)
-            if idx_ant >= 0:
-                self.inp_esquema.setCurrentIndex(idx_ant)
+                v_raw = {}
+            v_clean = self.db.adaptar_variables_a_esquema(v_raw, emp["esquema_codigo"], es_jornal, emp_id=emp["id"])
+            self._set_variables_json(json.dumps(v_clean, ensure_ascii=False))
+        finally:
             self._cargando_empleado = False
 
     def _duplicar_empleado(self):
@@ -1373,10 +1653,12 @@ class MainWindow(QMainWindow):
                 d_vars = json.loads(variables_txt)
                 self.db.propagar_variables_esquema(esquema, d_vars, emp_id_modificado=emp_id)
             except Exception:
-                passoads(variables_txt)
-                self.db.propagar_variables_esquema(esquema, d_vars)
-            except Exception:
                 pass
+
+        # Actualizar los datos originales guardados para permitir reversiones futuras
+        self._emp_original_tipo = self.inp_tipo.currentText()
+        self._emp_original_esquema = esquema
+        self._emp_original_vars_json = variables_txt
 
         self.statusBar().showMessage("Empleado guardado correctamente.", 4000)
         old_row = row
@@ -1391,6 +1673,9 @@ class MainWindow(QMainWindow):
             "asistencia_perfecta": True,
             "horas_trabajadas": 150
         }, indent=2, ensure_ascii=False)
+        self._emp_original_tipo = "mensual"
+        self._emp_original_esquema = "MENSUAL"
+        self._emp_original_vars_json = variables_default
         self.db.guardar_empleado(None, "", "Nuevo Empleado", "mensual", variables_default, "MENSUAL", None, "2020-01-01")
         self._cargar_lista_empleados()
         self.lista_empleados.setCurrentRow(self.lista_empleados.count() - 1)
@@ -1450,43 +1735,29 @@ class MainWindow(QMainWindow):
         inp_key = QLineEdit()
         inp_key.setPlaceholderText("Clave (ej: horas_trabajadas)")
         inp_key.setText(str(key))
+        inp_key.setEnabled(False)  # Nombres de variable bloqueados (pertenecen al esquema)
 
-        is_user = hasattr(self, "modo_actual") and self.modo_actual == "Usuario"
-        
-        if is_user:
-            inp_key.setEnabled(False)
-            
-            # Determinar control para el valor
-            if isinstance(val, bool) or str(val).lower() in ("true", "false"):
-                val_bool = val if isinstance(val, bool) else (str(val).lower() == "true")
-                inp_val = QCheckBox()
-                inp_val.setChecked(val_bool)
-            elif isinstance(val, (int, float)) or (isinstance(val, str) and val.replace(".","",1).replace("-","",1).isdigit()):
-                try:
-                    val_float = float(val)
-                except ValueError:
-                    val_float = 0.0
-                inp_val = QDoubleSpinBox()
-                inp_val.setRange(-99999999.0, 99999999.0)
-                inp_val.setDecimals(2)
-                inp_val.setValue(val_float)
-            else:
-                inp_val = QLineEdit()
-                inp_val.setText(str(val) if val is not None else "")
+        # Determinar control para el valor
+        if isinstance(val, bool) or str(val).lower() in ("true", "false"):
+            val_bool = val if isinstance(val, bool) else (str(val).lower() == "true")
+            inp_val = QCheckBox()
+            inp_val.setChecked(val_bool)
+        elif isinstance(val, (int, float)) or (isinstance(val, str) and val.replace(".","",1).replace("-","",1).isdigit()):
+            try:
+                val_float = float(val)
+            except ValueError:
+                val_float = 0.0
+            inp_val = QDoubleSpinBox()
+            inp_val.setRange(-99999999.0, 99999999.0)
+            inp_val.setDecimals(2)
+            inp_val.setValue(val_float)
         else:
             inp_val = QLineEdit()
-            if isinstance(val, bool):
-                inp_val.setText("true" if val else "false")
-            else:
-                inp_val.setText(str(val) if val is not None else "")
+            inp_val.setText(str(val) if val is not None else "")
 
         btn_del = QPushButton("−")
         btn_del.setFixedWidth(30)
-        btn_del.setToolTip("Eliminar esta variable")
-        btn_del.clicked.connect(lambda checked=False, t=tab_name, rw=row_widget: self._remove_variable_row_from_tab(t, rw))
-
-        if is_user:
-            btn_del.setVisible(False)
+        btn_del.setVisible(False)
 
         row_layout.addWidget(inp_key, 2)
         row_layout.addWidget(inp_val, 3)
@@ -1677,8 +1948,8 @@ class MainWindow(QMainWindow):
         
         if es_jornal:
             self.tab_widget_vars.tabBar().show()
-            self.btn_add_quincena.show()
-            self.btn_del_quincena.show()
+            #self.btn_add_quincena.show()
+            #self.btn_del_quincena.show()
             
             if isinstance(data, dict) and "quincenas" in data:
                 quincenas_dict = data["quincenas"]
@@ -1692,8 +1963,8 @@ class MainWindow(QMainWindow):
                 self._add_quincena_tab(q_name, quincenas_dict[q_name])
         else:
             self.tab_widget_vars.tabBar().hide()
-            self.btn_add_quincena.hide()
-            self.btn_del_quincena.hide()
+            #self.btn_add_quincena.hide()
+            #self.btn_del_quincena.hide()
             
             if isinstance(data, dict) and "quincenas" in data:
                 flat_data = data["quincenas"].get("Q1", {})
@@ -2858,6 +3129,8 @@ class MainWindow(QMainWindow):
                         celda.get("formula_unidad", ""),
                         celda.get("formula_base", ""),
                         celda.get("formula_monto", ""),
+                        celda.get("formula", ""),
+                        celda.get("imprime_recibo", 1),
                         new_orden,
                         esquema_codigo,
                         celda.get("tipo_calculo", "formula"),
@@ -2866,10 +3139,126 @@ class MainWindow(QMainWindow):
                         celda.get("simple_monto_fijo"),
                         celda.get("visible_recibo", 1)
                     )
-                except Exception as e:
-                    print(f"Error guardando orden: {e}")
+                except Exception:
+                    pass
 
-        self.statusBar().showMessage("Orden actualizado tras arrastrar y soltar.", 3000)
+    # ------------------------------------------------------------------
+    # Gestión de Variables y Quincenas desde el Editor del Esquema
+    # ------------------------------------------------------------------
+    def _on_agregar_variable_esquema_click(self):
+        esq_code = self.combo_visual_esquema.currentData() if hasattr(self, "combo_visual_esquema") else None
+        if not esq_code:
+            QMessageBox.warning(self, "Error", "Seleccione un Esquema de Cálculo primero.")
+            return
+
+        var_name, ok = QInputDialog.getText(self, "Nueva Variable al Esquema", "Nombre o código de la variable (ej: presentismo):")
+        if not ok or not var_name.strip():
+            return
+
+        var_code = var_name.strip().lower().replace(" ", "_")
+        plantilla = self.db.obtener_plantilla_variables_esquema(esq_code)
+        
+        esq_row = self.db.conn.execute("SELECT tipo_liquidacion FROM esquemas_calculo WHERE codigo = ?", (esq_code,)).fetchone()
+        es_jornal = (esq_row["tipo_liquidacion"] == "jornal") if esq_row else False
+
+        if es_jornal:
+            q_dict = plantilla.get("quincenas", {"Q1": {}})
+            for q_code in q_dict:
+                q_dict[q_code][var_code] = 0
+            plantilla["quincenas"] = q_dict
+        else:
+            plantilla[var_code] = 0
+
+        # Crear celda de cálculo de tipo 'variable' para dar soporte nativo
+        secciones = self.db.listar_secciones()
+        sec_code = secciones[0]["codigo"] if secciones else "COMPOSICION"
+        max_orden = self.db.conn.execute("SELECT MAX(orden) FROM celdas_calculo WHERE esquema_codigo = ?", (esq_code,)).fetchone()[0] or 0
+
+        self.db.guardar_celda(
+            celda_id=None,
+            seccion_codigo=sec_code,
+            codigo_variable=var_code,
+            descripcion=var_name.strip(),
+            condicion="",
+            formula_unidad="",
+            formula_base="",
+            formula_monto=var_code,
+            orden=max_orden + 10,
+            esquema_codigo=esq_code,
+            tipo_calculo="variable",
+            simple_porcentaje=None,
+            simple_base_variable=None,
+            simple_monto_fijo=None,
+            visible_recibo=1
+        )
+
+        self.db.propagar_variables_esquema(esq_code, plantilla)
+        self._cargar_esquema_visual()
+        self.statusBar().showMessage(f"Variable '{var_code}' agregada al esquema '{esq_code}'.", 4000)
+
+    def _on_eliminar_variable_esquema_click(self, var_code: str):
+        esq_code = self.combo_visual_esquema.currentData() if hasattr(self, "combo_visual_esquema") else None
+        if not esq_code:
+            return
+
+        resp = QMessageBox.question(
+            self, "Confirmar eliminación",
+            f"¿Desea eliminar la variable '{var_code}' del esquema '{esq_code}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if resp == QMessageBox.StandardButton.Yes:
+            plantilla = self.db.obtener_plantilla_variables_esquema(esq_code)
+            if "quincenas" in plantilla and isinstance(plantilla["quincenas"], dict):
+                for q_code in plantilla["quincenas"]:
+                    plantilla["quincenas"][q_code].pop(var_code, None)
+            else:
+                plantilla.pop(var_code, None)
+
+            # Eliminar celda asociada si existe
+            self.db.conn.execute("DELETE FROM celdas_calculo WHERE esquema_codigo = ? AND codigo_variable = ?", (esq_code, var_code))
+            self.db.conn.commit()
+
+            self.db.propagar_variables_esquema(esq_code, plantilla)
+            self._cargar_esquema_visual()
+            self.statusBar().showMessage(f"Variable '{var_code}' eliminada del esquema.", 4000)
+
+    def _on_agregar_quincena_esquema_click(self):
+        esq_code = self.combo_visual_esquema.currentData() if hasattr(self, "combo_visual_esquema") else None
+        if not esq_code:
+            return
+
+        plantilla = self.db.obtener_plantilla_variables_esquema(esq_code)
+        q_dict = plantilla.get("quincenas", {"Q1": {}})
+        num_q = len(q_dict) + 1
+        new_q = f"Q{num_q}"
+
+        ref_q = q_dict.get("Q1", {})
+        q_dict[new_q] = {k: (False if isinstance(v, bool) else 0) for k, v in ref_q.items()}
+        plantilla["quincenas"] = q_dict
+
+        self.db.propagar_variables_esquema(esq_code, plantilla)
+        self._cargar_esquema_visual()
+        self.statusBar().showMessage(f"Quincena '{new_q}' agregada al esquema '{esq_code}'.", 4000)
+
+    def _on_eliminar_quincena_esquema_click(self):
+        esq_code = self.combo_visual_esquema.currentData() if hasattr(self, "combo_visual_esquema") else None
+        if not esq_code:
+            return
+
+        plantilla = self.db.obtener_plantilla_variables_esquema(esq_code)
+        q_dict = plantilla.get("quincenas", {})
+        if len(q_dict) <= 1:
+            QMessageBox.warning(self, "Atención", "No se puede eliminar la única quincena restante.")
+            return
+
+        last_q = sorted(q_dict.keys())[-1]
+        del q_dict[last_q]
+        plantilla["quincenas"] = q_dict
+
+        self.db.propagar_variables_esquema(esq_code, plantilla)
+        self._cargar_esquema_visual()
+        self.statusBar().showMessage(f"Quincena '{last_q}' eliminada del esquema.", 4000)
         if hasattr(self, "_cargar_tabla_celdas"):
             self._cargar_tabla_celdas()
 
@@ -3766,6 +4155,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Ocurrió un error al reinicializar el mes o crear el backup:\n{e}")
 
 
+
+
     # ==================================================================
     # ABM de Esquemas de Cálculo
     # ==================================================================
@@ -3780,6 +4171,11 @@ class MainWindow(QMainWindow):
         btn_add.clicked.connect(self._agregar_esquema)
         header.addWidget(btn_add)
 
+        btn_config = QPushButton("Configurar Esquema")
+        btn_config.setToolTip("Configurar variables de entrada y quincenas del esquema seleccionado")
+        btn_config.clicked.connect(self._configurar_esquema_seleccionado)
+        header.addWidget(btn_config)
+
         btn_del = QPushButton("Eliminar Seleccionado")
         btn_del.clicked.connect(self._eliminar_esquema)
         header.addWidget(btn_del)
@@ -3792,8 +4188,8 @@ class MainWindow(QMainWindow):
 
         self.tabla_esquemas = QTableWidget()
         self.tabla_esquemas.setAlternatingRowColors(True)
-        self.tabla_esquemas.setColumnCount(2)
-        self.tabla_esquemas.setHorizontalHeaderLabels(["Código del Esquema", "Nombre descriptivo"])
+        self.tabla_esquemas.setColumnCount(3)
+        self.tabla_esquemas.setHorizontalHeaderLabels(["Código del Esquema", "Nombre descriptivo", "Tipo Liquidación"])
         self.tabla_esquemas.horizontalHeader().setStretchLastSection(True)
         self.tabla_esquemas.verticalHeader().setVisible(False)
         self.tabla_esquemas.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -3808,12 +4204,23 @@ class MainWindow(QMainWindow):
             self.tabla_esquemas.setItem(i, 0, QTableWidgetItem(esq["codigo"]))
             self.tabla_esquemas.setItem(i, 1, QTableWidgetItem(esq["nombre"]))
             
+            # Combo para tipo_liquidacion
+            combo_tipo = QComboBox()
+            combo_tipo.addItems(["mensual", "jornal"])
+            tipo_val = esq["tipo_liquidacion"]
+            idx_tipo = combo_tipo.findText(tipo_val)
+            if idx_tipo >= 0:
+                combo_tipo.setCurrentIndex(idx_tipo)
+            self.tabla_esquemas.setCellWidget(i, 2, combo_tipo)
+            
             # Guardar el código original oculto para saber si se modificó la PK
             item_codigo = self.tabla_esquemas.item(i, 0)
             if item_codigo:
                 item_codigo.setData(Qt.ItemDataRole.UserRole, esq["codigo"])
 
         self.tabla_esquemas.resizeColumnsToContents()
+        self.tabla_esquemas.setColumnWidth(0, 200)
+        self.tabla_esquemas.setColumnWidth(2, 130)
 
     def _agregar_esquema(self):
         row = self.tabla_esquemas.rowCount()
@@ -3821,12 +4228,54 @@ class MainWindow(QMainWindow):
         self.tabla_esquemas.setItem(row, 0, QTableWidgetItem(f"NUEVO_ESQ_{row + 1}"))
         self.tabla_esquemas.setItem(row, 1, QTableWidgetItem("Nuevo Esquema de Cálculo"))
         
+        # Combo para tipo_liquidacion
+        combo_tipo = QComboBox()
+        combo_tipo.addItems(["mensual", "jornal"])
+        self.tabla_esquemas.setCellWidget(row, 2, combo_tipo)
+        
         # Registrar como nuevo (sin original_codigo)
         item_codigo = self.tabla_esquemas.item(row, 0)
         if item_codigo:
             item_codigo.setData(Qt.ItemDataRole.UserRole, None)
             
         self.tabla_esquemas.selectRow(row)
+
+    def _configurar_esquema_seleccionado(self):
+        row = self.tabla_esquemas.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Atención", "Seleccione un esquema de cálculo de la tabla primero.")
+            return
+
+        item_code = self.tabla_esquemas.item(row, 0)
+        item_nombre = self.tabla_esquemas.item(row, 1)
+        if not item_code or not item_nombre:
+            return
+
+        esquema_code = item_code.text().strip().upper()
+        nombre_esquema = item_nombre.text().strip() or "Nuevo Esquema"
+        combo_tipo = self.tabla_esquemas.cellWidget(row, 2)
+        tipo_liq = combo_tipo.currentText() if combo_tipo else "mensual"
+        orig_codigo = item_code.data(Qt.ItemDataRole.UserRole)
+
+        if not esquema_code:
+            QMessageBox.warning(self, "Atención", "El código del esquema no puede estar vacío.")
+            return
+
+        # Inicializar/guardar el esquema en la base de datos para satisfacer la Foreign Key
+        try:
+            self.db.guardar_esquema(orig_codigo, esquema_code, nombre_esquema, tipo_liq)
+            item_code.setData(Qt.ItemDataRole.UserRole, esquema_code)
+        except Exception as e:
+            QMessageBox.critical(self, "Error al guardar esquema", f"No se pudo inicializar el esquema en la base de datos:\n{e}")
+            return
+
+        dlg = ConfigurarEsquemaDialog(self, self.db, esquema_code, tipo_liq)
+        dlg.exec()
+
+        self._cargar_lista_empleados()
+        self._cargar_combos_empleado()
+        self._recargar_combos_esquemas()
+        self.statusBar().showMessage(f"Variables del esquema '{esquema_code}' actualizadas.", 4000)
 
     def _eliminar_esquema(self):
         row = self.tabla_esquemas.currentRow()
@@ -3879,7 +4328,10 @@ class MainWindow(QMainWindow):
                 continue
                 
             try:
-                self.db.guardar_esquema(orig_codigo, nuevo_codigo, nombre)
+                # Leer tipo_liquidacion del combo
+                combo_tipo = self.tabla_esquemas.cellWidget(i, 2)
+                tipo_liq = combo_tipo.currentText() if combo_tipo else "mensual"
+                self.db.guardar_esquema(orig_codigo, nuevo_codigo, nombre, tipo_liq)
             except Exception as e:
                 errores.append(f"Fila {i+1} ({nuevo_codigo}): {e}")
                 
@@ -3907,16 +4359,20 @@ class MainWindow(QMainWindow):
             self.combo_filter_esquema.setCurrentIndex(0)
         self.combo_filter_esquema.blockSignals(False)
         
-        # 2. Combo en el formulario de empleados
+        # 2. Combo en el formulario de empleados (filtrado por tipo)
         current_emp_esq = self.inp_esquema.currentData()
+        es_jornal = self.inp_tipo.currentText() == "jornal"
+        tipo_filtro = "jornal" if es_jornal else "mensual"
         self.inp_esquema.blockSignals(True)
         self.inp_esquema.clear()
         for esq in esquemas:
-            self.inp_esquema.addItem(esq["nombre"], esq["codigo"])
+            esq_tipo = esq["tipo_liquidacion"]
+            if esq_tipo == tipo_filtro:
+                self.inp_esquema.addItem(esq["nombre"], esq["codigo"])
         idx = self.inp_esquema.findData(current_emp_esq)
         if idx >= 0:
             self.inp_esquema.setCurrentIndex(idx)
-        else:
+        elif self.inp_esquema.count() > 0:
             self.inp_esquema.setCurrentIndex(0)
         self.inp_esquema.blockSignals(False)
 
@@ -3976,9 +4432,9 @@ class MainWindow(QMainWindow):
             # Controles Empleados
             if hasattr(self, "btn_nuevo"): self.btn_nuevo.setVisible(False)
             if hasattr(self, "btn_eliminar"): self.btn_eliminar.setVisible(False)
-            if hasattr(self, "btn_add_var"): self.btn_add_var.setVisible(False)
-            if hasattr(self, "btn_add_quincena"): self.btn_add_quincena.setVisible(False)
-            if hasattr(self, "btn_del_quincena"): self.btn_del_quincena.setVisible(False)
+            #if hasattr(self, "btn_add_var"): self.btn_add_var.setVisible(False)
+            #if hasattr(self, "btn_add_quincena"): self.btn_add_quincena.setVisible(False)
+            #if hasattr(self, "btn_del_quincena"): self.btn_del_quincena.setVisible(False)
                 
             # Controles Globales (El botón Nuevo mes ahora es una Acción del Menú)
             if hasattr(self, "btn_add_global"): self.btn_add_global.setVisible(False)
@@ -3998,11 +4454,11 @@ class MainWindow(QMainWindow):
                 
             if hasattr(self, "btn_nuevo"): self.btn_nuevo.setVisible(True)
             if hasattr(self, "btn_eliminar"): self.btn_eliminar.setVisible(True)
-            if hasattr(self, "btn_add_var"): self.btn_add_var.setVisible(True)
+            #if hasattr(self, "btn_add_var"): self.btn_add_var.setVisible(True)
                 
             is_jornal = hasattr(self, "inp_tipo") and self.inp_tipo.currentText() == "jornal"
-            if hasattr(self, "btn_add_quincena"): self.btn_add_quincena.setVisible(is_jornal)
-            if hasattr(self, "btn_del_quincena"): self.btn_del_quincena.setVisible(is_jornal)
+            #if hasattr(self, "btn_add_quincena"): self.btn_add_quincena.setVisible(is_jornal)
+            #if hasattr(self, "btn_del_quincena"): self.btn_del_quincena.setVisible(is_jornal)
                 
             if hasattr(self, "btn_add_global"): self.btn_add_global.setVisible(True)
             if hasattr(self, "btn_del_global"): self.btn_del_global.setVisible(True)

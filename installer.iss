@@ -4,7 +4,7 @@
 ; =====================================================================
 
 #define MyAppName "Liquidación de Sueldos"
-#define MyAppVersion "0.1"
+#define MyAppVersion "0.3"
 #define MyAppPublisher "Sistema de Liquidación"
 #define MyAppExeName "LiquidacionSueldos.exe"
 
@@ -25,7 +25,7 @@ PrivilegesRequiredOverridesAllowed=commandline dialog
 
 ; Archivo ejecutable de salida del instalador
 OutputDir=.
-OutputBaseFilename=LiquidacionSueldos_Setup_v2.0
+OutputBaseFilename=LiquidacionSueldos_Setup_v0.3
 Compression=lzma2/ultra64
 SolidCompression=yes
 
