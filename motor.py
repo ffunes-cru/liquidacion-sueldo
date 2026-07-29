@@ -6,10 +6,13 @@ Soporta inyección de categorías jornaleras, esquemas de cálculo, variables gl
 
 import calendar
 import json
+import logging
 import re
 from datetime import datetime, date
 from simpleeval import SimpleEval, DEFAULT_OPERATORS
 from database import DatabaseManager
+
+logger = logging.getLogger(__name__)
 
 
 class QuincenaNamespace:

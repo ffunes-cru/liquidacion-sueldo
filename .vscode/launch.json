@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Archivo actual (Virtual Env)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "python": "${workspaceFolder}/venv/bin/python",
+            "console": "integratedTerminal"
+        }
+    ]
+}

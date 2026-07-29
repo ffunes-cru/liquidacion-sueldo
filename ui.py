@@ -5,8 +5,11 @@ Menú para importar/exportar la base de datos (SQLite, Excel, CSV).
 """
 
 import json
+import logging
 import os
 import shutil
+
+logger = logging.getLogger(__name__)
 
 from PyQt6.QtCore import Qt, QSize, QDate, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QColor, QActionGroup
@@ -389,6 +392,12 @@ class ConfiguracionDialog(QDialog):
         self.chk_habilitar_ia.setChecked(ia_val)
         form.addRow(self.chk_habilitar_ia)
 
+        # Activar Modo Debug
+        self.chk_modo_debug = QCheckBox("Activar Modo Debug (Trazado ultra-verboso en app_debug.log y consola)")
+        debug_val = self.db.obtener_config("modo_debug", "true").lower() == "true"
+        self.chk_modo_debug.setChecked(debug_val)
+        form.addRow(self.chk_modo_debug)
+
         # Clave API de Gemini
         self.inp_gemini_key = QLineEdit()
         self.inp_gemini_key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -420,10 +429,17 @@ class ConfiguracionDialog(QDialog):
         inmutable_str = "true" if self.chk_inmutable.isChecked() else "false"
         visual_str = "true" if self.chk_usar_esquema_visual.isChecked() else "false"
         ia_str = "true" if self.chk_habilitar_ia.isChecked() else "false"
+        debug_str = "true" if self.chk_modo_debug.isChecked() else "false"
+
         self.db.guardar_config("modelo_empleado_inmutable", inmutable_str)
         self.db.guardar_config("usar_esquema_visual", visual_str)
         self.db.guardar_config("habilitar_asistente_ia", ia_str)
+        self.db.guardar_config("modo_debug", debug_str)
         self.db.guardar_config("gemini_api_key", self.inp_gemini_key.text().strip())
+
+        level = logging.DEBUG if self.chk_modo_debug.isChecked() else logging.INFO
+        logging.getLogger().setLevel(level)
+        logger.info(f"[UI ACTION] Configuración guardada por usuario. Modo Debug: {debug_str} (Nivel: {logging.getLevelName(level)})")
 
         if hasattr(self.parent_win, "_actualizar_modo_vista"):
             self.parent_win._actualizar_modo_vista()
@@ -860,6 +876,8 @@ class ConfigurarEsquemaDialog(QDialog):
         self.esquema_codigo = esquema_codigo
         self.tipo_liquidacion = tipo_liquidacion.lower()
 
+        logger.info(f"[UI DIALOG - CONFIG ESQUEMA] Abriendo modal para esquema '{self.esquema_codigo}' (tipo: {self.tipo_liquidacion})")
+
         self.setWindowTitle(f"Configurar Variables — Esquema '{self.esquema_codigo}' ({self.tipo_liquidacion.upper()})")
         self.setModal(True)
         self.resize(560, 420)
@@ -898,6 +916,11 @@ class ConfigurarEsquemaDialog(QDialog):
             self.btn_del_q.clicked.connect(self._eliminar_quincena)
             btn_bar.addWidget(self.btn_del_q)
 
+        self.btn_refresh = QPushButton("Refrescar")
+        self.btn_refresh.setToolTip("Descartar cambios y recargar la configuración del esquema desde la base de datos")
+        self.btn_refresh.clicked.connect(self._cargar_variables)
+        btn_bar.addWidget(self.btn_refresh)
+
         btn_bar.addStretch()
         main_layout.addLayout(btn_bar)
 
@@ -915,8 +938,11 @@ class ConfigurarEsquemaDialog(QDialog):
 
     def _cargar_variables(self):
         self._cargando = True
+        logger.debug(f"[UI DIALOG - CONFIG ESQUEMA] Recargando variables y plantilla para esquema '{self.esquema_codigo}'...")
         self.tab_widget.clear()
         plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
+        font_normal = QFont()
+        font_normal.setBold(False)
 
         if self.tipo_liquidacion == "jornal":
             q_dict = plantilla.get("quincenas", {"Q1": {}})
@@ -932,9 +958,12 @@ class ConfigurarEsquemaDialog(QDialog):
                 table.setRowCount(len(vars_map))
                 for i, (k, val) in enumerate(vars_map.items()):
                     item_k = QTableWidgetItem(k)
+                    item_k.setFont(font_normal)
                     item_k.setData(Qt.ItemDataRole.UserRole, k)
+                    item_v = QTableWidgetItem(str(val))
+                    item_v.setFont(font_normal)
                     table.setItem(i, 0, item_k)
-                    table.setItem(i, 1, QTableWidgetItem(str(val)))
+                    table.setItem(i, 1, item_v)
                 table.itemChanged.connect(self._on_table_item_changed)
                 t_lay.addWidget(table)
                 tab.setProperty("table_vars", table)
@@ -953,9 +982,12 @@ class ConfigurarEsquemaDialog(QDialog):
             for i, k in enumerate(keys_list):
                 val = plantilla.get(k, 0)
                 item_k = QTableWidgetItem(k)
+                item_k.setFont(font_normal)
                 item_k.setData(Qt.ItemDataRole.UserRole, k)
+                item_v = QTableWidgetItem(str(val))
+                item_v.setFont(font_normal)
                 table.setItem(i, 0, item_k)
-                table.setItem(i, 1, QTableWidgetItem(str(val)))
+                table.setItem(i, 1, item_v)
             table.itemChanged.connect(self._on_table_item_changed)
             t_lay.addWidget(table)
             tab.setProperty("table_vars", table)
@@ -969,6 +1001,7 @@ class ConfigurarEsquemaDialog(QDialog):
             return
         clave_vieja = item.data(Qt.ItemDataRole.UserRole)
         clave_nueva = item.text().strip().lower().replace(" ", "_")
+        logger.debug(f"[UI DIALOG - CONFIG ESQUEMA] Modificado nombre de variable en celda: '{clave_vieja}' -> '{clave_nueva}'")
         if clave_vieja and clave_nueva and clave_vieja != clave_nueva:
             self.db.renombrar_variable_esquema(self.esquema_codigo, clave_vieja, clave_nueva)
             self._cargar_variables()
@@ -986,6 +1019,7 @@ class ConfigurarEsquemaDialog(QDialog):
         if not item:
             return
         clave_vieja = item.data(Qt.ItemDataRole.UserRole) or item.text().strip()
+        logger.info(f"[UI ACTION - CONFIG ESQUEMA] Clic en 'Renombrar Variable' para '{clave_vieja}' en esquema '{self.esquema_codigo}'")
 
         nueva_clave, ok = QInputDialog.getText(
             self, "Renombrar Variable",
@@ -995,52 +1029,60 @@ class ConfigurarEsquemaDialog(QDialog):
         if ok and nueva_clave.strip():
             nueva_clave = nueva_clave.strip().lower().replace(" ", "_")
             if nueva_clave != clave_vieja:
+                logger.info(f"[UI ACTION - CONFIG ESQUEMA] Confirmado renombrado de '{clave_vieja}' -> '{nueva_clave}'")
                 self.db.renombrar_variable_esquema(self.esquema_codigo, clave_vieja, nueva_clave)
                 self._cargar_variables()
 
     def _agregar_variable(self):
+        logger.info(f"[UI ACTION - CONFIG ESQUEMA] Clic en '+ Agregar Variable' en esquema '{self.esquema_codigo}'")
         var_name, ok = QInputDialog.getText(self, "Nueva Variable al Esquema", "Nombre o código de la variable de entrada (ej: presentismo):")
         if not ok or not var_name.strip():
             return
         var_code = var_name.strip().lower().replace(" ", "_")
+        logger.info(f"[UI ACTION - CONFIG ESQUEMA] Creando nueva variable '{var_code}' para esquema '{self.esquema_codigo}'")
 
-        plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
-        if self.tipo_liquidacion == "jornal":
-            q_dict = plantilla.get("quincenas", {"Q1": {}})
-            for q in q_dict:
-                q_dict[q][var_code] = 0
-            plantilla["quincenas"] = q_dict
-        else:
-            plantilla[var_code] = 0
+        try:
+            plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
+            if self.tipo_liquidacion == "jornal":
+                q_dict = plantilla.get("quincenas", {"Q1": {}})
+                for q in q_dict:
+                    q_dict[q][var_code] = 0
+                plantilla["quincenas"] = q_dict
+            else:
+                plantilla[var_code] = 0
 
-        secciones = self.db.listar_secciones()
-        if not secciones:
-            self.db.conn.execute("INSERT OR IGNORE INTO secciones (codigo, titulo, orden) VALUES ('COMPOSICION', 'Composición del Recibo', 10)")
-            self.db.conn.commit()
             secciones = self.db.listar_secciones()
-        sec_code = secciones[0]["codigo"]
-        max_orden = self.db.conn.execute("SELECT MAX(orden) FROM celdas_calculo WHERE esquema_codigo = ?", (self.esquema_codigo,)).fetchone()[0] or 0
+            if not secciones:
+                self.db.guardar_seccion("COMPOSICION", "Composición del Recibo", 10)
+                secciones = self.db.listar_secciones()
+            sec_code = secciones[0]["codigo"]
+            
+            celdas_actuales = self.db.listar_celdas_por_esquema(self.esquema_codigo)
+            max_orden = max((c["orden"] for c in celdas_actuales), default=0)
 
-        self.db.guardar_celda(
-            celda_id=None,
-            seccion_codigo=sec_code,
-            codigo_variable=var_code,
-            descripcion=var_name.strip(),
-            condicion="",
-            formula_unidad="",
-            formula_base="",
-            formula_monto=var_code,
-            orden=max_orden + 10,
-            esquema_codigo=self.esquema_codigo,
-            tipo_calculo="variable",
-            simple_porcentaje=None,
-            simple_base_variable=None,
-            simple_monto_fijo=None,
-            visible_recibo=1
-        )
+            self.db.guardar_celda(
+                celda_id=None,
+                seccion_codigo=sec_code,
+                codigo_variable=var_code,
+                descripcion=var_name.strip(),
+                condicion="",
+                formula_unidad="",
+                formula_base="",
+                formula_monto=var_code,
+                orden=max_orden + 10,
+                esquema_codigo=self.esquema_codigo,
+                tipo_calculo="variable",
+                simple_porcentaje=None,
+                simple_base_variable=None,
+                simple_monto_fijo=None,
+                visible_recibo=1
+            )
 
-        self.db.propagar_variables_esquema(self.esquema_codigo, plantilla)
-        self._cargar_variables()
+            self.db.propagar_variables_esquema(self.esquema_codigo, plantilla)
+            self._cargar_variables()
+        except Exception as e:
+            logger.error(f"[UI DIALOG - CONFIG ESQUEMA] Error al agregar variable '{var_code}': {e}", exc_info=True)
+            QMessageBox.critical(self, "Error al agregar variable", f"No se pudo agregar la variable '{var_code}':\n{e}")
 
     def _eliminar_variable(self):
         current_tab = self.tab_widget.currentWidget()
@@ -1055,25 +1097,51 @@ class ConfigurarEsquemaDialog(QDialog):
         if not item:
             return
         var_code = item.text().strip()
+        logger.info(f"[UI ACTION - CONFIG ESQUEMA] Clic en '− Eliminar Variable' para '{var_code}' en esquema '{self.esquema_codigo}'")
 
-        resp = QMessageBox.question(
-            self, "Confirmar Eliminación",
-            f"¿Desea eliminar la variable '{var_code}' del esquema '{self.esquema_codigo}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        # Auditar si existen empleados con valores guardados para esta variable
+        emp_count, ejemplo_nombre = self.db.contar_empleados_con_variable(self.esquema_codigo, var_code)
+
+        if emp_count > 0:
+            msg = (
+                f"⚠️ ATENCIÓN: La variable '{var_code}' contiene valores cargados en "
+                f"{emp_count} empleado(s) (ej: {ejemplo_nombre}).\n\n"
+                f"Al eliminar esta variable del esquema '{self.esquema_codigo}', se perderán "
+                f"dichos datos guardados en las fichas de todos los empleados asignados.\n\n"
+                f"¿Desea eliminar la variable '{var_code}' de todas formas?"
+            )
+            resp = QMessageBox.warning(
+                self, "Advertencia — Eliminación de Variable con Datos",
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+        else:
+            resp = QMessageBox.question(
+                self, "Confirmar Eliminación",
+                f"¿Desea eliminar la variable '{var_code}' del esquema '{self.esquema_codigo}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
         if resp == QMessageBox.StandardButton.Yes:
-            plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
-            if "quincenas" in plantilla and isinstance(plantilla["quincenas"], dict):
-                for q in plantilla["quincenas"]:
-                    plantilla["quincenas"][q].pop(var_code, None)
-            else:
-                plantilla.pop(var_code, None)
+            try:
+                plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
+                if "quincenas" in plantilla and isinstance(plantilla["quincenas"], dict):
+                    for q in plantilla["quincenas"]:
+                        plantilla["quincenas"][q].pop(var_code, None)
+                else:
+                    plantilla.pop(var_code, None)
 
-            self.db.conn.execute("DELETE FROM celdas_calculo WHERE esquema_codigo = ? AND codigo_variable = ?", (self.esquema_codigo, var_code))
-            self.db.conn.commit()
-
-            self.db.propagar_variables_esquema(self.esquema_codigo, plantilla)
-            self._cargar_variables()
+                self.db.eliminar_variable_esquema(self.esquema_codigo, var_code)
+                self.db.propagar_variables_esquema(self.esquema_codigo, plantilla)
+                self._cargar_variables()
+                logger.info(f"[UI DIALOG - CONFIG ESQUEMA] Variable '{var_code}' eliminada del esquema '{self.esquema_codigo}' exitosamente.")
+            except Exception as e:
+                logger.error(f"[UI DIALOG - CONFIG ESQUEMA] Error al eliminar variable '{var_code}' del esquema '{self.esquema_codigo}': {e}", exc_info=True)
+                QMessageBox.critical(
+                    self, "Error al eliminar variable",
+                    f"No se pudo eliminar la variable '{var_code}' del esquema:\n{e}"
+                )
 
     def _agregar_quincena(self):
         plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
@@ -1318,7 +1386,13 @@ class MainWindow(QMainWindow):
         ]
 
         # Aplicar visibilidad inicial de pestañas según la configuración
+        self.tabs.currentChanged.connect(self._on_tab_cambiada)
         self._actualizar_modo_vista()
+
+    def _on_tab_cambiada(self, idx: int):
+        if idx >= 0:
+            nombre_tab = self.tabs.tabText(idx)
+            logger.info(f"[UI EVENT] Pestaña seleccionada: índice {idx} ('{nombre_tab}')")
 
     # ==================================================================
     # PESTAÑA 1 — EMPLEADOS
@@ -1426,15 +1500,21 @@ class MainWindow(QMainWindow):
         self.btn_del_quincena.setVisible(False)
         btn_vars_bar.addWidget(self.btn_del_quincena)
 
-        btn_vars_bar.addStretch()
-        vars_layout.addLayout(btn_vars_bar)
-
         group_vars.setLayout(vars_layout)
         right_layout.addWidget(group_vars)
 
+        btn_emp_bar = QHBoxLayout()
+
+        btn_refresh_emp = QPushButton("Refrescar")
+        btn_refresh_emp.setToolTip("Descartar cambios no guardados en la ficha del empleado y recargar desde la base de datos")
+        btn_refresh_emp.clicked.connect(lambda: self._on_empleado_seleccionado(self.lista_empleados.currentRow()))
+        btn_emp_bar.addWidget(btn_refresh_emp)
+
         btn_guardar = QPushButton("Guardar Empleado")
         btn_guardar.clicked.connect(self._guardar_empleado)
-        right_layout.addWidget(btn_guardar)
+        btn_emp_bar.addWidget(btn_guardar)
+
+        right_layout.addLayout(btn_emp_bar)
 
         splitter.addWidget(right)
         splitter.setSizes([280, 700])
@@ -1554,6 +1634,7 @@ class MainWindow(QMainWindow):
         self._cargando_empleado = True
         try:
             emp = self._empleados_data[row]
+            logger.debug(f"[UI EVENT] Empleado seleccionado en lista: fila {row}, id={emp.get('id')}, legajo='{emp.get('legajo')}', nombre='{emp.get('nombre_completo')}'")
             self.inp_legajo.setText(emp["legajo"] or "")
             self.inp_nombre.setText(emp["nombre_completo"] or "")
             self.inp_cuil.setText(emp.get("cuil") or "")
@@ -1580,7 +1661,8 @@ class MainWindow(QMainWindow):
 
             try:
                 v_raw = json.loads(emp["variables_calculo"] or "{}")
-            except Exception:
+            except Exception as e:
+                logger.warning(f"[UI EVENT] Error al deserializar variables_calculo del empleado id={emp.get('id')}: {e}", exc_info=True)
                 v_raw = {}
             v_clean = self.db.adaptar_variables_a_esquema(v_raw, emp["esquema_codigo"], es_jornal, emp_id=emp["id"])
             self._set_variables_json(json.dumps(v_clean, ensure_ascii=False))
@@ -1593,6 +1675,7 @@ class MainWindow(QMainWindow):
         if row < 0 or row >= len(self._empleados_data):
             return
         emp = self._empleados_data[row]
+        logger.info(f"[UI ACTION] Clic en 'Duplicar Empleado' para id={emp.get('id')} legajo='{emp.get('legajo')}'")
         
         nuevo_legajo = f"{emp['legajo']}_copia" if emp['legajo'] else "0000"
         nuevo_nombre = f"{emp['nombre_completo']} (Copia)"
@@ -1630,7 +1713,11 @@ class MainWindow(QMainWindow):
             emp_id = self._empleados_data[row]["id"]
 
         nombre = self.inp_nombre.text().strip()
+        legajo = self.inp_legajo.text().strip()
+        logger.info(f"[UI ACTION] Clic en 'Guardar Empleado' para emp_id={emp_id}, legajo='{legajo}', nombre='{nombre}'")
+
         if not nombre:
+            logger.warning("[UI ACTION] Intento de guardar empleado sin nombre obligatorio.")
             QMessageBox.warning(self, "Error", "El nombre es obligatorio.")
             return
 
@@ -1642,7 +1729,7 @@ class MainWindow(QMainWindow):
         cuil = self.inp_cuil.text().strip()
 
         self.db.guardar_empleado(
-            emp_id, self.inp_legajo.text().strip(),
+            emp_id, legajo,
             nombre, self.inp_tipo.currentText(), variables_txt, esquema, cat_id, fecha_ing, cuil
         )
 
@@ -1652,8 +1739,8 @@ class MainWindow(QMainWindow):
             try:
                 d_vars = json.loads(variables_txt)
                 self.db.propagar_variables_esquema(esquema, d_vars, emp_id_modificado=emp_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[UI EVENT] Error al propagar variables de esquema '{esquema}': {e}", exc_info=True)
 
         # Actualizar los datos originales guardados para permitir reversiones futuras
         self._emp_original_tipo = self.inp_tipo.currentText()
@@ -1991,6 +2078,11 @@ class MainWindow(QMainWindow):
         btn_del.clicked.connect(self._eliminar_categoria)
         header.addWidget(btn_del)
 
+        btn_refresh = QPushButton("Refrescar")
+        btn_refresh.setToolTip("Descartar cambios no guardados y recargar categorías desde la base de datos")
+        btn_refresh.clicked.connect(self._cargar_tabla_categorias)
+        header.addWidget(btn_refresh)
+
         btn_save = QPushButton("Guardar Cambios")
         btn_save.clicked.connect(self._guardar_categorias)
         header.addWidget(btn_save)
@@ -2004,16 +2096,37 @@ class MainWindow(QMainWindow):
         self.tabla_categorias.horizontalHeader().setStretchLastSection(True)
         self.tabla_categorias.verticalHeader().setVisible(False)
         self.tabla_categorias.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabla_categorias.itemChanged.connect(self._on_tabla_categorias_item_changed)
         layout.addWidget(self.tabla_categorias)
 
         self._cargar_tabla_categorias()
 
+    def _on_tabla_categorias_item_changed(self, item: QTableWidgetItem):
+        if getattr(self, "_cargando_categorias", False):
+            return
+        row = item.row()
+        logger.debug(f"[UI EVENT - CATEGORIAS] Modificada fila {row}, col {item.column()} -> Negrita")
+        font = QFont()
+        font.setBold(True)
+        for col in range(self.tabla_categorias.columnCount()):
+            it = self.tabla_categorias.item(row, col)
+            if it:
+                it.setFont(font)
+
     def _cargar_tabla_categorias(self):
+        self._cargando_categorias = True
         cats = self.db.listar_categorias_jornal()
+        logger.debug(f"[UI EVENT - CATEGORIAS] Recargando tabla de categorías ({len(cats)} registros)...")
         self.tabla_categorias.setRowCount(len(cats))
+        font_normal = QFont()
+        font_normal.setBold(False)
         for i, c in enumerate(cats):
-            self.tabla_categorias.setItem(i, 0, QTableWidgetItem(c["nombre"]))
-            self.tabla_categorias.setItem(i, 1, QTableWidgetItem(f"{c['valor_hora']:.2f}"))
+            it0 = QTableWidgetItem(c["nombre"])
+            it0.setFont(font_normal)
+            it1 = QTableWidgetItem(f"{c['valor_hora']:.2f}")
+            it1.setFont(font_normal)
+            self.tabla_categorias.setItem(i, 0, it0)
+            self.tabla_categorias.setItem(i, 1, it1)
             
             # ID oculto
             item_nombre = self.tabla_categorias.item(i, 0)
@@ -2022,6 +2135,7 @@ class MainWindow(QMainWindow):
 
         self.tabla_categorias.resizeColumnsToContents()
         self.tabla_categorias.setColumnWidth(0, 400)
+        self._cargando_categorias = False
 
     def _guardar_categorias(self):
         errores = []
@@ -2132,9 +2246,18 @@ class MainWindow(QMainWindow):
         group_edit.setLayout(form)
         right_layout.addWidget(group_edit)
 
+        btn_sec_bar = QHBoxLayout()
+
+        btn_refresh_sec = QPushButton("Refrescar")
+        btn_refresh_sec.setToolTip("Descartar cambios no guardados en el formulario y recargar secciones desde la base de datos")
+        btn_refresh_sec.clicked.connect(self._cargar_tabla_secciones)
+        btn_sec_bar.addWidget(btn_refresh_sec)
+
         btn_guardar_sec = QPushButton("Guardar Sección")
         btn_guardar_sec.clicked.connect(self._guardar_seccion)
-        right_layout.addWidget(btn_guardar_sec)
+        btn_sec_bar.addWidget(btn_guardar_sec)
+
+        right_layout.addLayout(btn_sec_bar)
 
         right_layout.addStretch()
         splitter.addWidget(right)
@@ -2142,6 +2265,8 @@ class MainWindow(QMainWindow):
         self._cargar_tabla_secciones()
 
     def _cargar_tabla_secciones(self):
+        current_row = self.tabla_secciones.currentRow()
+        self.tabla_secciones.blockSignals(True)
         self.tabla_secciones.setRowCount(0)
         self._secciones_data = self.db.listar_secciones()
         for i, sec in enumerate(self._secciones_data):
@@ -2151,7 +2276,13 @@ class MainWindow(QMainWindow):
             self.tabla_secciones.setItem(i, 2, QTableWidgetItem(sec["titulo"]))
             self.tabla_secciones.setItem(i, 3, QTableWidgetItem(str(sec.get("orden", 0))))
             
+        self.tabla_secciones.blockSignals(False)
         self._refrescar_secciones_en_combos()
+
+        target = current_row if (0 <= current_row < len(self._secciones_data)) else (0 if self._secciones_data else -1)
+        if target >= 0:
+            self.tabla_secciones.selectRow(target)
+            self._on_seccion_seleccionada(None, None)
 
     def _on_seccion_seleccionada(self, current, previous):
         row = self.tabla_secciones.currentRow()
@@ -2232,9 +2363,13 @@ class MainWindow(QMainWindow):
         self.btn_del_global.clicked.connect(self._eliminar_variable_global)
         top_layout.addWidget(self.btn_del_global)
 
+        btn_refresh = QPushButton("Refrescar")
+        btn_refresh.setToolTip("Descartar cambios no guardados y recargar variables desde la base de datos")
+        btn_refresh.clicked.connect(self._cargar_tabla_globales)
+        top_layout.addWidget(btn_refresh)
+
         btn_save = QPushButton("Guardar Cambios")
         btn_save.clicked.connect(self._guardar_variables_globales)
-        # Resaltamos el botón de guardar para mejorar la experiencia
         top_layout.addWidget(btn_save)
 
         layout.addLayout(top_layout)
@@ -2248,6 +2383,7 @@ class MainWindow(QMainWindow):
         self.tabla_globales.setAlternatingRowColors(True)
         self.tabla_globales.verticalHeader().setVisible(False)
         self.tabla_globales.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabla_globales.itemChanged.connect(self._on_tabla_globales_item_changed)
         
         # Ajuste de tamaño inteligente de columnas
         self.tabla_globales.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
@@ -2260,20 +2396,36 @@ class MainWindow(QMainWindow):
         
         self._cargar_tabla_globales()
 
+    def _on_tabla_globales_item_changed(self, item: QTableWidgetItem):
+        if getattr(self, "_cargando_globales", False):
+            return
+        row = item.row()
+        font = QFont()
+        font.setBold(True)
+        for col in range(self.tabla_globales.columnCount()):
+            it = self.tabla_globales.item(row, col)
+            if it:
+                it.setFont(font)
+
     def _cargar_tabla_globales(self):
+        self._cargando_globales = True
         self.tabla_globales.blockSignals(True)
         variables = self.db.listar_variables_globales()
         self.tabla_globales.setRowCount(len(variables))
 
         is_user = hasattr(self, "modo_actual") and self.modo_actual == "Usuario"
+        font_normal = QFont()
+        font_normal.setBold(False)
         
         for i, var in enumerate(variables):
             item_codigo = QTableWidgetItem(var["codigo"])
-            # Guardamos el ID en UserRole para rastrear cambios en la BD
+            item_codigo.setFont(font_normal)
             item_codigo.setData(Qt.ItemDataRole.UserRole, var["id"])
             
             item_valor = QTableWidgetItem(var["valor"])
+            item_valor.setFont(font_normal)
             item_desc = QTableWidgetItem(var["descripcion"])
+            item_desc.setFont(font_normal)
 
             if is_user:
                 item_codigo.setFlags(item_codigo.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -2284,6 +2436,7 @@ class MainWindow(QMainWindow):
             self.tabla_globales.setItem(i, 2, item_desc)
 
         self.tabla_globales.blockSignals(False)
+        self._cargando_globales = False
 
     def _agregar_variable_global(self):
         # Creamos una entrada básica temporal para que el usuario la personalice
@@ -2381,6 +2534,11 @@ class MainWindow(QMainWindow):
         btn_del.clicked.connect(self._eliminar_celda)
         filter_layout.addWidget(btn_del)
 
+        btn_refresh = QPushButton("Refrescar")
+        btn_refresh.setToolTip("Descartar cambios no guardados y recargar celdas desde la base de datos")
+        btn_refresh.clicked.connect(self._cargar_tabla_celdas)
+        filter_layout.addWidget(btn_refresh)
+
         btn_save = QPushButton("Guardar Cambios")
         btn_save.clicked.connect(self._guardar_celdas)
         filter_layout.addWidget(btn_save)
@@ -2403,6 +2561,7 @@ class MainWindow(QMainWindow):
         self.tabla_celdas.verticalHeader().setVisible(False)
         self.tabla_celdas.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabla_celdas.itemSelectionChanged.connect(self._on_celda_seleccionada_tabla)
+        self.tabla_celdas.itemChanged.connect(self._on_tabla_celdas_item_changed)
         splitter.addWidget(self.tabla_celdas)
 
         # Editor Simple / Avanzado (Inferior)
@@ -2529,16 +2688,34 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _on_esquema_filtro_cambiado(self):
+        esq = self.combo_filter_esquema.currentData()
+        logger.info(f"[UI EVENT - ESQUEMA VISUAL] Cambio de esquema seleccionado a '{esq}'")
         self._cargar_tabla_celdas()
+
+    def _on_tabla_celdas_item_changed(self, item: QTableWidgetItem):
+        if getattr(self, "_cargando_celdas", False):
+            return
+        row = item.row()
+        logger.debug(f"[UI EVENT - ESQUEMA VISUAL] Modificada celda en fila {row}, col {item.column()}: '{item.text()}' -> Negrita")
+        font = QFont()
+        font.setBold(True)
+        for col in range(self.tabla_celdas.columnCount()):
+            it = self.tabla_celdas.item(row, col)
+            if it:
+                it.setFont(font)
 
     def _cargar_tabla_celdas(self):
         esq = self.combo_filter_esquema.currentData()
         if not esq:
             return
 
+        self._cargando_celdas = True
         self.tabla_celdas.blockSignals(True)
         celdas = self.db.listar_celdas_por_esquema(esq)
+        logger.debug(f"[UI EVENT - ESQUEMA VISUAL] Recargando {len(celdas)} celdas para esquema '{esq}'")
         self.tabla_celdas.setRowCount(len(celdas))
+        font_normal = QFont()
+        font_normal.setBold(False)
 
         secciones = [s["codigo"] for s in self.db.listar_secciones()]
 
@@ -2548,16 +2725,24 @@ class MainWindow(QMainWindow):
             idx = combo.findText(c["seccion_codigo"])
             if idx >= 0:
                 combo.setCurrentIndex(idx)
+            combo.currentIndexChanged.connect(lambda _, r=i: self._on_tabla_celdas_combo_changed(r))
             self.tabla_celdas.setCellWidget(i, 0, combo)
 
             # Columnas editables del grid (Código, Descripción, Orden)
-            self.tabla_celdas.setItem(i, 1, QTableWidgetItem(c["codigo_variable"]))
-            self.tabla_celdas.setItem(i, 2, QTableWidgetItem(c["descripcion"]))
-            self.tabla_celdas.setItem(i, 9, QTableWidgetItem(str(c["orden"])))
+            it1 = QTableWidgetItem(c["codigo_variable"])
+            it1.setFont(font_normal)
+            it2 = QTableWidgetItem(c["descripcion"])
+            it2.setFont(font_normal)
+            it9 = QTableWidgetItem(str(c["orden"]))
+            it9.setFont(font_normal)
+            self.tabla_celdas.setItem(i, 1, it1)
+            self.tabla_celdas.setItem(i, 2, it2)
+            self.tabla_celdas.setItem(i, 9, it9)
 
-            # --- NUEVO: Hacer celdas calculadas, fórmulas y condiciones estrictamente READ-ONLY en el grid ---
+            # --- NUEVO: Hacer celdas calculadas, fórmulas y condiciones strictly READ-ONLY en el grid ---
             def make_readonly_item(text):
                 it = QTableWidgetItem(text)
+                it.setFont(font_normal)
                 it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 return it
 
@@ -2604,6 +2789,18 @@ class MainWindow(QMainWindow):
         self.tabla_celdas.setColumnWidth(2, 180)
         self.tabla_celdas.setColumnWidth(3, 140)
         self.tabla_celdas.setColumnWidth(4, 100)
+        self._cargando_celdas = False
+
+    def _on_tabla_celdas_combo_changed(self, row: int):
+        if getattr(self, "_cargando_celdas", False):
+            return
+        logger.debug(f"[UI EVENT - ESQUEMA VISUAL] Cambiada sección en combo de la fila {row} -> Negrita")
+        font = QFont()
+        font.setBold(True)
+        for col in range(self.tabla_celdas.columnCount()):
+            it = self.tabla_celdas.item(row, col)
+            if it:
+                it.setFont(font)
         self.tabla_celdas.setColumnWidth(5, 150)
         self.tabla_celdas.setColumnWidth(6, 150)
         self.tabla_celdas.setColumnWidth(7, 240)
@@ -2622,6 +2819,8 @@ class MainWindow(QMainWindow):
         if not item_codigo:
             return
 
+        c_code = item_codigo.text().strip()
+        logger.debug(f"[UI EVENT - ESQUEMA VISUAL] Selección de celda cambiada a fila {row} (código: '{c_code}')")
         self._is_loading_cell = True
 
         self.spin_pct_valor.blockSignals(True)
@@ -2687,6 +2886,7 @@ class MainWindow(QMainWindow):
 
     def _on_tipo_calculo_editor_cambiado(self):
         t = self.combo_editor_tipo.currentData()
+        logger.debug(f"[UI EVENT - ESQUEMA VISUAL] Tipo de regla de cálculo cambiado a '{t}'")
         if t == "porcentaje":
             self.editor_stack.setCurrentWidget(self.pane_porcentaje)
         elif t == "fijo":
@@ -2709,6 +2909,7 @@ class MainWindow(QMainWindow):
             return
 
         tipo_calculo = self.combo_editor_tipo.currentData()
+        logger.debug(f"[UI EVENT - ESQUEMA VISUAL] Sincronizando campos de editor hacia fila {row} ('{item_codigo.text()}')")
         item_codigo.setData(Qt.ItemDataRole.UserRole + 1, tipo_calculo)
         
         # Guardar valores
@@ -2757,6 +2958,7 @@ class MainWindow(QMainWindow):
 
     def _guardar_celdas(self):
         esq = self.combo_filter_esquema.currentData()
+        logger.info(f"[UI ACTION - ESQUEMA VISUAL] Clic en '💾 Guardar Cambios' de celdas para esquema '{esq}' (filas: {self.tabla_celdas.rowCount()})")
         if not esq:
             return
 
@@ -2804,6 +3006,7 @@ class MainWindow(QMainWindow):
                     visible_recibo
                 )
             except Exception as e:
+                logger.error(f"[UI ACTION - ESQUEMA VISUAL] Error al guardar celda '{codigo}' en esquema '{esq}': {e}", exc_info=True)
                 errores.append(f"Fila {i + 1}: {e}")
 
         if errores:
@@ -2814,6 +3017,7 @@ class MainWindow(QMainWindow):
 
     def _agregar_celda(self):
         esq = self.combo_filter_esquema.currentData()
+        logger.info(f"[UI ACTION - ESQUEMA VISUAL] Clic en 'Agregar Celda' en esquema '{esq}'")
         if not esq:
             return
         secciones = self.db.listar_secciones()
@@ -2837,16 +3041,22 @@ class MainWindow(QMainWindow):
         if not item:
             return
         celda_id = item.data(Qt.ItemDataRole.UserRole)
+        c_code = item.text()
+        esq = self.combo_filter_esquema.currentData()
+        logger.info(f"[UI ACTION - ESQUEMA VISUAL] Clic en 'Eliminar Celda' para '{c_code}' en esquema '{esq}'")
         if celda_id:
             resp = QMessageBox.question(
                 self, "Confirmar",
-                f"¿Eliminar la celda \"{item.text()}\"?",
+                f"¿Eliminar la celda \"{c_code}\"?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if resp == QMessageBox.StandardButton.Yes:
-                self.db.eliminar_celda(celda_id)
-                self._cargar_tabla_celdas()
-                self.statusBar().showMessage("Celda eliminada.", 4000)
+                try:
+                    self.db.eliminar_celda(celda_id)
+                    self._cargar_tabla_celdas()
+                    self.statusBar().showMessage("Celda eliminada.", 4000)
+                except Exception as e:
+                    logger.error(f"[UI ACTION - ESQUEMA VISUAL] Error al eliminar celda id={celda_id}: {e}", exc_info=True)
 
     def _obtener_todas_las_variables(self):
         """Busca dinámicamente qué variables hay configuradas en los empleados,
@@ -3156,45 +3366,51 @@ class MainWindow(QMainWindow):
             return
 
         var_code = var_name.strip().lower().replace(" ", "_")
-        plantilla = self.db.obtener_plantilla_variables_esquema(esq_code)
-        
-        esq_row = self.db.conn.execute("SELECT tipo_liquidacion FROM esquemas_calculo WHERE codigo = ?", (esq_code,)).fetchone()
-        es_jornal = (esq_row["tipo_liquidacion"] == "jornal") if esq_row else False
+        try:
+            plantilla = self.db.obtener_plantilla_variables_esquema(esq_code)
+            
+            esqs = self.db.listar_esquemas()
+            esq_info = next((e for e in esqs if e["codigo"] == esq_code), None)
+            es_jornal = (esq_info["tipo_liquidacion"] == "jornal") if esq_info else False
 
-        if es_jornal:
-            q_dict = plantilla.get("quincenas", {"Q1": {}})
-            for q_code in q_dict:
-                q_dict[q_code][var_code] = 0
-            plantilla["quincenas"] = q_dict
-        else:
-            plantilla[var_code] = 0
+            if es_jornal:
+                q_dict = plantilla.get("quincenas", {"Q1": {}})
+                for q_code in q_dict:
+                    q_dict[q_code][var_code] = 0
+                plantilla["quincenas"] = q_dict
+            else:
+                plantilla[var_code] = 0
 
-        # Crear celda de cálculo de tipo 'variable' para dar soporte nativo
-        secciones = self.db.listar_secciones()
-        sec_code = secciones[0]["codigo"] if secciones else "COMPOSICION"
-        max_orden = self.db.conn.execute("SELECT MAX(orden) FROM celdas_calculo WHERE esquema_codigo = ?", (esq_code,)).fetchone()[0] or 0
+            # Crear celda de cálculo de tipo 'variable' para dar soporte nativo
+            secciones = self.db.listar_secciones()
+            sec_code = secciones[0]["codigo"] if secciones else "COMPOSICION"
+            celdas_actuales = self.db.listar_celdas_por_esquema(esq_code)
+            max_orden = max((c["orden"] for c in celdas_actuales), default=0)
 
-        self.db.guardar_celda(
-            celda_id=None,
-            seccion_codigo=sec_code,
-            codigo_variable=var_code,
-            descripcion=var_name.strip(),
-            condicion="",
-            formula_unidad="",
-            formula_base="",
-            formula_monto=var_code,
-            orden=max_orden + 10,
-            esquema_codigo=esq_code,
-            tipo_calculo="variable",
-            simple_porcentaje=None,
-            simple_base_variable=None,
-            simple_monto_fijo=None,
-            visible_recibo=1
-        )
+            self.db.guardar_celda(
+                celda_id=None,
+                seccion_codigo=sec_code,
+                codigo_variable=var_code,
+                descripcion=var_name.strip(),
+                condicion="",
+                formula_unidad="",
+                formula_base="",
+                formula_monto=var_code,
+                orden=max_orden + 10,
+                esquema_codigo=esq_code,
+                tipo_calculo="variable",
+                simple_porcentaje=None,
+                simple_base_variable=None,
+                simple_monto_fijo=None,
+                visible_recibo=1
+            )
 
-        self.db.propagar_variables_esquema(esq_code, plantilla)
-        self._cargar_esquema_visual()
-        self.statusBar().showMessage(f"Variable '{var_code}' agregada al esquema '{esq_code}'.", 4000)
+            self.db.propagar_variables_esquema(esq_code, plantilla)
+            self._cargar_esquema_visual()
+            self.statusBar().showMessage(f"Variable '{var_code}' agregada al esquema '{esq_code}'.", 4000)
+        except Exception as e:
+            logger.error(f"[UI EVENT - ESQUEMA VISUAL] Error al agregar variable '{var_code}' al esquema '{esq_code}': {e}", exc_info=True)
+            QMessageBox.critical(self, "Error al agregar variable", f"No se pudo agregar la variable '{var_code}':\n{e}")
 
     def _on_eliminar_variable_esquema_click(self, var_code: str):
         esq_code = self.combo_visual_esquema.currentData() if hasattr(self, "combo_visual_esquema") else None
@@ -3208,20 +3424,22 @@ class MainWindow(QMainWindow):
         )
 
         if resp == QMessageBox.StandardButton.Yes:
-            plantilla = self.db.obtener_plantilla_variables_esquema(esq_code)
-            if "quincenas" in plantilla and isinstance(plantilla["quincenas"], dict):
-                for q_code in plantilla["quincenas"]:
-                    plantilla["quincenas"][q_code].pop(var_code, None)
-            else:
-                plantilla.pop(var_code, None)
+            try:
+                plantilla = self.db.obtener_plantilla_variables_esquema(esq_code)
+                if "quincenas" in plantilla and isinstance(plantilla["quincenas"], dict):
+                    for q_code in plantilla["quincenas"]:
+                        plantilla["quincenas"][q_code].pop(var_code, None)
+                else:
+                    plantilla.pop(var_code, None)
 
-            # Eliminar celda asociada si existe
-            self.db.conn.execute("DELETE FROM celdas_calculo WHERE esquema_codigo = ? AND codigo_variable = ?", (esq_code, var_code))
-            self.db.conn.commit()
-
-            self.db.propagar_variables_esquema(esq_code, plantilla)
-            self._cargar_esquema_visual()
-            self.statusBar().showMessage(f"Variable '{var_code}' eliminada del esquema.", 4000)
+                self.db.eliminar_variable_esquema(esq_code, var_code)
+                self.db.propagar_variables_esquema(esq_code, plantilla)
+                self._cargar_esquema_visual()
+                self.statusBar().showMessage(f"Variable '{var_code}' eliminada del esquema.", 4000)
+                logger.info(f"[UI EVENT - ESQUEMA VISUAL] Variable '{var_code}' eliminada del esquema '{esq_code}'.")
+            except Exception as e:
+                logger.error(f"[UI EVENT - ESQUEMA VISUAL] Error al eliminar variable '{var_code}': {e}", exc_info=True)
+                QMessageBox.critical(self, "Error al eliminar variable", f"No se pudo eliminar la variable '{var_code}':\n{e}")
 
     def _on_agregar_quincena_esquema_click(self):
         esq_code = self.combo_visual_esquema.currentData() if hasattr(self, "combo_visual_esquema") else None
@@ -3327,6 +3545,11 @@ class MainWindow(QMainWindow):
         btn_del.clicked.connect(self._eliminar_porcion_grafico)
         filter_layout.addWidget(btn_del)
 
+        btn_refresh = QPushButton("Refrescar")
+        btn_refresh.setToolTip("Descartar cambios no guardados y recargar configuración del gráfico desde la base de datos")
+        btn_refresh.clicked.connect(self._cargar_tabla_grafico)
+        filter_layout.addWidget(btn_refresh)
+
         btn_save = QPushButton("Guardar Cambios")
         btn_save.clicked.connect(self._guardar_grafico_config)
         filter_layout.addWidget(btn_save)
@@ -3342,9 +3565,22 @@ class MainWindow(QMainWindow):
         self.tabla_grafico.horizontalHeader().setStretchLastSection(True)
         self.tabla_grafico.verticalHeader().setVisible(False)
         self.tabla_grafico.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabla_grafico.itemChanged.connect(self._on_tabla_grafico_item_changed)
         layout.addWidget(self.tabla_grafico)
 
         self._cargar_tabla_grafico()
+
+    def _on_tabla_grafico_item_changed(self, item: QTableWidgetItem):
+        if getattr(self, "_cargando_grafico", False):
+            return
+        row = item.row()
+        logger.debug(f"[UI EVENT - GRAFICO] Modificada celda en fila {row}, col {item.column()} -> Negrita")
+        font = QFont()
+        font.setBold(True)
+        for col in range(self.tabla_grafico.columnCount()):
+            it = self.tabla_grafico.item(row, col)
+            if it:
+                it.setFont(font)
 
     def _on_esquema_grafico_filtro_cambiado(self):
         self._cargar_tabla_grafico()
@@ -3354,13 +3590,25 @@ class MainWindow(QMainWindow):
         if not esq:
             return
 
+        self._cargando_grafico = True
         celdas = self.db.listar_celdas_grafico_por_esquema(esq)
+        logger.debug(f"[UI EVENT - GRAFICO] Recargando {len(celdas)} porciones para el esquema '{esq}'")
         self.tabla_grafico.setRowCount(len(celdas))
 
+        font_normal = QFont()
+        font_normal.setBold(False)
+
         for i, c in enumerate(celdas):
-            self.tabla_grafico.setItem(i, 0, QTableWidgetItem(c["etiqueta"]))
-            self.tabla_grafico.setItem(i, 1, QTableWidgetItem(c["formula"]))
-            self.tabla_grafico.setItem(i, 2, QTableWidgetItem(str(c["orden"])))
+            it0 = QTableWidgetItem(c["etiqueta"])
+            it0.setFont(font_normal)
+            it1 = QTableWidgetItem(c["formula"])
+            it1.setFont(font_normal)
+            it2 = QTableWidgetItem(str(c["orden"]))
+            it2.setFont(font_normal)
+
+            self.tabla_grafico.setItem(i, 0, it0)
+            self.tabla_grafico.setItem(i, 1, it1)
+            self.tabla_grafico.setItem(i, 2, it2)
 
             item_etiqueta = self.tabla_grafico.item(i, 0)
             if item_etiqueta:
@@ -3370,6 +3618,7 @@ class MainWindow(QMainWindow):
         self.tabla_grafico.setColumnWidth(0, 300)
         self.tabla_grafico.setColumnWidth(1, 600)
         self.tabla_grafico.setColumnWidth(2, 80)
+        self._cargando_grafico = False
 
     def _guardar_grafico_config(self):
         esq = self.combo_filter_esquema_g.currentData()
@@ -4180,6 +4429,11 @@ class MainWindow(QMainWindow):
         btn_del.clicked.connect(self._eliminar_esquema)
         header.addWidget(btn_del)
 
+        btn_refresh = QPushButton("Refrescar")
+        btn_refresh.setToolTip("Descartar cambios no guardados y recargar esquemas desde la base de datos")
+        btn_refresh.clicked.connect(self._cargar_tabla_esquemas)
+        header.addWidget(btn_refresh)
+
         btn_save = QPushButton("Guardar Cambios")
         btn_save.clicked.connect(self._guardar_esquemas)
         header.addWidget(btn_save)
@@ -4193,17 +4447,38 @@ class MainWindow(QMainWindow):
         self.tabla_esquemas.horizontalHeader().setStretchLastSection(True)
         self.tabla_esquemas.verticalHeader().setVisible(False)
         self.tabla_esquemas.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabla_esquemas.itemChanged.connect(self._on_tabla_esquemas_item_changed)
         layout.addWidget(self.tabla_esquemas)
 
         self._cargar_tabla_esquemas()
 
+    def _on_tabla_esquemas_item_changed(self, item: QTableWidgetItem):
+        if getattr(self, "_cargando_esquemas", False):
+            return
+        row = item.row()
+        logger.debug(f"[UI EVENT - ESQUEMAS] Modificada celda en fila {row}, col {item.column()}: '{item.text()}' -> Negrita")
+        font = QFont()
+        font.setBold(True)
+        for col in range(self.tabla_esquemas.columnCount()):
+            it = self.tabla_esquemas.item(row, col)
+            if it:
+                it.setFont(font)
+
     def _cargar_tabla_esquemas(self):
+        self._cargando_esquemas = True
         esqs = self.db.listar_esquemas()
+        logger.debug(f"[UI EVENT - ESQUEMAS] Recargando tabla de esquemas (total: {len(esqs)} esquemas)...")
         self.tabla_esquemas.setRowCount(len(esqs))
+        font_normal = QFont()
+        font_normal.setBold(False)
         for i, esq in enumerate(esqs):
-            self.tabla_esquemas.setItem(i, 0, QTableWidgetItem(esq["codigo"]))
-            self.tabla_esquemas.setItem(i, 1, QTableWidgetItem(esq["nombre"]))
-            
+            it0 = QTableWidgetItem(esq["codigo"])
+            it0.setFont(font_normal)
+            it1 = QTableWidgetItem(esq["nombre"])
+            it1.setFont(font_normal)
+            self.tabla_esquemas.setItem(i, 0, it0)
+            self.tabla_esquemas.setItem(i, 1, it1)
+
             # Combo para tipo_liquidacion
             combo_tipo = QComboBox()
             combo_tipo.addItems(["mensual", "jornal"])
@@ -4211,8 +4486,9 @@ class MainWindow(QMainWindow):
             idx_tipo = combo_tipo.findText(tipo_val)
             if idx_tipo >= 0:
                 combo_tipo.setCurrentIndex(idx_tipo)
+            combo_tipo.currentIndexChanged.connect(lambda _, r=i: self._on_tabla_esquemas_combo_changed(r))
             self.tabla_esquemas.setCellWidget(i, 2, combo_tipo)
-            
+
             # Guardar el código original oculto para saber si se modificó la PK
             item_codigo = self.tabla_esquemas.item(i, 0)
             if item_codigo:
@@ -4221,9 +4497,22 @@ class MainWindow(QMainWindow):
         self.tabla_esquemas.resizeColumnsToContents()
         self.tabla_esquemas.setColumnWidth(0, 200)
         self.tabla_esquemas.setColumnWidth(2, 130)
+        self._cargando_esquemas = False
+
+    def _on_tabla_esquemas_combo_changed(self, row: int):
+        if getattr(self, "_cargando_esquemas", False):
+            return
+        logger.debug(f"[UI EVENT - ESQUEMAS] Cambiado combo tipo_liquidacion en fila {row} -> Negrita")
+        font = QFont()
+        font.setBold(True)
+        for col in range(self.tabla_esquemas.columnCount()):
+            it = self.tabla_esquemas.item(row, col)
+            if it:
+                it.setFont(font)
 
     def _agregar_esquema(self):
         row = self.tabla_esquemas.rowCount()
+        logger.info(f"[UI ACTION - ESQUEMAS] Clic en '+ Agregar Esquema' (insertando nueva fila en posición {row})")
         self.tabla_esquemas.insertRow(row)
         self.tabla_esquemas.setItem(row, 0, QTableWidgetItem(f"NUEVO_ESQ_{row + 1}"))
         self.tabla_esquemas.setItem(row, 1, QTableWidgetItem("Nuevo Esquema de Cálculo"))
@@ -4243,6 +4532,7 @@ class MainWindow(QMainWindow):
     def _configurar_esquema_seleccionado(self):
         row = self.tabla_esquemas.currentRow()
         if row < 0:
+            logger.warning("[UI ACTION - ESQUEMAS] Intento de configurar esquema sin selección previa.")
             QMessageBox.warning(self, "Atención", "Seleccione un esquema de cálculo de la tabla primero.")
             return
 
@@ -4256,6 +4546,7 @@ class MainWindow(QMainWindow):
         combo_tipo = self.tabla_esquemas.cellWidget(row, 2)
         tipo_liq = combo_tipo.currentText() if combo_tipo else "mensual"
         orig_codigo = item_code.data(Qt.ItemDataRole.UserRole)
+        logger.info(f"[UI ACTION - ESQUEMAS] Clic en 'Configurar Esquema' para código='{esquema_code}' (nombre='{nombre_esquema}', tipo='{tipo_liq}')")
 
         if not esquema_code:
             QMessageBox.warning(self, "Atención", "El código del esquema no puede estar vacío.")
@@ -4266,6 +4557,7 @@ class MainWindow(QMainWindow):
             self.db.guardar_esquema(orig_codigo, esquema_code, nombre_esquema, tipo_liq)
             item_code.setData(Qt.ItemDataRole.UserRole, esquema_code)
         except Exception as e:
+            logger.error(f"[UI ACTION - ESQUEMAS] Error al inicializar esquema en BD: {e}", exc_info=True)
             QMessageBox.critical(self, "Error al guardar esquema", f"No se pudo inicializar el esquema en la base de datos:\n{e}")
             return
 
@@ -4287,6 +4579,7 @@ class MainWindow(QMainWindow):
             return
             
         orig_codigo = item_codigo.data(Qt.ItemDataRole.UserRole)
+        logger.info(f"[UI ACTION - ESQUEMAS] Clic en '− Eliminar Seleccionado' para esquema '{orig_codigo}'")
         
         if not orig_codigo:
             # Aún no se ha guardado en DB, simplemente removemos la fila de la tabla
@@ -4305,9 +4598,11 @@ class MainWindow(QMainWindow):
                 self._recargar_combos_esquemas()
                 self.statusBar().showMessage(f"Esquema '{orig_codigo}' eliminado.", 4000)
             except Exception as e:
+                logger.error(f"[UI ACTION - ESQUEMAS] Error al eliminar esquema '{orig_codigo}': {e}", exc_info=True)
                 QMessageBox.critical(self, "Error al eliminar", str(e))
 
     def _guardar_esquemas(self):
+        logger.info(f"[UI ACTION - ESQUEMAS] Clic en '💾 Guardar Cambios' de Esquemas de Cálculo (procesando {self.tabla_esquemas.rowCount()} filas)")
         errores = []
         for i in range(self.tabla_esquemas.rowCount()):
             item_codigo = self.tabla_esquemas.item(i, 0)
@@ -4499,17 +4794,26 @@ class MainWindow(QMainWindow):
         self.inp_emp_lugar.setPlaceholderText("Ej: C.A.B.A.")
         form.addRow("Lugar de Pago:", self.inp_emp_lugar)
         
+        btn_layout = QHBoxLayout()
+        
+        btn_refresh = QPushButton("Refrescar")
+        btn_refresh.setToolTip("Descartar cambios no guardados y recargar datos de la empresa desde la base de datos")
+        btn_refresh.clicked.connect(self._cargar_datos_empresa)
+        btn_layout.addWidget(btn_refresh)
+
         btn_guardar = QPushButton("Guardar Datos de Empresa")
         btn_guardar.setStyleSheet("font-weight: bold; background-color: #2563EB; color: white;")
         btn_guardar.clicked.connect(self._guardar_empresa)
+        btn_layout.addWidget(btn_guardar)
         
         layout.addWidget(group)
-        layout.addWidget(btn_guardar)
+        layout.addLayout(btn_layout)
         layout.addStretch()
         
         self._cargar_datos_empresa()
 
     def _cargar_datos_empresa(self):
+        logger.debug("[UI EVENT - EMPRESA] Recargando datos de la empresa desde base de datos...")
         emp = self.db.obtener_empresa()
         self.inp_emp_razon.setText(emp.get("razon_social") or "")
         self.inp_emp_direccion.setText(emp.get("direccion") or "")

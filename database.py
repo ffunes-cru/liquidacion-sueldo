@@ -4,9 +4,12 @@ Soporta Esquemas de Cálculo (Mensual, Jornal), Categorías Jornaleras y Modo de
 """
 
 import json
+import logging
 import os
 import sqlite3
 import sys
+
+logger = logging.getLogger(__name__)
 
 DB_FILENAME = "liquidacion_sueldos.db"
 
@@ -29,6 +32,8 @@ class DatabaseManager:
         self.db_path = os.path.abspath(db_path)
         self._lock_path = self.db_path + ".lock"
         self._lock_file = None
+
+        logger.info(f"Conectando a base de datos SQLite en: {self.db_path}")
 
         if not skip_lock:
             self._adquirir_bloqueo_exclusivo()
@@ -481,15 +486,18 @@ class DatabaseManager:
                          tipo_liq: str, variables_json: str, esquema_codigo: str,
                          categoria_jornal_id: int | None, fecha_ingreso: str = "2020-01-01",
                          cuil: str = "") -> int:
+        logger.info(f"Guardando empleado legajo='{legajo}', nombre='{nombre}', emp_id={emp_id}, esquema='{esquema_codigo}'")
         es_jornal = (tipo_liq.lower() == "jornal")
         try:
             raw_v = json.loads(variables_json or "{}")
-        except Exception:
+        except Exception as e:
+            logger.warning(f"No se pudo parsear variables_json del empleado legajo='{legajo}': {e}. Usando objeto vacío.", exc_info=True)
             raw_v = {}
         clean_v = self.adaptar_variables_a_esquema(raw_v, esquema_codigo, es_jornal, emp_id=emp_id)
         variables_json = json.dumps(clean_v, ensure_ascii=False)
 
         if emp_id:
+            logger.debug(f"Ejecutando UPDATE para empleado id={emp_id}")
             self.conn.execute(
                 """UPDATE empleados
                    SET legajo=?, nombre_completo=?, tipo_liquidacion=?, variables_calculo=?,
@@ -499,6 +507,7 @@ class DatabaseManager:
                  categoria_jornal_id, fecha_ingreso, cuil, emp_id),
             )
         else:
+            logger.debug(f"Ejecutando INSERT para nuevo empleado legajo='{legajo}'")
             cur = self.conn.execute(
                 """INSERT INTO empleados (legajo, nombre_completo, tipo_liquidacion, variables_calculo,
                     esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil)
@@ -508,11 +517,14 @@ class DatabaseManager:
             )
             emp_id = cur.lastrowid
         self.conn.commit()
+        logger.info(f"Empleado id={emp_id} legajo='{legajo}' guardado exitosamente.")
         return emp_id
 
     def eliminar_empleado(self, emp_id: int):
+        logger.info(f"Eliminando empleado id={emp_id}...")
         self.conn.execute("DELETE FROM empleados WHERE id = ?", (emp_id,))
         self.conn.commit()
+        logger.info(f"Empleado id={emp_id} eliminado exitosamente.")
 
     # ------------------------------------------------------------------
     # CRUD Secciones
@@ -565,8 +577,7 @@ class DatabaseManager:
         self.conn.commit()
 
     def obtener_plantilla_variables_esquema(self, esquema_codigo: str, emp_id_excluir: int | None = None) -> dict:
-        """Devuelve la plantilla de VARIABLES DE ENTRADA de un esquema_codigo.
-        Diferencia strictly las variables de entrada de los conceptos calculados y de las variables globales/motor del sistema."""
+        """Devuelve la plantilla de VARIABLES DE ENTRADA de un esquema_codigo leyendo las celdas declaradas como 'variable'."""
         # 1. Obtener conceptos calculados (tipo_calculo != 'variable')
         rows_calc = self.conn.execute("SELECT codigo_variable FROM celdas_calculo WHERE tipo_calculo != 'variable'").fetchall()
         conceptos_calculados = set(r["codigo_variable"] for r in rows_calc if r["codigo_variable"])
@@ -575,8 +586,13 @@ class DatabaseManager:
         rows_glob = self.conn.execute("SELECT codigo FROM variables_globales").fetchall()
         vars_globales_db = set(r["codigo"] for r in rows_glob if r["codigo"])
 
-        # 3. Constantes globales y acumuladores del motor de cálculo
+        # 3. Constantes globales, variables implícitas y acumuladores del motor de cálculo
         sistema_engine = {
+            'antiguedad_anios', 'antiguedad', 'fecha_ingreso', 'fecha_calculo',
+            'tipo_liquidacion', 'valor_hora', 'basico_categoria', 'jornal_categoria',
+            'dias_mes', 'dias_trabajados', 'horas_mes', 'horas_trabajadas',
+            'sac_proporcional', 'vacaciones_dias', 'quincena_activa', 'es_segunda_quincena',
+            'bruto', 'neto', 'remunerativo', 'no_remunerativo', 'retenciones', 'descuentos',
             'Contrib_ANSSAL', 'Contrib_Asig_Fam', 'Contrib_OS', 'Contrib_PAMI', 'Contrib_Previsional',
             'Detraccion_Aplicable', 'Fondo_Nac_Empleo', 'Tope_Maximo', 'Tope_Minimo', 'Q_sum_bruto',
             'Q1_bruto', 'Q2_bruto', 'bruto_acum', 'remun_1', 'remun_2', 'remun_3', 'remun_4', 'remun_5',
@@ -590,29 +606,12 @@ class DatabaseManager:
         celdas = self.listar_celdas_por_esquema(esquema_codigo)
         vars_de_entrada = set()
 
-        # 4. Variables de entrada explícitas del esquema (tipo_calculo == 'variable')
+        # 4. Variables de entrada explícitas del esquema declaradas en celdas_calculo (tipo_calculo == 'variable')
         for c in celdas:
             if c.get("tipo_calculo") == "variable" and c.get("codigo_variable"):
                 c_var = c["codigo_variable"]
                 if not c_var.isdigit() and c_var not in excluidas_del_empleado:
                     vars_de_entrada.add(c_var)
-
-        # 5. Escanear fórmulas del esquema por variables que NO sean globales ni conceptos calculados
-        import re
-        for c in celdas:
-            for f_key in ("formula_monto", "formula_base", "formula_unidad"):
-                formula = c.get(f_key) or ""
-                tokens = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', formula)
-                for t in tokens:
-                    if (
-                        not t.isdigit() and
-                        t not in excluidas_del_empleado and
-                        t not in (
-                            'if', 'else', 'and', 'or', 'not', 'min', 'max', 'abs', 'round',
-                            'True', 'False', 'None'
-                        )
-                    ):
-                        vars_de_entrada.add(t)
 
         # 6. Preservar variables de entrada existentes en los empleados del esquema (filtrando las excluidas)
         rows_emp = self.conn.execute(
@@ -827,6 +826,45 @@ class DatabaseManager:
                 )
         self.conn.commit()
 
+    def contar_empleados_con_variable(self, esquema_codigo: str, codigo_variable: str) -> tuple[int, str]:
+        """Devuelve una tupla (count, ejemplo_nombre) con la cantidad de empleados asignados al esquema
+        que tienen un valor no nulo / cargado en la variable dada."""
+        rows = self.conn.execute(
+            "SELECT nombre_completo, variables_calculo FROM empleados WHERE esquema_codigo = ?",
+            (esquema_codigo,)
+        ).fetchall()
+
+        count = 0
+        ejemplo = ""
+
+        for r in rows:
+            nombre = r["nombre_completo"]
+            try:
+                v_data = json.loads(r["variables_calculo"] or "{}")
+            except Exception:
+                continue
+
+            has_val = False
+            if isinstance(v_data, dict):
+                if "quincenas" in v_data and isinstance(v_data["quincenas"], dict):
+                    for q_dict in v_data["quincenas"].values():
+                        if isinstance(q_dict, dict) and codigo_variable in q_dict:
+                            val = q_dict[codigo_variable]
+                            if val and val != 0 and str(val).strip() != "":
+                                has_val = True
+                                break
+                elif codigo_variable in v_data:
+                    val = v_data[codigo_variable]
+                    if val and val != 0 and str(val).strip() != "":
+                        has_val = True
+
+            if has_val:
+                count += 1
+                if not ejemplo:
+                    ejemplo = nombre
+
+        return count, ejemplo
+
     def renombrar_variable_esquema(self, esquema_codigo: str, clave_vieja: str, clave_nueva: str) -> None:
         """Renombra una variable de entrada de un esquema_codigo en celdas_calculo y en las variables de todos los empleados asignados."""
         clave_vieja = clave_vieja.strip()
@@ -947,8 +985,60 @@ class DatabaseManager:
         return celda_id
 
     def eliminar_celda(self, celda_id: int):
-        self.conn.execute("DELETE FROM celdas_calculo WHERE id = ?", (celda_id,))
-        self.conn.commit()
+        logger.info(f"Eliminando celda id={celda_id} de celdas_calculo...")
+        try:
+            self.conn.execute("DELETE FROM celdas_calculo WHERE id = ?", (celda_id,))
+            self.conn.commit()
+            logger.info(f"Celda id={celda_id} eliminada con éxito.")
+        except Exception as e:
+            self.conn.rollback()
+            logger.error(f"Error al eliminar celda id={celda_id}: {e}", exc_info=True)
+            raise e
+
+    def eliminar_variable_esquema(self, esquema_codigo: str, codigo_variable: str):
+        """Elimina de forma segura una variable de celdas_calculo y de las fichas de todos los empleados asignados."""
+        logger.info(f"Eliminando variable '{codigo_variable}' del esquema '{esquema_codigo}'...")
+        try:
+            # 1. Eliminar celda de cálculo de tipo 'variable' o asociadas
+            self.conn.execute(
+                "DELETE FROM celdas_calculo WHERE esquema_codigo = ? AND codigo_variable = ?",
+                (esquema_codigo, codigo_variable)
+            )
+
+            # 2. Limpiar la variable del JSON variables_calculo en todos los empleados asignados al esquema
+            rows_emp = self.conn.execute(
+                "SELECT id, variables_calculo FROM empleados WHERE esquema_codigo = ?",
+                (esquema_codigo,)
+            ).fetchall()
+
+            for r in rows_emp:
+                try:
+                    v_data = json.loads(r["variables_calculo"] or "{}")
+                    modificado = False
+                    if isinstance(v_data, dict):
+                        if "quincenas" in v_data and isinstance(v_data["quincenas"], dict):
+                            for q_code in v_data["quincenas"]:
+                                if isinstance(v_data["quincenas"][q_code], dict) and codigo_variable in v_data["quincenas"][q_code]:
+                                    v_data["quincenas"][q_code].pop(codigo_variable, None)
+                                    modificado = True
+                        elif codigo_variable in v_data:
+                            v_data.pop(codigo_variable, None)
+                            modificado = True
+                    
+                    if modificado:
+                        self.conn.execute(
+                            "UPDATE empleados SET variables_calculo = ? WHERE id = ?",
+                            (json.dumps(v_data, ensure_ascii=False), r["id"])
+                        )
+                except Exception as e:
+                    logger.warning(f"Error al limpiar variable '{codigo_variable}' del empleado id={r['id']}: {e}")
+
+            self.conn.commit()
+            logger.info(f"Variable '{codigo_variable}' eliminada del esquema '{esquema_codigo}' y fichas de empleados exitosamente.")
+        except Exception as e:
+            self.conn.rollback()
+            logger.error(f"Error al eliminar variable '{codigo_variable}' del esquema '{esquema_codigo}': {e}", exc_info=True)
+            raise e
 
     # ------------------------------------------------------------------
     # CRUD Celdas de Gráfico Custom

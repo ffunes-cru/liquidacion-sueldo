@@ -6,12 +6,15 @@ Soporta importación/exportación plana de variables de empleados (prefijo j_) y
 
 import csv
 import json
+import logging
 import os
 import sqlite3
 import matplotlib.pyplot as plt
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.drawing.image import Image as OpenpyxlImage
+
+logger = logging.getLogger(__name__)
 
 from odf.opendocument import OpenDocumentSpreadsheet
 from odf.table import Table, TableRow, TableCell
@@ -806,6 +809,7 @@ def exportar_recibo_pdf(resultado: dict, db, pdf_path: str, path_grafico: str | 
                         empresa: dict | None = None, mes_anio: dict | None = None):
     """Exporta el recibo detallado a un documento PDF con cabecera industrial."""
     emp = resultado["empleado"]
+    logger.info(f"Generando PDF de recibo para empleado '{emp.get('nombre_completo')}' (Legajo: {emp.get('legajo')}) en: {pdf_path}")
     secciones_info = {s["codigo"]: s["titulo"] for s in db.listar_secciones()}
 
     if empresa is None:
