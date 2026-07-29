@@ -7,3 +7,4 @@ _*/
 *.xlsx*
 dist/
 build/
+*.log

@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QMessageBox, QFileDialog, QHeaderView,
     QFrame, QGroupBox, QAbstractItemView, QDoubleSpinBox, QSpinBox, QRadioButton, QButtonGroup,
     QStackedWidget, QScrollArea, QDialog, QToolButton, QDateEdit, QCheckBox,
-    QProgressDialog, QInputDialog
+    QProgressDialog, QInputDialog, QDialogButtonBox
 )
 
 from database import DatabaseManager
@@ -867,6 +867,38 @@ class ConceptoDialog(QDialog):
             QMessageBox.critical(self, "Error al guardar", str(e))
 
 
+class AgregarVariableDialog(QDialog):
+    """Diálogo para ingresar el código y el tipo de dato (Numérico vs Booleano) de una nueva variable de entrada."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Nueva Variable de Entrada al Esquema")
+        self.setMinimumWidth(380)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.inp_nombre = QLineEdit()
+        self.inp_nombre.setPlaceholderText("Ej: presentismo, horas_extras_50")
+        form.addRow("Código / Nombre:", self.inp_nombre)
+
+        self.inp_tipo = QComboBox()
+        self.inp_tipo.addItem("Numérico (Monto / Cantidad)", "numeric")
+        self.inp_tipo.addItem("Booleano / Casilla (Sí / No)", "boolean")
+        form.addRow("Tipo de Dato:", self.inp_tipo)
+
+        layout.addLayout(form)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+
+    def get_data(self):
+        code = self.inp_nombre.text().strip().lower().replace(" ", "_")
+        tipo = self.inp_tipo.currentData()
+        return code, tipo
+
+
 class ConfigurarEsquemaDialog(QDialog):
     """Diálogo modal para configurar las variables de entrada y quincenas de un Esquema de Cálculo."""
 
@@ -994,17 +1026,71 @@ class ConfigurarEsquemaDialog(QDialog):
             self.tab_widget.addTab(tab, "Variables Mensuales")
         self._cargando = False
 
+    def accept(self):
+        self._guardar_defaults()
+        super().accept()
+
+    def _guardar_defaults(self):
+        if getattr(self, "_cargando", False):
+            return
+        plantilla_data = {}
+        if self.tipo_liquidacion == "jornal":
+            q_map = {}
+            for index in range(self.tab_widget.count()):
+                tab = self.tab_widget.widget(index)
+                q_code = self.tab_widget.tabText(index)
+                table = tab.property("table_vars")
+                if table:
+                    q_vars = {}
+                    for row in range(table.rowCount()):
+                        item_k = table.item(row, 0)
+                        item_v = table.item(row, 1)
+                        if item_k and item_v:
+                            k = item_k.text().strip()
+                            raw_v = item_v.text().strip()
+                            q_vars[k] = self._parse_value(k, raw_v)
+                    q_map[q_code] = q_vars
+            plantilla_data = {"quincenas": q_map}
+        else:
+            current_tab = self.tab_widget.currentWidget()
+            if current_tab:
+                table = current_tab.property("table_vars")
+                if table:
+                    for row in range(table.rowCount()):
+                        item_k = table.item(row, 0)
+                        item_v = table.item(row, 1)
+                        if item_k and item_v:
+                            k = item_k.text().strip()
+                            raw_v = item_v.text().strip()
+                            plantilla_data[k] = self._parse_value(k, raw_v)
+
+        logger.info(f"[UI DIALOG - CONFIG ESQUEMA] Guardando valores por defecto para esquema '{self.esquema_codigo}': {plantilla_data}")
+        self.db.guardar_config(f"esquema_defaults_{self.esquema_codigo}", json.dumps(plantilla_data, ensure_ascii=False))
+        self.db.propagar_variables_esquema(self.esquema_codigo, plantilla_data)
+
+    def _parse_value(self, k: str, raw_v: str):
+        val_str = raw_v.lower().strip()
+        if val_str in ("true", "false", "sí", "si", "no"):
+            return val_str in ("true", "sí", "si")
+        try:
+            if "." in raw_v:
+                return float(raw_v)
+            return int(raw_v)
+        except ValueError:
+            return raw_v
+
     def _on_table_item_changed(self, item: QTableWidgetItem):
         if getattr(self, "_cargando", False):
             return
-        if item.column() != 0:
-            return
-        clave_vieja = item.data(Qt.ItemDataRole.UserRole)
-        clave_nueva = item.text().strip().lower().replace(" ", "_")
-        logger.debug(f"[UI DIALOG - CONFIG ESQUEMA] Modificado nombre de variable en celda: '{clave_vieja}' -> '{clave_nueva}'")
-        if clave_vieja and clave_nueva and clave_vieja != clave_nueva:
-            self.db.renombrar_variable_esquema(self.esquema_codigo, clave_vieja, clave_nueva)
-            self._cargar_variables()
+        if item.column() == 0:
+            clave_vieja = item.data(Qt.ItemDataRole.UserRole)
+            clave_nueva = item.text().strip().lower().replace(" ", "_")
+            logger.debug(f"[UI DIALOG - CONFIG ESQUEMA] Modificado nombre de variable en celda: '{clave_vieja}' -> '{clave_nueva}'")
+            if clave_vieja and clave_nueva and clave_vieja != clave_nueva:
+                self.db.renombrar_variable_esquema(self.esquema_codigo, clave_vieja, clave_nueva)
+                self._cargar_variables()
+        elif item.column() == 1:
+            self._guardar_defaults()
 
     def _renombrar_variable(self):
         current_tab = self.tab_widget.currentWidget()
@@ -1035,21 +1121,26 @@ class ConfigurarEsquemaDialog(QDialog):
 
     def _agregar_variable(self):
         logger.info(f"[UI ACTION - CONFIG ESQUEMA] Clic en '+ Agregar Variable' en esquema '{self.esquema_codigo}'")
-        var_name, ok = QInputDialog.getText(self, "Nueva Variable al Esquema", "Nombre o código de la variable de entrada (ej: presentismo):")
-        if not ok or not var_name.strip():
+        dlg = AgregarVariableDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        var_code = var_name.strip().lower().replace(" ", "_")
-        logger.info(f"[UI ACTION - CONFIG ESQUEMA] Creando nueva variable '{var_code}' para esquema '{self.esquema_codigo}'")
+        var_code, tipo_dato = dlg.get_data()
+        if not var_code:
+            QMessageBox.warning(self, "Atención", "El código/nombre de la variable no puede estar vacío.")
+            return
+
+        default_val = False if tipo_dato == "boolean" else 0
+        logger.info(f"[UI ACTION - CONFIG ESQUEMA] Creando nueva variable '{var_code}' (tipo: {tipo_dato}, default: {default_val}) para esquema '{self.esquema_codigo}'")
 
         try:
             plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
             if self.tipo_liquidacion == "jornal":
                 q_dict = plantilla.get("quincenas", {"Q1": {}})
                 for q in q_dict:
-                    q_dict[q][var_code] = 0
+                    q_dict[q][var_code] = default_val
                 plantilla["quincenas"] = q_dict
             else:
-                plantilla[var_code] = 0
+                plantilla[var_code] = default_val
 
             secciones = self.db.listar_secciones()
             if not secciones:
@@ -1144,18 +1235,24 @@ class ConfigurarEsquemaDialog(QDialog):
                 )
 
     def _agregar_quincena(self):
+        logger.info(f"[UI ACTION - CONFIG ESQUEMA] Clic en '+ Agregar Quincena' para esquema '{self.esquema_codigo}'")
         plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
         q_dict = plantilla.get("quincenas", {"Q1": {}})
         num_q = len(q_dict) + 1
         new_q = f"Q{num_q}"
-        ref_q = q_dict.get("Q1", {})
-        q_dict[new_q] = {k: (False if isinstance(v, bool) else 0) for k, v in ref_q.items()}
+        def _get_val_type(k_name, val):
+            if isinstance(val, bool) or str(val).lower() in ("true", "false") or k_name == "asistencia_perfecta" or k_name.startswith("es_") or k_name.startswith("is_") or k_name.startswith("chk_"):
+                return False
+            return 0
+        q_dict[new_q] = {k: _get_val_type(k, v) for k, v in ref_q.items()}
         plantilla["quincenas"] = q_dict
 
+        self.db.guardar_config(f"esquema_quincenas_{self.esquema_codigo}", json.dumps(list(q_dict.keys())))
         self.db.propagar_variables_esquema(self.esquema_codigo, plantilla)
         self._cargar_variables()
 
     def _eliminar_quincena(self):
+        logger.info(f"[UI ACTION - CONFIG ESQUEMA] Clic en '− Eliminar Quincena' para esquema '{self.esquema_codigo}'")
         plantilla = self.db.obtener_plantilla_variables_esquema(self.esquema_codigo)
         q_dict = plantilla.get("quincenas", {})
         if len(q_dict) <= 1:
@@ -1166,6 +1263,7 @@ class ConfigurarEsquemaDialog(QDialog):
         del q_dict[last_q]
         plantilla["quincenas"] = q_dict
 
+        self.db.guardar_config(f"esquema_quincenas_{self.esquema_codigo}", json.dumps(list(q_dict.keys())))
         self.db.propagar_variables_esquema(self.esquema_codigo, plantilla)
         self._cargar_variables()
 
