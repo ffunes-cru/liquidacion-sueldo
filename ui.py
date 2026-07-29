@@ -1155,7 +1155,7 @@ class ConfigurarEsquemaDialog(QDialog):
                 celda_id=None,
                 seccion_codigo=sec_code,
                 codigo_variable=var_code,
-                descripcion=var_name.strip(),
+                descripcion=var_code,
                 condicion="",
                 formula_unidad="",
                 formula_base="",
