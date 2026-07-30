@@ -1,5 +1,0 @@
-PyQt6
-simpleeval
-matplotlib
-openpyxl
-odfpy

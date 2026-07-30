@@ -1,10 +1,1 @@
-.env
-venv/
-*.lock
-_*/
-*.db
-*.exe
-*.xlsx*
-dist/
 build/
-*.log

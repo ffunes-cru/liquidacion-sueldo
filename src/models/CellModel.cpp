@@ -1,0 +1,112 @@
+#include "CellModel.h"
+#include "database/DatabaseManager.h"
+
+CellModel::CellModel(DatabaseManager *db, QObject *parent)
+    : QAbstractListModel(parent), m_db(db)
+{
+}
+
+int CellModel::rowCount(const QModelIndex &parent) const
+{
+    Q_UNUSED(parent);
+    return m_data.size();
+}
+
+QVariant CellModel::data(const QModelIndex &index, int role) const
+{
+    if (!index.isValid() || index.row() >= m_data.size()) return {};
+    const QVariantMap &c = m_data[index.row()].toMap();
+
+    switch (role) {
+    case IdRole:                 return c["id"];
+    case SeccionCodigoRole:      return c["seccion_codigo"];
+    case CodigoVariableRole:     return c["codigo_variable"];
+    case DescripcionRole:        return c["descripcion"];
+    case CondicionRole:          return c["condicion"];
+    case FormulaUnidadRole:      return c["formula_unidad"];
+    case FormulaBaseRole:        return c["formula_base"];
+    case FormulaMontoRole:       return c["formula_monto"];
+    case OrdenRole:              return c["orden"];
+    case EsquemaCodigoRole:      return c["esquema_codigo"];
+    case TipoCalculoRole:        return c["tipo_calculo"];
+    case SimplePorcentajeRole:   return c["simple_porcentaje"];
+    case SimpleBaseVariableRole: return c["simple_base_variable"];
+    case SimpleMontoFijoRole:    return c["simple_monto_fijo"];
+    case VisibleReciboRole:      return c["visible_recibo"];
+    default:                     return {};
+    }
+}
+
+QHash<int, QByteArray> CellModel::roleNames() const
+{
+    return {
+        {IdRole, "cellId"},
+        {SeccionCodigoRole, "seccionCodigo"},
+        {CodigoVariableRole, "codigoVariable"},
+        {DescripcionRole, "descripcion"},
+        {CondicionRole, "condicion"},
+        {FormulaUnidadRole, "formulaUnidad"},
+        {FormulaBaseRole, "formulaBase"},
+        {FormulaMontoRole, "formulaMonto"},
+        {OrdenRole, "orden"},
+        {EsquemaCodigoRole, "esquemaCodigo"},
+        {TipoCalculoRole, "tipoCalculo"},
+        {SimplePorcentajeRole, "simplePorcentaje"},
+        {SimpleBaseVariableRole, "simpleBaseVariable"},
+        {SimpleMontoFijoRole, "simpleMontoFijo"},
+        {VisibleReciboRole, "visibleRecibo"}
+    };
+}
+
+QString CellModel::esquemaCodigo() const
+{
+    return m_esquemaCodigo;
+}
+
+void CellModel::setEsquemaCodigo(const QString &esquema)
+{
+    if (m_esquemaCodigo == esquema) return;
+    m_esquemaCodigo = esquema;
+    emit esquemaCodigoChanged();
+    refresh();
+}
+
+int CellModel::count() const
+{
+    return m_data.size();
+}
+
+void CellModel::refresh()
+{
+    beginResetModel();
+    if (m_esquemaCodigo.isEmpty()) {
+        m_data = m_db->listAllCells();
+    } else {
+        m_data = m_db->listCellsBySchema(m_esquemaCodigo);
+    }
+    endResetModel();
+    emit countChanged();
+}
+
+int CellModel::saveCell(int id, const QString &seccionCodigo, const QString &codigoVariable,
+                        const QString &descripcion, const QString &condicion,
+                        const QString &formulaUnidad, const QString &formulaBase,
+                        const QString &formulaMonto, int orden, const QString &esquemaCodigo,
+                        const QString &tipoCalculo, double simplePorcentaje,
+                        const QString &simpleBaseVariable, double simpleMontoFijo,
+                        bool visibleRecibo)
+{
+    int cellId = m_db->saveCell(id, seccionCodigo, codigoVariable, descripcion, condicion,
+                                formulaUnidad, formulaBase, formulaMonto, orden,
+                                esquemaCodigo, tipoCalculo, simplePorcentaje,
+                                simpleBaseVariable, simpleMontoFijo, visibleRecibo);
+    if (cellId > 0) refresh();
+    return cellId;
+}
+
+bool CellModel::removeCell(int id)
+{
+    bool ok = m_db->deleteCell(id);
+    if (ok) refresh();
+    return ok;
+}
