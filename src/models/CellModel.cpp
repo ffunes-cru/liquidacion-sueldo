@@ -33,6 +33,7 @@ QVariant CellModel::data(const QModelIndex &index, int role) const
     case SimpleBaseVariableRole: return c["simple_base_variable"];
     case SimpleMontoFijoRole:    return c["simple_monto_fijo"];
     case VisibleReciboRole:      return c["visible_recibo"];
+    case ColorHexRole:           return c["color_hex"];
     default:                     return {};
     }
 }
@@ -54,7 +55,8 @@ QHash<int, QByteArray> CellModel::roleNames() const
         {SimplePorcentajeRole, "simplePorcentaje"},
         {SimpleBaseVariableRole, "simpleBaseVariable"},
         {SimpleMontoFijoRole, "simpleMontoFijo"},
-        {VisibleReciboRole, "visibleRecibo"}
+        {VisibleReciboRole, "visibleRecibo"},
+        {ColorHexRole, "colorHex"}
     };
 }
 
@@ -100,14 +102,21 @@ int CellModel::saveCell(int id, const QString &seccionCodigo, const QString &cod
                         const QString &formulaMonto, int orden, const QString &esquemaCodigo,
                         const QString &tipoCalculo, double simplePorcentaje,
                         const QString &simpleBaseVariable, double simpleMontoFijo,
-                        bool visibleRecibo)
+                        bool visibleRecibo, const QString &colorHex)
 {
     int cellId = m_db->saveCell(id, seccionCodigo, codigoVariable, descripcion, condicion,
                                 formulaUnidad, formulaBase, formulaMonto, orden,
                                 esquemaCodigo, tipoCalculo, simplePorcentaje,
-                                simpleBaseVariable, simpleMontoFijo, visibleRecibo);
+                                simpleBaseVariable, simpleMontoFijo, visibleRecibo, colorHex);
     if (cellId > 0) refresh();
     return cellId;
+}
+
+bool CellModel::updateCellColor(int id, const QString &colorHex)
+{
+    bool ok = m_db->updateCellColor(id, colorHex);
+    if (ok) refresh();
+    return ok;
 }
 
 bool CellModel::removeCell(int id)

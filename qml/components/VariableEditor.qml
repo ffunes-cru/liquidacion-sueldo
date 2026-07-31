@@ -12,9 +12,19 @@ Rectangle {
     property string value: ""
     signal valueSaved(string newValue)
 
-    implicitHeight: 42
+    readonly property string typeNormalized: (fieldType || "number").toString().toLowerCase().trim()
+    readonly property bool isBoolType: typeNormalized === "bool" || typeNormalized === "boolean"
+    readonly property bool isNumType: typeNormalized === "number" || typeNormalized === "int" || typeNormalized === "float" || typeNormalized === "double" || typeNormalized === "num" || typeNormalized === "decimal"
+
+    function getSafeNumString(strVal) {
+        if (strVal === "true" || strVal === "false" || strVal === "True" || strVal === "False") return "0";
+        var parsed = parseFloat(strVal);
+        return isNaN(parsed) ? "0" : parsed.toString();
+    }
+
+    implicitHeight: 44
     color: Theme.panelBg
-    radius: 4
+    radius: 6
     border.color: Theme.borderColor
 
     RowLayout {
@@ -22,9 +32,17 @@ Rectangle {
         anchors.margins: 8
         spacing: 12
 
+        BadgePill {
+            text: root.isBoolType ? "BOOL" : (root.isNumType ? "NUM" : "TXT")
+            badgeColor: root.isBoolType ? Theme.warningColor : (root.isNumType ? Theme.accentColor : Theme.infoColor)
+            fontSize: 10
+            implicitWidth: 42
+        }
+
         Label {
             text: root.fieldLabel + " (" + root.fieldCode + ")"
             font.pixelSize: 13
+            font.bold: true
             color: Theme.textColor
             Layout.preferredWidth: 200
             elide: Text.ElideRight
@@ -32,21 +50,46 @@ Rectangle {
 
         Item { Layout.fillWidth: true }
 
-        Switch {
-            visible: root.fieldType === "bool"
-            checked: root.value === "true" || root.value === "1"
-            onToggled: {
-                root.valueSaved(checked ? "true" : "false")
+        // 1. Boolean Switch Control
+        RowLayout {
+            visible: root.isBoolType
+            spacing: 6
+
+            Label {
+                text: (root.value.toString().toLowerCase() === "true" || root.value === "1") ? "Sí" : "No"
+                font.pixelSize: 12
+                color: (root.value.toString().toLowerCase() === "true" || root.value === "1") ? Theme.successColor : Theme.subtextColor
+            }
+
+            Switch {
+                checked: root.value.toString().toLowerCase() === "true" || root.value === "1"
+                onToggled: {
+                    root.valueSaved(checked ? "true" : "false")
+                }
             }
         }
 
+        // 2. Numeric Input Control (No text allowed)
         StyledTextField {
-            visible: root.fieldType !== "bool"
-            text: root.value
-            Layout.preferredWidth: 140
+            id: numField
+            visible: root.isNumType
+            text: root.getSafeNumString(root.value)
+            Layout.preferredWidth: 170
             horizontalAlignment: Text.AlignRight
-            inputMethodHints: root.fieldType === "number" ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
+            inputMethodHints: Qt.ImhFormattedNumbersOnly
+            validator: DoubleValidator { bottom: 0; decimals: 4; notation: DoubleValidator.StandardNotation }
+            onEditingFinished: {
+                var parsed = parseFloat(text || "0");
+                var safeVal = isNaN(parsed) ? "0" : parsed.toString();
+                root.valueSaved(safeVal);
+            }
+        }
 
+        // 3. String / Fallback Text Control
+        StyledTextField {
+            visible: !root.isBoolType && !root.isNumType
+            text: root.value
+            Layout.preferredWidth: 170
             onEditingFinished: {
                 root.valueSaved(text)
             }

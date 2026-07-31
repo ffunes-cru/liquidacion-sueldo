@@ -75,10 +75,15 @@ ReceiptHistoryModel *AppController::receiptHistoryModel() const {
 QVariantMap AppController::processLiquidation(int employeeId,
                                               const QString &quincenaSel,
                                               const QString &fechaCalculo) {
-  qInfo() << "[AppController] Ejecutando procesamiento de liquidación para "
-             "Empleado ID:"
+  qInfo() << "[AppController] Ejecutando procesamiento de liquidación para Empleado ID:"
           << employeeId << "Quincena:" << quincenaSel;
-  return m_engine->processLiquidation(employeeId, quincenaSel, fechaCalculo);
+  QVariantMap result = m_engine->processLiquidation(employeeId, quincenaSel, fechaCalculo);
+  QVariantList errores = result.value("errores").toList();
+  if (!errores.isEmpty()) {
+      qWarning() << "[AppController] Se detectaron errores en la liquidación para empleado ID:" << employeeId << ":" << errores;
+      emit calculationErrorOccurred(errores);
+  }
+  return result;
 }
 
 int AppController::persistLiquidation(const QVariantMap &result, int mes,
@@ -142,6 +147,13 @@ bool AppController::renameSchemaField(int fieldId, const QString &newCode, const
   return ok;
 }
 
+bool AppController::updateSchemaField(int fieldId, const QString &fieldCode, const QString &fieldLabel, const QString &fieldType, const QString &defaultValue)
+{
+    bool ok = m_db->updateSchemaField(fieldId, fieldCode, fieldLabel, fieldType, defaultValue);
+    m_employeeVarsModel->refresh();
+    return ok;
+}
+
 bool AppController::removeSchemaField(int fieldId) {
   qInfo() << "[AppController] Eliminando campo de esquema ID:" << fieldId;
   bool ok = m_db->removeSchemaField(fieldId);
@@ -189,18 +201,22 @@ AppController::getAvailableFormulaVariables(const QString &esquemaCodigo) {
 
   // Built-in functions
   addVar("round(val, n)", "Redondea un valor a N decimales", "Función Motor");
-  addVar("min(a, b)", "Retorna el mínimo entre dos expresiones",
-         "Función Motor");
-  addVar("max(a, b)", "Retorna el máximo entre dos expresiones",
-         "Función Motor");
+  addVar("min(a, b)", "Retorna el mínimo entre expresiones", "Función Motor");
+  addVar("max(a, b)", "Retorna el máximo entre expresiones", "Función Motor");
   addVar("abs(val)", "Retorna el valor absoluto", "Función Motor");
-  addVar("Q_sum_(\"var\")",
-         "Suma de una variable en todas las quincenas del mes",
-         "Agregación Quincenal");
-  addVar("Q_avg_(\"var\")", "Promedio de una variable en las quincenas del mes",
-         "Agregación Quincenal");
-  addVar("cant_q()", "Cantidad total de quincenas configuradas",
-         "Agregación Quincenal");
+
+  // Quincena functions
+  addVar("Q1(\"var\")", "Valor de una variable en la Quincena 1", "Agregación Quincenal");
+  addVar("Q2(\"var\")", "Valor de una variable en la Quincena 2", "Agregación Quincenal");
+  addVar("Q_sum(\"var\")", "Suma de una variable en las quincenas del mes", "Agregación Quincenal");
+  addVar("Q_avg(\"var\")", "Promedio de una variable en las quincenas del mes", "Agregación Quincenal");
+  addVar("Q_max(\"var\")", "Valor máximo de una variable en las quincenas del mes", "Agregación Quincenal");
+
+  // Historical functions
+  addVar("H_sum(\"var\", meses)", "Sumatoria de los últimos N meses recibidos", "Histórico Mensual");
+  addVar("H_max(\"var\", meses)", "Valor máximo de los últimos N meses (para SAC)", "Histórico Mensual");
+  addVar("H_avg(\"var\", meses)", "Promedio de los últimos N meses", "Histórico Mensual");
+  addVar("H_val(\"var\", offset)", "Valor de una variable N meses atrás (offset)", "Histórico Mensual");
 
   // Local concept execution variables
   addVar("unidad", "Valor de la columna Unidad/Cantidad del concepto actual",

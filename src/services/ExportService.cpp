@@ -9,12 +9,27 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QPainter>
 #include <QPdfWriter>
 #include <QSqlQuery>
 #include <QTextStream>
 
 #include "xlsxdocument.h"
+
+static QString fmtNum(double val, int decimals = 2)
+{
+    if (val == 0.0) return "-";
+    QLocale loc(QLocale::Spanish, QLocale::Argentina);
+    return loc.toString(val, 'f', decimals);
+}
+
+static QString fmtMoney(double val)
+{
+    if (val == 0.0) return "-";
+    QLocale loc(QLocale::Spanish, QLocale::Argentina);
+    return "$ " + loc.toString(val, 'f', 2);
+}
 
 ExportService::ExportService(DatabaseManager *db, QObject *parent)
     : QObject(parent), m_db(db)
@@ -275,6 +290,8 @@ bool ExportService::importDataXlsx(const QString &path)
         return false;
     }
 
+    m_db->transaction();
+
     // Import Schemas
     if (xlsx.selectSheet("Esquemas de Cálculo")) {
         for (int r = 2; r <= xlsx.dimension().lastRow(); r++) {
@@ -405,6 +422,7 @@ bool ExportService::importDataXlsx(const QString &path)
         }
     }
 
+    m_db->commit();
     qInfo() << "[ExportService] Importación Excel completada.";
     return true;
 }
@@ -616,16 +634,14 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
     // ── Concept Lines ───────────────────────────────────────────
     painter.setFont(headerFont);
     int colDesc = 0;
-    int colUnit = pageW * 0.50;
-    int colBase = pageW * 0.62;
-    int colHab  = pageW * 0.76;
-    int colDesc2 = pageW * 0.88;
+    int colUnit = pageW * 0.55;
+    int colBase = pageW * 0.67;
+    int colMonto = pageW * 0.81;
 
     painter.drawText(QRect(colDesc, y, colUnit - colDesc, 60), Qt::AlignLeft, "Concepto");
     painter.drawText(QRect(colUnit, y, colBase - colUnit, 60), Qt::AlignRight, "Unidad");
-    painter.drawText(QRect(colBase, y, colHab - colBase, 60), Qt::AlignRight, "Base");
-    painter.drawText(QRect(colHab, y, colDesc2 - colHab, 60), Qt::AlignRight, "Haberes");
-    painter.drawText(QRect(colDesc2, y, pageW - colDesc2, 60), Qt::AlignRight, "Descuentos");
+    painter.drawText(QRect(colBase, y, colMonto - colBase, 60), Qt::AlignRight, "Base");
+    painter.drawText(QRect(colMonto, y, pageW - colMonto, 60), Qt::AlignRight, "Monto ($)");
     y += 70;
     drawLine(y);
     y += 10;
@@ -635,7 +651,7 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
     for (const auto &concepto : conceptos) {
         auto c = concepto.toMap();
         QString desc = c["descripcion"].toString();
-        QString seccion = c["seccion"].toString();
+        QString seccion = c["seccion"].toString().toUpper();
         QString tipoCalc = c["tipo_calculo"].toString();
         QString codigo = c["codigo"].toString();
         double monto = c["monto"].toDouble();
@@ -643,40 +659,55 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
         double base = c["base"].toDouble();
 
         bool isSeparator = (tipoCalc == "separator" || codigo.startsWith("SEP_"));
+        bool isTotal = (!isSeparator && (codigo.startsWith("TOT_") || codigo.startsWith("TOTAL_") || codigo.startsWith("NETO") || desc.toUpper().contains("TOTAL") || desc.toUpper().contains("NETO")));
 
         if (isSeparator) {
-            y += 8;
-            QRect sepRect(0, y, pageW, 55);
-            painter.fillRect(sepRect, QColor(240, 243, 250)); // Light subtle tint background
-            painter.setPen(QPen(QColor(180, 195, 220), 1));
+            y += 6;
+            QRect sepRect(0, y, pageW, 58);
+            painter.fillRect(sepRect, QColor(234, 242, 253));
+            painter.setPen(QPen(QColor(59, 130, 246), 1.5));
             painter.drawRect(sepRect);
 
             QFont sepFont("Helvetica", 9, QFont::Bold);
             painter.setFont(sepFont);
-            painter.setPen(QPen(QColor(30, 40, 70)));
-            painter.drawText(QRect(15, y, pageW - 30, 55), Qt::AlignLeft | Qt::AlignVCenter, "■  " + desc.toUpper());
+            painter.setPen(QPen(QColor(15, 23, 42)));
+            painter.drawText(QRect(12, y, pageW - 24, 58), Qt::AlignLeft | Qt::AlignVCenter, "■  " + desc.toUpper());
 
             painter.setFont(normalFont);
             painter.setPen(QPen(Qt::black));
             y += 65;
         } else {
-            painter.drawText(QRect(colDesc, y, colUnit - colDesc - 10, 50), Qt::AlignLeft, desc);
+            if (isTotal) {
+                y += 4;
+                QRect totalRect(0, y, pageW, 58);
+                painter.fillRect(totalRect, QColor(234, 242, 253));
+                painter.setPen(QPen(QColor(59, 130, 246), 1.5));
+                painter.drawRect(totalRect);
+
+                QFont boldFont("Helvetica", 9, QFont::Bold);
+                painter.setFont(boldFont);
+                painter.setPen(QPen(QColor(15, 23, 42)));
+            }
+
+            painter.drawText(QRect(colDesc + (isTotal ? 8 : 0), y, colUnit - colDesc - 10, 50), Qt::AlignLeft, desc);
 
             if (unidad != 0)
                 painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, 50), Qt::AlignRight,
-                                 QString::number(unidad, 'f', 2));
+                                 fmtNum(unidad, 2));
             if (base > 0)
-                painter.drawText(QRect(colBase, y, colHab - colBase - 10, 50), Qt::AlignRight,
-                                 QString::number(base, 'f', 2));
+                painter.drawText(QRect(colBase, y, colMonto - colBase - 10, 50), Qt::AlignRight,
+                                 fmtMoney(base));
 
-            if (seccion == "REMUNERATIVO" || seccion == "NO_REMUNERATIVO" || seccion == "COMPOSICION") {
-                painter.drawText(QRect(colHab, y, colDesc2 - colHab - 10, 50), Qt::AlignRight,
-                                 QString::number(monto, 'f', 2));
-            } else if (seccion == "DESCUENTO" || seccion == "RECIBO") {
-                painter.drawText(QRect(colDesc2, y, pageW - colDesc2, 50), Qt::AlignRight,
-                                 QString::number(monto, 'f', 2));
+            if (monto != 0) {
+                painter.drawText(QRect(colMonto - (isTotal ? 8 : 0), y, pageW - colMonto, 50), Qt::AlignRight,
+                                 fmtMoney(monto));
             }
-            y += 55;
+
+            if (isTotal) {
+                painter.setFont(normalFont);
+                painter.setPen(QPen(Qt::black));
+            }
+            y += isTotal ? 65 : 55;
         }
 
         if (y > writer.height() - 400) {
@@ -684,33 +715,6 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
             y = 50;
         }
     }
-
-    // ── Totals ──────────────────────────────────────────────────
-    y += 20;
-    drawLine(y);
-    y += 20;
-
-    painter.setFont(headerFont);
-    double totalRem = liquidationResult.value("total_remunerativo", 0).toDouble();
-    double totalDesc = liquidationResult.value("total_descuentos", 0).toDouble();
-    double neto = liquidationResult.value("neto_a_cobrar", 0).toDouble();
-
-    painter.drawText(QRect(colDesc, y, colHab - colDesc, 60), Qt::AlignLeft, "TOTAL REMUNERATIVO:");
-    painter.drawText(QRect(colHab, y, colDesc2 - colHab, 60), Qt::AlignRight, QString::number(totalRem, 'f', 2));
-    y += 70;
-
-    painter.drawText(QRect(colDesc, y, colDesc2 - colDesc, 60), Qt::AlignLeft, "TOTAL DESCUENTOS:");
-    painter.drawText(QRect(colDesc2, y, pageW - colDesc2, 60), Qt::AlignRight, QString::number(totalDesc, 'f', 2));
-    y += 70;
-
-    drawLine(y);
-    y += 20;
-
-    titleFont.setPointSize(12);
-    painter.setFont(titleFont);
-    painter.drawText(QRect(colDesc, y, pageW * 0.75, 80), Qt::AlignLeft, "NETO A COBRAR:");
-    painter.drawText(QRect(pageW * 0.75, y, pageW * 0.25, 80), Qt::AlignRight,
-                     "$ " + QString::number(neto, 'f', 2));
 
     painter.end();
 

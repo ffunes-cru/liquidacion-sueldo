@@ -187,8 +187,6 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
 
     // Override seniority (calculated from dates, not user input)
     contexto["antiguedad_anios"] = antiguedadAnios;
-    contexto["antiguedad"] = antiguedadAnios;
-
     // Inject valor_hora, jornal, basico from category
     int catId = employee.value("categoria_jornal_id").toInt();
     double valorHora = 0.0;
@@ -222,8 +220,22 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
         for (auto it = quincenasData.begin(); it != quincenasData.end(); ++it) {
             quincenaComputed[it.key()] = buildQuincenaContext(
                 employeeId, it.key(), globalFlat, globalNamespaces, contexto, cells);
+            contexto[it.key() + "_obj"] = quincenaComputed[it.key()];
         }
     }
+
+    // Load historical receipt snapshots for H_* evaluation
+    QVariantList historyList;
+    QVariantList receipts = m_db->listReceiptsByEmployee(employeeId);
+    for (const QVariant &r : receipts) {
+        QVariantMap rec = r.toMap();
+        QString jsonStr = rec["datos_json"].toString();
+        QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8());
+        if (doc.isObject()) {
+            historyList.append(doc.object().toVariantMap());
+        }
+    }
+    contexto["_history"] = historyList;
 
     // ═══════════════════════════════════════════════════════════════
     // STEP 4: Setup aggregation functions and evaluate cells
@@ -233,6 +245,22 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
 
     FormulaEngine engine;
     engine.setContext(contexto);
+
+    if (esJornal) {
+        QSet<QString> allVarNames;
+        for (const auto &qData : quincenaComputed) {
+            for (auto vi = qData.begin(); vi != qData.end(); ++vi) {
+                allVarNames.insert(vi.key());
+            }
+        }
+
+        for (const QString &varName : allVarNames) {
+            engine.setVariable("Q_sum_" + varName, aggregator.sumarQ(varName));
+            engine.setVariable("Q_avg_" + varName, aggregator.promedioQ(varName));
+            engine.setVariable("Q_max_" + varName, aggregator.maxQ(varName));
+            engine.setVariable("Q_min_" + varName, aggregator.minQ(varName));
+        }
+    }
 
     if (esJornal) {
         QSet<QString> allVarNames;
@@ -308,15 +336,47 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
             monto = 0.0;
         } else if (tipoCalc == "porcentaje") {
             double pct = cell.value("simple_porcentaje", 0.0).toDouble();
-            QString baseVar = cell.value("simple_base_variable", "").toString();
-            double baseVal = engine.getVariable(baseVar).toDouble();
-
-            unidad = pct / 100.0;
+            QString baseVar = cell.value("simple_base_variable", "").toString().trimmed().toLower();
+            double baseVal = 0.0;
+            if (!baseVar.isEmpty()) {
+                baseVal = engine.getVariable(baseVar).toDouble();
+                if (baseVal == 0.0 && (baseVar == "bruto" || baseVar == "total_remunerativo")) {
+                    baseVal = totalRemunerativo;
+                }
+            }
+            unidad = pct;
             base = baseVal;
-            monto = qRound(unidad.toDouble() * baseVal * 100.0) / 100.0; // round to 2 decimals
+            monto = qRound((baseVal * (pct / 100.0)) * 100.0) / 100.0;
 
         } else if (tipoCalc == "fijo") {
             monto = cell.value("simple_monto_fijo", 0.0).toDouble();
+
+        } else if (tipoCalc == "simple") {
+            double pct = cell.value("simple_porcentaje", 0.0).toDouble();
+            QString baseVar = cell.value("simple_base_variable", "").toString().trimmed().toLower();
+            double montoFijo = cell.value("simple_monto_fijo", 0.0).toDouble();
+            double baseVal = 0.0;
+            if (!baseVar.isEmpty()) {
+                baseVal = engine.getVariable(baseVar).toDouble();
+                if (baseVal == 0.0 && (baseVar == "bruto" || baseVar == "total_remunerativo")) {
+                    baseVal = totalRemunerativo;
+                }
+            }
+
+            if (pct != 0.0 && baseVal != 0.0) {
+                unidad = pct;
+                base = baseVal;
+                monto = (baseVal * (pct / 100.0)) + montoFijo;
+            } else if (montoFijo != 0.0) {
+                monto = montoFijo;
+                if (pct != 0.0) unidad = pct;
+                if (baseVal != 0.0) base = baseVal;
+            } else if (pct != 0.0) {
+                unidad = pct;
+                base = baseVal;
+                monto = baseVal * (pct / 100.0);
+            }
+            monto = qRound(monto * 100.0) / 100.0;
 
         } else {
             // Formula type
@@ -475,9 +535,14 @@ QVariantMap LiquidationEngine::buildQuincenaContext(int employeeId, const QStrin
     FormulaEngine tmpEngine;
     tmpEngine.setContext(ctx);
 
+    double qBruto = 0.0;
+    double qNoRemun = 0.0;
+    double qDesc = 0.0;
+
     for (const QVariant &c : cells) {
         QVariantMap cell = c.toMap();
         QString codigo = cell["codigo_variable"].toString();
+        QString seccion = cell["seccion_codigo"].toString().trimmed().toUpper();
         QString tipoCalc = cell.value("tipo_calculo", "formula").toString();
 
         // Condition check
@@ -520,7 +585,30 @@ QVariantMap LiquidationEngine::buildQuincenaContext(int employeeId, const QStrin
 
         tmpEngine.setVariable(codigo, monto);
         ctx[codigo] = monto;
+
+        // Accumulate quincena totals
+        if (seccion.contains("REMUNERATIVO") && !seccion.contains("NO_REMUNERATIVO") && !seccion.contains("NO REMUNERATIVO")) {
+            qBruto += monto;
+            tmpEngine.setVariable("bruto", qBruto);
+            tmpEngine.setVariable("total_remunerativo", qBruto);
+            ctx["bruto"] = qBruto;
+            ctx["total_remunerativo"] = qBruto;
+        } else if (seccion.contains("NO_REMUNERATIVO") || seccion.contains("NO REMUNERATIVO")) {
+            qNoRemun += monto;
+            tmpEngine.setVariable("total_no_remunerativo", qNoRemun);
+            ctx["total_no_remunerativo"] = qNoRemun;
+        } else if (seccion.contains("DESCUENTO") || seccion.contains("DEDUCCION") || seccion.contains("RETENCION")) {
+            qDesc += monto;
+            tmpEngine.setVariable("total_descuentos", qDesc);
+            ctx["total_descuentos"] = qDesc;
+        }
     }
+
+    ctx["bruto"] = qBruto;
+    ctx["total_remunerativo"] = qBruto;
+    ctx["total_no_remunerativo"] = qNoRemun;
+    ctx["total_descuentos"] = qDesc;
+    ctx["neto"] = qBruto + qNoRemun - qDesc;
 
     return ctx;
 }

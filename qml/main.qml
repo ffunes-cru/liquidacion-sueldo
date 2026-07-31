@@ -148,4 +148,15 @@ ApplicationWindow {
     SettingsDialog {
         id: settingsDialog
     }
+
+    CalculationErrorDialog {
+        id: calcErrorDialog
+    }
+
+    Connections {
+        target: AppController
+        function onCalculationErrorOccurred(errors) {
+            calcErrorDialog.showErrors(errors)
+        }
+    }
 }

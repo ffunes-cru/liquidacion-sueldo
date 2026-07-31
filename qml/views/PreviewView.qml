@@ -119,8 +119,13 @@ Item {
                             if (cbEmpleado.currentIndex >= 0)
                                 root.employeeData = AppController.employeeModel.get(cbEmpleado.currentIndex)
                             root.companyData = AppController.getCompany()
-                            root.liquidationResult = AppController.processLiquidation(empId, cbQuincena.currentText, txtFechaCalculo.text)
-                            root.statusMsg = "Liquidación calculada con éxito."
+                            var res = AppController.processLiquidation(empId, cbQuincena.currentText, txtFechaCalculo.text)
+                            root.liquidationResult = res
+                            if (res && res.errores && res.errores.length > 0) {
+                                root.statusMsg = "⚠️ Se detectaron " + res.errores.length + " error(es) en la liquidación."
+                            } else {
+                                root.statusMsg = "Liquidación calculada con éxito."
+                            }
                         } else {
                             root.statusMsg = "Seleccione un empleado válido."
                         }
@@ -156,7 +161,8 @@ Item {
 
                 Label {
                     text: root.statusMsg
-                    color: Theme.accentColor
+                    color: root.statusMsg.indexOf("⚠️") !== -1 ? "#EF4444" : Theme.accentColor
+                    font.bold: root.statusMsg.indexOf("⚠️") !== -1
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
@@ -247,34 +253,6 @@ Item {
                         }
                     }
 
-                    // ── KPI Summary Cards ─────────────────────────────
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-
-                        KpiCard {
-                            title: "Total Remunerativo"
-                            value: root.liquidationResult ? "$ " + Number(root.liquidationResult["total_remunerativo"] || 0).toFixed(2) : "$ 0.00"
-                            borderAccent: Theme.successColor
-                            valueColor: Theme.successColor
-                        }
-
-                        KpiCard {
-                            title: "Total Descuentos"
-                            value: root.liquidationResult ? "$ " + Number(root.liquidationResult["total_descuentos"] || 0).toFixed(2) : "$ 0.00"
-                            borderAccent: Theme.dangerColor
-                            valueColor: Theme.dangerColor
-                        }
-
-                        KpiCard {
-                            title: "NETO A COBRAR"
-                            value: root.liquidationResult ? "$ " + Number(root.liquidationResult["neto_a_cobrar"] || 0).toFixed(2) : "$ 0.00"
-                            borderAccent: Theme.accentColor
-                            valueColor: Theme.accentColor
-                            valueSize: 18
-                        }
-                    }
-
                     // ── Concepts Breakdown Table ──────────────────────
                     SectionPanel {
                         Layout.fillHeight: true
@@ -298,10 +276,9 @@ Item {
 
                                     Label { text: "Cód"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 80 }
                                     Label { text: "Descripción del Concepto"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.fillWidth: true }
-                                    Label { text: "Unidad"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 70; horizontalAlignment: Text.AlignRight }
-                                    Label { text: "Base Imp."; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 90; horizontalAlignment: Text.AlignRight }
-                                    Label { text: "Haberes ($)"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 100; horizontalAlignment: Text.AlignRight }
-                                    Label { text: "Descuentos ($)"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 100; horizontalAlignment: Text.AlignRight }
+                                    Label { text: "Unidad"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 80; horizontalAlignment: Text.AlignRight }
+                                    Label { text: "Base Imp."; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 110; horizontalAlignment: Text.AlignRight }
+                                    Label { text: "Monto ($)"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 130; horizontalAlignment: Text.AlignRight }
                                 }
                             }
 
@@ -319,13 +296,20 @@ Item {
                                 model: root.liquidationResult ? root.liquidationResult["conceptos"] : []
                                 delegate: Rectangle {
                                     property bool isSep: (modelData["tipo_calculo"] === "separator" || (modelData["codigo"] || "").indexOf("SEP_") === 0)
+                                    property bool isTotal: {
+                                        if (isSep) return false;
+                                        var c = (modelData["codigo"] || modelData["codigo_variable"] || "").toUpperCase();
+                                        var d = (modelData["descripcion"] || "").toUpperCase();
+                                        return c.indexOf("TOT_") === 0 || c.indexOf("TOTAL_") === 0 || c.indexOf("NETO") === 0 || d.indexOf("TOTAL") !== -1 || d.indexOf("NETO") !== -1;
+                                    }
+
                                     Layout.fillWidth: true
-                                    height: isSep ? 32 : 36
+                                    height: isSep ? 32 : (isTotal ? 40 : 36)
                                     color: isSep ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.15)
-                                                 : (index % 2 === 0 ? Qt.alpha("#ffffff", 0.02) : "transparent")
+                                                 : (isTotal ? "#1E293B" : (index % 2 === 0 ? Qt.alpha("#ffffff", 0.02) : "transparent"))
                                     radius: 4
-                                    border.color: isSep ? Theme.accentColor : "transparent"
-                                    border.width: isSep ? 1 : 0
+                                    border.color: isSep ? Theme.accentColor : (isTotal ? "#F59E0B" : "transparent")
+                                    border.width: isSep ? 1 : (isTotal ? 1 : 0)
 
                                     RowLayout {
                                         anchors.fill: parent
@@ -336,7 +320,7 @@ Item {
                                         Label {
                                             visible: isSep
                                             text: "🔹  " + (modelData["descripcion"] || "SECCIÓN")
-                                            color: Theme.textColor
+                                            color: Theme.accentColor
                                             font.bold: true
                                             font.pixelSize: 13
                                             Layout.fillWidth: true
@@ -346,40 +330,34 @@ Item {
                                         Label {
                                             visible: !isSep
                                             text: modelData["codigo"] || modelData["codigo_variable"] || ""
-                                            color: Theme.accentColor; font.bold: true; font.family: "Monospace"; font.pixelSize: 12
+                                            color: isTotal ? "#F59E0B" : Theme.accentColor; font.bold: true; font.family: "Monospace"; font.pixelSize: isTotal ? 13 : 12
                                             Layout.preferredWidth: 80; elide: Text.ElideRight
                                         }
                                         Label {
                                             visible: !isSep
                                             text: modelData["descripcion"] || ""
-                                            color: Theme.textColor; font.pixelSize: 13
+                                            color: isTotal ? "#F8FAFC" : Theme.textColor; font.bold: isTotal; font.pixelSize: isTotal ? 13 : 13
                                             Layout.fillWidth: true; elide: Text.ElideRight
                                         }
                                         Label {
                                             visible: !isSep
-                                            text: (modelData["unidad"] !== undefined && modelData["unidad"] !== null && Number(modelData["unidad"]) !== 0) ? Number(modelData["unidad"]).toFixed(2) : "-"
-                                            color: Theme.subtextColor; font.pixelSize: 12
-                                            Layout.preferredWidth: 70; horizontalAlignment: Text.AlignRight
+                                            text: formatNumber(modelData["unidad"], 2)
+                                            color: isTotal ? "#F8FAFC" : "#94A3B8"; font.family: "Monospace"; font.pixelSize: isTotal ? 13 : 12
+                                            Layout.preferredWidth: 80; horizontalAlignment: Text.AlignRight
                                         }
                                         Label {
                                             visible: !isSep
-                                            text: (modelData["base"] !== undefined && modelData["base"] !== null && Number(modelData["base"]) > 0) ? "$ " + Number(modelData["base"]).toFixed(2) : "-"
-                                            color: Theme.subtextColor; font.pixelSize: 12
-                                            Layout.preferredWidth: 90; horizontalAlignment: Text.AlignRight
-                                        }
-                                        Label {
-                                            visible: !isSep
-                                            property string sec: (modelData["seccion"] || "").toUpperCase()
-                                            text: (sec === "REMUNERATIVO" || sec === "NO_REMUNERATIVO" || sec === "COMPOSICION" || sec === "HABERES") ? "$ " + Number(modelData["monto"] || 0).toFixed(2) : "-"
-                                            color: Theme.successColor; font.bold: true; font.pixelSize: 13
-                                            Layout.preferredWidth: 100; horizontalAlignment: Text.AlignRight
+                                            text: formatMoney(modelData["base"])
+                                            color: isTotal ? "#38BDF8" : "#94A3B8"; font.family: "Monospace"; font.pixelSize: isTotal ? 13 : 12
+                                            Layout.preferredWidth: 110; horizontalAlignment: Text.AlignRight
                                         }
                                         Label {
                                             visible: !isSep
                                             property string sec: (modelData["seccion"] || "").toUpperCase()
-                                            text: (sec === "DESCUENTO" || sec === "RECIBO" || sec === "RETENCION" || sec === "RETENCIONES") ? "$ " + Number(modelData["monto"] || 0).toFixed(2) : "-"
-                                            color: Theme.dangerColor; font.bold: true; font.pixelSize: 13
-                                            Layout.preferredWidth: 100; horizontalAlignment: Text.AlignRight
+                                            property bool isDesc: (sec === "DESCUENTO" || sec === "RECIBO" || sec === "RETENCION" || sec === "RETENCIONES" || sec === "DESCUENTOS")
+                                            text: formatMoney(modelData["monto"])
+                                            color: isTotal ? "#F59E0B" : (isDesc ? "#EF4444" : "#10B981"); font.bold: true; font.family: "Monospace"; font.pixelSize: isTotal ? 14 : 13
+                                            Layout.preferredWidth: 130; horizontalAlignment: Text.AlignRight
                                         }
                                     }
                                 }
@@ -389,6 +367,21 @@ Item {
                 }
             }
         }
+    }
+
+    function formatNumber(val, decimals) {
+        if (val === undefined || val === null || isNaN(val)) return "-";
+        var num = Number(val);
+        if (num === 0) return "-";
+        var dec = (decimals !== undefined) ? decimals : 2;
+        var parts = num.toFixed(dec).split(".");
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+        return parts.join(",");
+    }
+
+    function formatMoney(val) {
+        if (val === undefined || val === null || isNaN(val) || Number(val) === 0) return "-";
+        return "$ " + formatNumber(val, 2);
     }
 
     function refreshQuincenasCombo(empId) {

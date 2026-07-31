@@ -116,6 +116,7 @@ set(QML_FILES
     qml/dialogs/VariableAssistantDialog.qml
     qml/dialogs/SchemaConfigDialog.qml
     qml/dialogs/SettingsDialog.qml
+    qml/dialogs/CalculationErrorDialog.qml
 )
 
 qt_add_executable(${PROJECT_NAME}

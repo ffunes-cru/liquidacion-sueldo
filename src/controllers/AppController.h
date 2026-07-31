@@ -71,6 +71,7 @@ public:
     Q_INVOKABLE QVariantList listSchemaFields(const QString &esquemaCodigo);
     Q_INVOKABLE int addSchemaField(const QString &esquemaCodigo, const QString &fieldCode, const QString &fieldLabel, const QString &fieldType, const QString &defaultValue, int displayOrder);
     Q_INVOKABLE bool renameSchemaField(int fieldId, const QString &newCode, const QString &newLabel);
+    Q_INVOKABLE bool updateSchemaField(int fieldId, const QString &fieldCode, const QString &fieldLabel, const QString &fieldType, const QString &defaultValue);
     Q_INVOKABLE bool removeSchemaField(int fieldId);
 
     // Quincenas CRUD
@@ -90,6 +91,7 @@ public:
 signals:
     void currentRoleChanged();
     void darkModeChanged();
+    void calculationErrorOccurred(const QVariantList &errors);
 
 private:
     DatabaseManager *m_db;

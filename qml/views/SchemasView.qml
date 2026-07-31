@@ -220,7 +220,15 @@ MasterDetailView {
                             AppController.removeSchemaField(id)
                             root.refreshSchemaFields()
                         }
-                        onEditRequested: function(data) { /* not editable inline */ }
+                        onEditRequested: function(data) {
+                            editFieldDialog.openEdit({
+                                itemId: modelData.id,
+                                field_code: modelData.field_code || "",
+                                field_label: modelData.field_label || "",
+                                field_type: modelData.field_type || "number",
+                                default_value: modelData.default_value || "0"
+                            })
+                        }
                     }
                 }
             }
@@ -271,6 +279,34 @@ MasterDetailView {
                     values.field_type || "number",
                     values.default_value.trim() || "0",
                     10
+                )
+                root.refreshSchemaFields()
+            }
+        }
+    }
+
+    // ── Dialog to edit field ──────────────────────────────────────
+    FormDialog {
+        id: editFieldDialog
+        entityName: "Variable de Esquema"
+        dialogWidth: 420
+
+        formFields: [
+            { key: "field_code",    label: "Código Variable:", placeholder: "Ej: horas_extras_50", type: "text" },
+            { key: "field_label",   label: "Etiqueta:",        placeholder: "Ej: Horas Extras 50%", type: "text" },
+            { key: "field_type",    label: "Tipo de Dato:",    type: "combo", comboModel: ["number", "bool", "string"] },
+            { key: "default_value", label: "Valor por Defecto:", placeholder: "0", type: "text" }
+        ]
+
+        onFormAccepted: function(values) {
+            var fieldId = editFieldDialog.itemId
+            if (fieldId > 0 && values.field_code.trim() !== "" && values.field_label.trim() !== "") {
+                AppController.updateSchemaField(
+                    fieldId,
+                    values.field_code.trim().toLowerCase(),
+                    values.field_label.trim(),
+                    values.field_type || "number",
+                    values.default_value.trim() || "0"
                 )
                 root.refreshSchemaFields()
             }

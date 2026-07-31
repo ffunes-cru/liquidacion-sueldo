@@ -229,6 +229,8 @@ void DatabaseManager::createTables()
 
 void DatabaseManager::runMigrations()
 {
+    QSqlQuery q(m_db);
+    q.exec("ALTER TABLE celdas_calculo ADD COLUMN color_hex TEXT DEFAULT ''");
 }
 
 QVariantList DatabaseManager::listSchemas() const
@@ -472,20 +474,15 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
 
     QSqlQuery q(m_db);
     if (exists) {
-        q.prepare(R"(
-            UPDATE empleados
-            SET legajo=?, nombre_completo=?, tipo_liquidacion=?,
-                esquema_codigo=?, categoria_jornal_id=?, fecha_ingreso=?, cuil=?
-            WHERE id=?
-        )");
-        q.addBindValue(legajo);
-        q.addBindValue(nombre);
-        q.addBindValue(tipoLiq);
-        q.addBindValue(safeEsquema);
-        q.addBindValue(categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant());
-        q.addBindValue(fechaIngreso);
-        q.addBindValue(cuil);
-        q.addBindValue(id);
+        q.prepare("UPDATE empleados SET legajo=?, nombre_completo=?, tipo_liquidacion=?, esquema_codigo=?, categoria_jornal_id=?, fecha_ingreso=?, cuil=? WHERE id=?");
+        q.bindValue(0, legajo);
+        q.bindValue(1, nombre);
+        q.bindValue(2, tipoLiq);
+        q.bindValue(3, safeEsquema);
+        q.bindValue(4, categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant(QMetaType(QMetaType::Int)));
+        q.bindValue(5, fechaIngreso);
+        q.bindValue(6, cuil);
+        q.bindValue(7, id);
         if (!q.exec()) {
             qCritical() << "[DatabaseManager] Error al actualizar empleado ID" << id << ":" << q.lastError().text();
             return -1;
@@ -493,26 +490,25 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
         return id;
     } else {
         if (id > 0) {
-            q.prepare(R"(
-                INSERT INTO empleados (id, legajo, nombre_completo, tipo_liquidacion,
-                                       esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            )");
-            q.addBindValue(id);
+            q.prepare("INSERT INTO empleados (id, legajo, nombre_completo, tipo_liquidacion, esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            q.bindValue(0, id);
+            q.bindValue(1, legajo);
+            q.bindValue(2, nombre);
+            q.bindValue(3, tipoLiq);
+            q.bindValue(4, safeEsquema);
+            q.bindValue(5, categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant(QMetaType(QMetaType::Int)));
+            q.bindValue(6, fechaIngreso);
+            q.bindValue(7, cuil);
         } else {
-            q.prepare(R"(
-                INSERT INTO empleados (legajo, nombre_completo, tipo_liquidacion,
-                                       esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            )");
+            q.prepare("INSERT INTO empleados (legajo, nombre_completo, tipo_liquidacion, esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            q.bindValue(0, legajo);
+            q.bindValue(1, nombre);
+            q.bindValue(2, tipoLiq);
+            q.bindValue(3, safeEsquema);
+            q.bindValue(4, categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant(QMetaType(QMetaType::Int)));
+            q.bindValue(5, fechaIngreso);
+            q.bindValue(6, cuil);
         }
-        q.addBindValue(legajo);
-        q.addBindValue(nombre);
-        q.addBindValue(tipoLiq);
-        q.addBindValue(safeEsquema);
-        q.addBindValue(categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant());
-        q.addBindValue(fechaIngreso);
-        q.addBindValue(cuil);
         if (!q.exec()) {
             qCritical() << "[DatabaseManager] Error al insertar nuevo empleado:" << q.lastError().text();
             return -1;
@@ -521,10 +517,11 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
 
         QSqlQuery insQ(m_db);
         insQ.prepare("INSERT OR IGNORE INTO quincenas_empleado (empleado_id, quincena) VALUES (?, 'Q1')");
-        insQ.addBindValue(newId);
+        insQ.bindValue(0, newId);
         insQ.exec();
 
         syncEmployeeFieldsForSchema(safeEsquema);
+
         return newId;
     }
 }
@@ -534,7 +531,7 @@ bool DatabaseManager::deleteEmployee(int id)
     qInfo() << "[DatabaseManager] Eliminando registro de empleado ID:" << id;
     QSqlQuery q(m_db);
     q.prepare("DELETE FROM empleados WHERE id = ?");
-    q.addBindValue(id);
+    q.bindValue(0, id);
     return q.exec();
 }
 
@@ -564,8 +561,8 @@ int DatabaseManager::duplicateEmployee(int sourceId)
         FROM employee_field_values
         WHERE empleado_id = ?
     )");
-    q.addBindValue(newId);
-    q.addBindValue(sourceId);
+    q.bindValue(0, newId);
+    q.bindValue(1, sourceId);
     q.exec();
 
     return newId;
@@ -576,7 +573,7 @@ QVariantList DatabaseManager::listSchemaFields(const QString &esquemaCodigo) con
     QVariantList result;
     QSqlQuery q(m_db);
     q.prepare("SELECT * FROM schema_fields WHERE esquema_codigo = ? ORDER BY display_order, id");
-    q.addBindValue(esquemaCodigo);
+    q.bindValue(0, esquemaCodigo);
     q.exec();
     while (q.next()) {
         result.append(QVariantMap{
@@ -598,16 +595,13 @@ int DatabaseManager::addSchemaField(const QString &esquemaCodigo, const QString 
 {
     qInfo() << "[DatabaseManager] Agregando variable de entrada al esquema" << esquemaCodigo << ":" << fieldCode;
     QSqlQuery q(m_db);
-    q.prepare(R"(
-        INSERT INTO schema_fields (esquema_codigo, field_code, field_label, field_type, default_value, display_order)
-        VALUES (?, ?, ?, ?, ?, ?)
-    )");
-    q.addBindValue(esquemaCodigo);
-    q.addBindValue(fieldCode);
-    q.addBindValue(fieldLabel);
-    q.addBindValue(fieldType);
-    q.addBindValue(defaultValue);
-    q.addBindValue(displayOrder);
+    q.prepare("INSERT INTO schema_fields (esquema_codigo, field_code, field_label, field_type, default_value, display_order) VALUES (?, ?, ?, ?, ?, ?)");
+    q.bindValue(0, esquemaCodigo);
+    q.bindValue(1, fieldCode);
+    q.bindValue(2, fieldLabel);
+    q.bindValue(3, fieldType);
+    q.bindValue(4, defaultValue);
+    q.bindValue(5, displayOrder);
 
     if (!q.exec()) {
         qWarning() << "[DatabaseManager] Error al agregar campo de esquema:" << q.lastError().text();
@@ -635,6 +629,19 @@ bool DatabaseManager::renameSchemaField(int fieldId, const QString &newCode, con
     q.prepare("UPDATE schema_fields SET field_code = ?, field_label = ? WHERE id = ?");
     q.addBindValue(newCode);
     q.addBindValue(newLabel);
+    q.addBindValue(fieldId);
+    return q.exec();
+}
+
+bool DatabaseManager::updateSchemaField(int fieldId, const QString &fieldCode, const QString &fieldLabel,
+                                        const QString &fieldType, const QString &defaultValue)
+{
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE schema_fields SET field_code = ?, field_label = ?, field_type = ?, default_value = ? WHERE id = ?");
+    q.addBindValue(fieldCode);
+    q.addBindValue(fieldLabel);
+    q.addBindValue(fieldType);
+    q.addBindValue(defaultValue);
     q.addBindValue(fieldId);
     return q.exec();
 }
@@ -911,6 +918,7 @@ QVariantList DatabaseManager::listCellsBySchema(const QString &esquemaCodigo) co
             {"simple_base_variable", q.value("simple_base_variable")},
             {"simple_monto_fijo", q.value("simple_monto_fijo")},
             {"visible_recibo", q.value("visible_recibo")},
+            {"color_hex", q.value("color_hex")},
         });
     }
     return result;
@@ -944,6 +952,7 @@ QVariantList DatabaseManager::listAllCells() const
             {"simple_base_variable", q.value("simple_base_variable")},
             {"simple_monto_fijo", q.value("simple_monto_fijo")},
             {"visible_recibo", q.value("visible_recibo")},
+            {"color_hex", q.value("color_hex")},
         });
     }
     return result;
@@ -955,7 +964,7 @@ int DatabaseManager::saveCell(int id, const QString &seccionCodigo, const QStrin
                                const QString &formulaMonto, int orden, const QString &esquemaCodigo,
                                const QString &tipoCalculo, double simplePorcentaje,
                                const QString &simpleBaseVariable, double simpleMontoFijo,
-                               bool visibleRecibo)
+                               bool visibleRecibo, const QString &colorHex)
 {
     qInfo() << "[DatabaseManager] Guardando celda de cálculo:" << codigoVariable << "Esquema:" << esquemaCodigo;
     QSqlQuery q(m_db);
@@ -965,7 +974,7 @@ int DatabaseManager::saveCell(int id, const QString &seccionCodigo, const QStrin
             SET seccion_codigo=?, codigo_variable=?, descripcion=?, condicion=?,
                 formula_unidad=?, formula_base=?, formula_monto=?, orden=?,
                 esquema_codigo=?, tipo_calculo=?, simple_porcentaje=?,
-                simple_base_variable=?, simple_monto_fijo=?, visible_recibo=?
+                simple_base_variable=?, simple_monto_fijo=?, visible_recibo=?, color_hex=?
             WHERE id=?
         )");
         q.addBindValue(seccionCodigo);
@@ -982,6 +991,7 @@ int DatabaseManager::saveCell(int id, const QString &seccionCodigo, const QStrin
         q.addBindValue(simpleBaseVariable);
         q.addBindValue(simpleMontoFijo);
         q.addBindValue(visibleRecibo ? 1 : 0);
+        q.addBindValue(colorHex);
         q.addBindValue(id);
         q.exec();
         return id;
@@ -990,8 +1000,8 @@ int DatabaseManager::saveCell(int id, const QString &seccionCodigo, const QStrin
             INSERT INTO celdas_calculo
             (seccion_codigo, codigo_variable, descripcion, condicion,
              formula_unidad, formula_base, formula_monto, orden, esquema_codigo,
-             tipo_calculo, simple_porcentaje, simple_base_variable, simple_monto_fijo, visible_recibo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             tipo_calculo, simple_porcentaje, simple_base_variable, simple_monto_fijo, visible_recibo, color_hex)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         )");
         q.addBindValue(seccionCodigo);
         q.addBindValue(codigoVariable);
@@ -1007,9 +1017,20 @@ int DatabaseManager::saveCell(int id, const QString &seccionCodigo, const QStrin
         q.addBindValue(simpleBaseVariable);
         q.addBindValue(simpleMontoFijo);
         q.addBindValue(visibleRecibo ? 1 : 0);
+        q.addBindValue(colorHex);
         q.exec();
         return q.lastInsertId().toInt();
     }
+}
+
+bool DatabaseManager::updateCellColor(int id, const QString &colorHex)
+{
+    qInfo() << "[DatabaseManager] Actualizando color de celda ID:" << id << "a" << colorHex;
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE celdas_calculo SET color_hex = ? WHERE id = ?");
+    q.addBindValue(colorHex);
+    q.addBindValue(id);
+    return q.exec();
 }
 
 bool DatabaseManager::deleteCell(int id)

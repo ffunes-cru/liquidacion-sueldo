@@ -10,6 +10,7 @@ AppDialog {
     property int cellId: -1
     property string esquemaCodigo: "MENSUAL"
     property string seccionCodigo: "REMUNERATIVO"
+    property string tipoCalculo: "formula"
     property alias codigoVariable: txtCodigoVariable.text
     property alias descripcion: txtDescripcion.text
     property alias condicion: txtCondicion.text
@@ -18,7 +19,7 @@ AppDialog {
     property alias formulaBase: txtFormulaBase.text
     property int orden: 10
     property alias simplePorcentaje: txtSimplePorcentaje.text
-    property alias simpleBaseVariable: txtSimpleBaseVar.text
+    property string simpleBaseVariable: ""
     property alias simpleMontoFijo: txtSimpleMontoFijo.text
     property alias visibleRecibo: chkVisibleRecibo.checked
 
@@ -27,7 +28,8 @@ AppDialog {
     signal conceptSaved()
 
     title: cellId > 0 ? "Editar Concepto #" + cellId : "Nuevo Concepto de Recibo"
-    dialogWidth: 620
+    dialogWidth: 720
+    dialogHeight: 540
     standardButtons: Dialog.Save | Dialog.Cancel
 
     onOpened: {
@@ -47,15 +49,48 @@ AppDialog {
                 break
             }
         }
+
+        // Base variables model for ComboBox
+        var varsList = AppController.getAvailableFormulaVariables(root.esquemaCodigo)
+        var baseOpts = ["bruto", "total_remunerativo", "basico", "total_no_remunerativo"]
+        for (var k = 0; k < varsList.length; k++) {
+            var vCode = (varsList[k].code || "").toLowerCase()
+            if (vCode !== "" && baseOpts.indexOf(vCode) === -1) {
+                baseOpts.push(vCode)
+            }
+        }
+        cbSimpleBaseVar.model = baseOpts
+
+        var initBase = (root.simpleBaseVariable || "bruto").toLowerCase()
+        cbSimpleBaseVar.editText = initBase
+        for (var m = 0; m < cbSimpleBaseVar.count; m++) {
+            if (cbSimpleBaseVar.textAt(m).toLowerCase() === initBase) {
+                cbSimpleBaseVar.currentIndex = m
+                break
+            }
+        }
+
+        if (root.tipoCalculo === "porcentaje" || root.tipoCalculo === "simple") {
+            cbTipoCalculo.currentIndex = 1
+        } else if (root.tipoCalculo === "fijo") {
+            cbTipoCalculo.currentIndex = 2
+        } else {
+            cbTipoCalculo.currentIndex = 0
+        }
     }
 
     onAccepted: {
-        var calcType = (cbTipoCalculo.currentIndex === 1) ? "simple" : "formula"
-        var code = txtCodigoVariable.text.trim().toUpperCase()
+        var calcType = "formula"
+        if (cbTipoCalculo.currentIndex === 1) calcType = "porcentaje"
+        else if (cbTipoCalculo.currentIndex === 2) calcType = "fijo"
+
+        var code = txtCodigoVariable.text.trim().toLowerCase()
         var desc = txtDescripcion.text.trim()
         var cond = txtCondicion.text.trim() || "1"
         var fMonto = txtFormulaMonto.text.trim()
         if (calcType === "formula" && fMonto === "") fMonto = "0.0"
+
+        var baseVarVal = (cbTipoCalculo.currentIndex === 1) ? cbSimpleBaseVar.editText.trim().toLowerCase() : ""
 
         if (code !== "") {
             AppController.cellModel.saveCell(
@@ -71,7 +106,7 @@ AppDialog {
                 esquemaCodigo,
                 calcType,
                 parseFloat(txtSimplePorcentaje.text) || 0.0,
-                txtSimpleBaseVar.text.trim(),
+                baseVarVal,
                 parseFloat(txtSimpleMontoFijo.text) || 0.0,
                 chkVisibleRecibo.checked
             )
@@ -84,14 +119,14 @@ AppDialog {
 
         ColumnLayout {
             id: dialogColumn
-            width: root.dialogWidth - 40
-            spacing: 12
+            width: root.dialogWidth - 48
+            spacing: 14
 
             GridLayout {
                 Layout.fillWidth: true
                 columns: 2
                 rowSpacing: 10
-                columnSpacing: 12
+                columnSpacing: 14
 
                 Label { text: "Sección del Recibo:"; color: Theme.textColor; font.pixelSize: 13 }
                 ComboBox {
@@ -100,10 +135,10 @@ AppDialog {
                     model: ["REMUNERATIVO", "NO_REMUNERATIVO", "DESCUENTO", "APORTE_PATRONAL"]
                 }
 
-                Label { text: "Código de Concepto:"; color: Theme.textColor; font.pixelSize: 13 }
+                Label { text: "Código de Variable:"; color: Theme.textColor; font.pixelSize: 13 }
                 StyledTextField {
                     id: txtCodigoVariable
-                    placeholderText: "Ej: JUBILACION"
+                    placeholderText: "Ej: jubilacion (siempre minúsculas)"
                     Layout.fillWidth: true
                 }
 
@@ -126,7 +161,7 @@ AppDialog {
                 ComboBox {
                     id: cbTipoCalculo
                     Layout.fillWidth: true
-                    model: ["Fórmula Completa (IDE)", "Simplificado (% / Fijo)"]
+                    model: ["Fórmula JavaScript (IDE)", "Porcentaje (%)", "Monto Fijo ($)"]
                 }
             }
 
@@ -137,7 +172,7 @@ AppDialog {
                 spacing: 8
 
                 Label {
-                    text: "Fórmula Monto ($) — Con Autocompletado IDE:"
+                    text: "Fórmula Monto ($) — Expresión JS:"
                     color: Theme.accentColor
                     font.bold: true
                     font.pixelSize: 13
@@ -166,13 +201,13 @@ AppDialog {
                 }
             }
 
-            // ── Simple Calculator ──────────────────────────────────
+            // ── Porcentaje (%) Mode ──────────────────────────────────
             GridLayout {
                 visible: cbTipoCalculo.currentIndex === 1
                 Layout.fillWidth: true
                 columns: 2
                 rowSpacing: 10
-                columnSpacing: 10
+                columnSpacing: 14
 
                 Label { text: "Porcentaje (%):"; color: Theme.textColor; font.pixelSize: 13 }
                 PercentageField {
@@ -181,12 +216,21 @@ AppDialog {
                 }
 
                 Label { text: "Variable Base:"; color: Theme.textColor; font.pixelSize: 13 }
-                FormulaInput {
-                    id: txtSimpleBaseVar
-                    esquemaCodigo: root.esquemaCodigo
-                    placeholderText: "total_remunerativo"
+                ComboBox {
+                    id: cbSimpleBaseVar
                     Layout.fillWidth: true
+                    editable: true
+                    model: ["bruto", "total_remunerativo", "basico", "total_no_remunerativo"]
                 }
+            }
+
+            // ── Monto Fijo ($) Mode ──────────────────────────────────
+            GridLayout {
+                visible: cbTipoCalculo.currentIndex === 2
+                Layout.fillWidth: true
+                columns: 2
+                rowSpacing: 10
+                columnSpacing: 14
 
                 Label { text: "Monto Fijo ($):"; color: Theme.textColor; font.pixelSize: 13 }
                 MoneyField {

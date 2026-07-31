@@ -46,6 +46,7 @@ Item {
         conceptDialog.cellId = -1
         conceptDialog.esquemaCodigo = currentEsquema
         conceptDialog.seccionCodigo = secCode || "REMUNERATIVO"
+        conceptDialog.tipoCalculo = "formula"
         conceptDialog.codigoVariable = ""
         conceptDialog.descripcion = ""
         conceptDialog.condicion = "1"
@@ -64,6 +65,7 @@ Item {
         conceptDialog.cellId = cellData.cellId || cellData.id
         conceptDialog.esquemaCodigo = currentEsquema
         conceptDialog.seccionCodigo = cellData.seccionCodigo || cellData.seccion_codigo || "REMUNERATIVO"
+        conceptDialog.tipoCalculo = cellData.tipoCalculo || cellData.tipo_calculo || "formula"
         conceptDialog.codigoVariable = cellData.codigoVariable || cellData.codigo_variable || ""
         conceptDialog.descripcion = cellData.descripcion || ""
         conceptDialog.condicion = cellData.condicion || "1"
@@ -71,9 +73,9 @@ Item {
         conceptDialog.formulaUnidad = cellData.formulaUnidad || cellData.formula_unidad || ""
         conceptDialog.formulaBase = cellData.formulaBase || cellData.formula_base || ""
         conceptDialog.orden = cellData.orden || 10
-        conceptDialog.simplePorcentaje = (cellData.simplePorcentaje || cellData.simple_porcentaje || 0.0).toString()
+        conceptDialog.simplePorcentaje = (cellData.simplePorcentaje !== undefined ? cellData.simplePorcentaje : (cellData.simple_porcentaje !== undefined ? cellData.simple_porcentaje : 0.0)).toString()
         conceptDialog.simpleBaseVariable = cellData.simpleBaseVariable || cellData.simple_base_variable || ""
-        conceptDialog.simpleMontoFijo = (cellData.simpleMontoFijo || cellData.simple_monto_fijo || 0.0).toString()
+        conceptDialog.simpleMontoFijo = (cellData.simpleMontoFijo !== undefined ? cellData.simpleMontoFijo : (cellData.simple_monto_fijo !== undefined ? cellData.simple_monto_fijo : 0.0)).toString()
         conceptDialog.visibleRecibo = cellData.visibleRecibo !== undefined ? cellData.visibleRecibo : true
         conceptDialog.open()
     }
@@ -271,6 +273,7 @@ Item {
                                 property string itemFormulaUnidad: model.formulaUnidad || ""
                                 property string itemFormulaBase: model.formulaBase || ""
                                 property string itemFormulaMonto: model.formulaMonto || ""
+                                property string itemColorHex: model.colorHex || ""
 
                                 sourceComponent: model.tipoCalculo === "separator" ? separatorComponent : conceptComponent
                             }
@@ -290,27 +293,34 @@ Item {
             height: 42
             opacity: (root.isDragging && root.draggedRowIndex === itemIndex) ? 0.35 : 1.0
 
+            property color cardAccentColor: itemColorHex !== "" ? Qt.color(itemColorHex) : Theme.accentColor
+
             Rectangle {
                 anchors.fill: parent
                 radius: 6
-                color: Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.22)
-                border.color: Theme.accentColor
+                color: Qt.rgba(cardAccentColor.r, cardAccentColor.g, cardAccentColor.b, 0.22)
+                border.color: cardAccentColor
                 border.width: 1.5
 
                 MouseArea {
                     id: sepCardDragArea
                     anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     hoverEnabled: true
                     preventStealing: true
                     cursorShape: sepCardDragArea.pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
                     onPressed: function(mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            colorPaletteDialog.openForCell(itemId, itemColorHex || "#8B5CF6");
+                            return;
+                        }
                         root.draggedRowIndex = itemIndex;
                         root.dropTargetIndex = itemIndex;
                         root.ghostData = {
                             title: "SECCIÓN: " + (itemDescripcion || "GENERAL").toUpperCase(),
                             variable: "",
-                            color: Theme.accentColor,
+                            color: cardAccentColor,
                             isSeparator: true
                         };
                         root.isDragging = true;
@@ -356,7 +366,7 @@ Item {
                         text: "⠿"
                         font.pixelSize: 18
                         font.bold: true
-                        color: sepCardDragArea.pressed ? Theme.accentColor : (sepCardDragArea.containsMouse ? Theme.textColor : Theme.subtextColor)
+                        color: sepCardDragArea.pressed ? cardAccentColor : (sepCardDragArea.containsMouse ? Theme.textColor : Theme.subtextColor)
                         Layout.alignment: Qt.AlignVCenter
                     }
 
@@ -426,16 +436,18 @@ Item {
             height: 50
             opacity: (root.isDragging && root.draggedRowIndex === itemIndex) ? 0.35 : 1.0
 
+            property bool isTotalItem: (itemCodigoVariable.indexOf("total_") === 0) || (itemDescripcion.toUpperCase().indexOf("TOTAL") !== -1)
             property string secUpper: (itemSeccionCodigo || "").toUpperCase()
             property color themeColor: {
+                if (itemColorHex !== "") return Qt.color(itemColorHex)
                 if (secUpper.indexOf("REMUNERATIVO") !== -1 && secUpper.indexOf("NO_REMUNERATIVO") === -1 && secUpper.indexOf("NO REMUNERATIVO") === -1)
-                    return Qt.color("#2ECC71") // Green
+                    return Qt.color("#00E5FF") // Neon Cyan
                 if (secUpper.indexOf("NO_REMUNERATIVO") !== -1 || secUpper.indexOf("NO REMUNERATIVO") !== -1)
-                    return Qt.color("#3498DB") // Cyan
+                    return Qt.color("#10B981") // Emerald Green
                 if (secUpper.indexOf("DESCUENTO") !== -1 || secUpper.indexOf("DEDUCCION") !== -1 || secUpper.indexOf("RETENCION") !== -1)
-                    return Qt.color("#E74C3C") // Red
+                    return Qt.color("#EF4444") // Coral Red
                 if (secUpper.indexOf("COSTO") !== -1 || secUpper.indexOf("PATRONAL") !== -1 || secUpper.indexOf("APORTE") !== -1)
-                    return Qt.color("#9B59B6") // Purple
+                    return Qt.color("#8B5CF6") // Purple
                 return Theme.accentColor
             }
 
@@ -443,14 +455,13 @@ Item {
                 anchors.fill: parent
                 radius: 6
 
-                // Clean dark card background (NO overall blue tint)
-                color: Theme.panelBg
-                border.color: Theme.borderColor
-                border.width: 1
+                color: conceptItem.isTotalItem ? Qt.rgba(conceptItem.themeColor.r, conceptItem.themeColor.g, conceptItem.themeColor.b, 0.15) : Theme.panelBg
+                border.color: conceptItem.isTotalItem ? conceptItem.themeColor : Theme.borderColor
+                border.width: conceptItem.isTotalItem ? 2 : 1
 
-                // Left 4px section color accent bar
+                // Left 4px section/custom color accent bar
                 Rectangle {
-                    width: 4
+                    width: conceptItem.isTotalItem ? 6 : 4
                     anchors.left: parent.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
@@ -461,11 +472,16 @@ Item {
                 MouseArea {
                     id: conceptCardDragArea
                     anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     hoverEnabled: true
                     preventStealing: true
                     cursorShape: conceptCardDragArea.pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
                     onPressed: function(mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            colorPaletteDialog.openForCell(itemId, itemColorHex || "#00E5FF");
+                            return;
+                        }
                         root.draggedRowIndex = itemIndex;
                         root.dropTargetIndex = itemIndex;
                         root.ghostData = {
@@ -529,7 +545,9 @@ Item {
 
                     Label {
                         text: itemDescripcion || ""
-                        font.bold: true; font.pixelSize: 13; color: Theme.textColor
+                        font.bold: conceptItem.isTotalItem
+                        font.pixelSize: conceptItem.isTotalItem ? 14 : 13
+                        color: conceptItem.isTotalItem ? conceptItem.themeColor : Theme.textColor
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                     }
@@ -730,6 +748,81 @@ Item {
                                     root.refreshCells()
                                     selectSchemaDialog.close()
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Color Palette Popover Dialog ───────────────────────────
+    AppDialog {
+        id: colorPaletteDialog
+
+        property int targetCellId: -1
+        property string activeColor: "#00E5FF"
+
+        title: "🎨 Selección de Color de Tarjeta / Separador"
+        dialogWidth: 420
+        dialogHeight: 240
+        standardButtons: Dialog.Close
+
+        function openForCell(cellId, currentColorHex) {
+            targetCellId = cellId;
+            activeColor = currentColorHex || "#00E5FF";
+            open();
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 15
+
+            Label {
+                text: "Haz click derecho en cualquier elemento para cambiar su color destacado:"
+                color: Theme.subtextColor
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            RowLayout {
+                spacing: 12
+                Layout.alignment: Qt.AlignHCenter
+
+                Repeater {
+                    model: [
+                        { name: "Cyan", hex: "#00E5FF" },
+                        { name: "Verde", hex: "#10B981" },
+                        { name: "Rojo", hex: "#EF4444" },
+                        { name: "Púrpura", hex: "#8B5CF6" },
+                        { name: "Gris Dark", hex: "#1E293B" },
+                        { name: "Por Defecto", hex: "" }
+                    ]
+
+                    delegate: Rectangle {
+                        width: 50; height: 50; radius: 8
+                        color: modelData.hex !== "" ? Qt.color(modelData.hex) : Theme.cardBg
+                        border.color: (colorPaletteDialog.activeColor === modelData.hex) ? "#FFFFFF" : Theme.borderColor
+                        border.width: (colorPaletteDialog.activeColor === modelData.hex) ? 3 : 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.hex === "" ? "✖" : "✓"
+                            font.bold: true
+                            font.pixelSize: 16
+                            color: "#FFFFFF"
+                            visible: colorPaletteDialog.activeColor === modelData.hex || modelData.hex === ""
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (colorPaletteDialog.targetCellId > 0) {
+                                    AppController.cellModel.updateCellColor(colorPaletteDialog.targetCellId, modelData.hex);
+                                }
+                                colorPaletteDialog.close();
                             }
                         }
                     }

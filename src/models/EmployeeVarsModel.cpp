@@ -43,7 +43,7 @@ bool EmployeeVarsModel::setData(const QModelIndex &index, const QVariant &value,
     QString validatedValue = rawValue;
 
     // Strict backend type validation
-    if (fieldType == "number") {
+    if (fieldType == "number" || fieldType == "num" || fieldType == "int" || fieldType == "float" || fieldType == "double" || fieldType == "decimal") {
         rawValue.replace(',', '.'); // Allow comma as decimal separator
         bool ok;
         double num = rawValue.toDouble(&ok);
@@ -53,7 +53,7 @@ bool EmployeeVarsModel::setData(const QModelIndex &index, const QVariant &value,
             return false;
         }
         validatedValue = ok ? QString::number(num, 'g', 10) : "0";
-    } else if (fieldType == "bool") {
+    } else if (fieldType == "bool" || fieldType == "boolean") {
         QString s = rawValue.toLower();
         validatedValue = (s == "true" || s == "1" || s == "sí" || s == "si") ? "true" : "false";
     }

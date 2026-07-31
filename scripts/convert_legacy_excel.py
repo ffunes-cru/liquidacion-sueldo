@@ -92,7 +92,7 @@ def main():
                     try:
                         cell_id = int(r[0])
                         sec_code = str(r[1]).strip() if len(r) > 1 and r[1] else "COMPOSICION"
-                        var_code = str(r[2]).strip() if len(r) > 2 and r[2] else ""
+                        var_code = str(r[2]).strip().lower() if len(r) > 2 and r[2] else ""
                         desc = str(r[3]).strip() if len(r) > 3 and r[3] else ""
                         cond = str(r[4]).strip() if len(r) > 4 and r[4] else ""
                         f_unid = str(r[5]).strip() if len(r) > 5 and r[5] else ""
@@ -102,7 +102,7 @@ def main():
                         esq_code = str(r[9]).strip().upper() if len(r) > 9 and r[9] else "MENSUAL"
                         t_calc = str(r[10]).strip().lower() if len(r) > 10 and r[10] else "formula"
                         s_porc = float(r[11]) if len(r) > 11 and r[11] is not None else 0.0
-                        s_base = str(r[12]).strip() if len(r) > 12 and r[12] else ""
+                        s_base = str(r[12]).strip().lower() if len(r) > 12 and r[12] else ""
                         s_monto = float(r[13]) if len(r) > 13 and r[13] is not None else 0.0
                         cells.append({
                             "id": cell_id, "seccion_codigo": sec_code, "codigo_variable": var_code,
@@ -203,6 +203,10 @@ def main():
                 "display_order": sf_id * 10
             })
 
+    # Build initial field_map for all schema_fields
+    for sf in schema_fields:
+        field_map[sf["field_code"]] = sf["id"]
+
     if "Empleados" in wb.sheetnames:
         ws = wb["Empleados"]
         rows = list(ws.iter_rows(values_only=True))
@@ -217,20 +221,43 @@ def main():
                     clean_code = h[2:] if h.startswith("j_") or h.startswith("m_") else h
                     dynamic_cols.append((col_idx, clean_code, h))
                     
-                    if clean_code not in field_map and not any(sf["field_code"] == clean_code for sf in schema_fields):
+                    if clean_code not in field_map:
                         field_id = field_counter
                         field_map[clean_code] = field_id
                         field_counter += 1
                         
                         label = clean_code.replace("_", " ").title()
-                        f_type = "number"
+
+                        # Infer field_type from cell values
+                        inferred_type = "number"
+                        col_vals = [r[col_idx] for r in rows[1:] if len(r) > col_idx and r[col_idx] is not None]
+                        if col_vals:
+                            bool_count = 0
+                            num_count = 0
+                            str_count = 0
+                            for v in col_vals:
+                                if isinstance(v, bool) or str(v).strip().lower() in ["true", "false", "si", "no"]:
+                                    bool_count += 1
+                                else:
+                                    try:
+                                        float(str(v).replace(',', '.'))
+                                        num_count += 1
+                                    except ValueError:
+                                        str_count += 1
+                            if bool_count > 0 and num_count == 0 and str_count == 0:
+                                inferred_type = "bool"
+                            elif str_count > num_count:
+                                inferred_type = "string"
+                            else:
+                                inferred_type = "number"
+
                         schema_fields.append({
                             "id": field_id,
-                            "esquema_codigo": "JORNAL",
+                            "esquema_codigo": "JORNAL" if h.startswith("j_") else "MENSUAL",
                             "field_code": clean_code,
                             "field_label": label,
-                            "field_type": f_type,
-                            "default_value": "0",
+                            "field_type": inferred_type,
+                            "default_value": "false" if inferred_type == "bool" else ("0" if inferred_type == "number" else ""),
                             "display_order": field_id * 10
                         })
 

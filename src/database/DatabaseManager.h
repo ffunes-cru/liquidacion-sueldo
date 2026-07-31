@@ -63,6 +63,8 @@ public:
                                 const QString &defaultValue, int displayOrder);
     bool         removeSchemaField(int fieldId);
     bool         renameSchemaField(int fieldId, const QString &newCode, const QString &newLabel);
+    bool         updateSchemaField(int fieldId, const QString &fieldCode, const QString &fieldLabel,
+                                   const QString &fieldType, const QString &defaultValue);
 
     // ── Employee Field Values (employee_field_values) ───────────────
     // Actual values per employee, conforming to the schema's field model
@@ -90,7 +92,8 @@ public:
                           const QString &formulaMonto, int orden, const QString &esquemaCodigo,
                           const QString &tipoCalculo, double simplePorcentaje,
                           const QString &simpleBaseVariable, double simpleMontoFijo,
-                          bool visibleRecibo);
+                          bool visibleRecibo, const QString &colorHex = "");
+    bool         updateCellColor(int id, const QString &colorHex);
     bool         deleteCell(int id);
 
     // ── Chart Cells (celdas_grafico) ────────────────────────────────
@@ -126,6 +129,11 @@ public:
     // ── Backup & New Month ──────────────────────────────────────────
     QString createBackup();
     QString resetNewMonth();
+
+    // ── Transaction Helpers ─────────────────────────────────────────
+    bool transaction() { return m_db.transaction(); }
+    bool commit() { return m_db.commit(); }
+    bool rollback() { return m_db.rollback(); }
 
 private:
     void createTables();

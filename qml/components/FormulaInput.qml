@@ -128,24 +128,6 @@ Item {
                         }
                     }
                 }
-
-                Button {
-                    implicitWidth: 28
-                    implicitHeight: 28
-                    text: "💡"
-                    flat: true
-                    ToolTip.visible: hovered
-                    ToolTip.text: "Variables e IntelliSense para Fórmulas"
-                    onClicked: {
-                        reloadSuggestions()
-                        if (suggestionPopup.opened) {
-                            suggestionPopup.close()
-                        } else {
-                            suggestionPopup.updatePosition()
-                            suggestionPopup.open()
-                        }
-                    }
-                }
             }
         }
     }

@@ -6,6 +6,7 @@
 #include <QJSValue>
 #include <QVariantMap>
 #include <QString>
+#include <QRegularExpression>
 
 /**
  * @brief Wrapper around QJSEngine for evaluating payroll formulas safely.
