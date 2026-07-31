@@ -109,7 +109,7 @@ Rectangle {
         // Admin action buttons
         AdminActions {
             z: 10
-            visible: root.showAdminActions && AppController.currentRole === "admin"
+            visible: root.showAdminActions
             showDuplicate: root.showDuplicate
             Layout.alignment: Qt.AlignVCenter
             onEditClicked: root.editRequested(root.itemData)

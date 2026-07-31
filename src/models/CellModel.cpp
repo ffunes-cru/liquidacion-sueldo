@@ -161,3 +161,32 @@ bool CellModel::moveCellDown(int index)
     return moveCellUp(index + 1);
 }
 
+bool CellModel::moveCell(int fromIndex, int toIndex)
+{
+    if (fromIndex < 0 || fromIndex >= m_data.size()) return false;
+    if (toIndex < 0 || toIndex >= m_data.size()) return false;
+    if (fromIndex == toIndex) return true;
+
+    beginResetModel();
+    QVariant item = m_data.takeAt(fromIndex);
+    m_data.insert(toIndex, item);
+
+    for (int i = 0; i < m_data.size(); ++i) {
+        QVariantMap m = m_data[i].toMap();
+        int cellId = m["id"].toInt();
+        int newOrder = (i + 1) * 10;
+        m["orden"] = newOrder;
+        m_data[i] = m;
+        m_db->saveCell(cellId, m["seccion_codigo"].toString(), m["codigo_variable"].toString(),
+                       m["descripcion"].toString(), m["condicion"].toString(),
+                       m["formula_unidad"].toString(), m["formula_base"].toString(),
+                       m["formula_monto"].toString(), newOrder, m["esquema_codigo"].toString(),
+                       m["tipo_calculo"].toString(), m["simple_porcentaje"].toDouble(),
+                       m["simple_base_variable"].toString(), m["simple_monto_fijo"].toDouble(),
+                       m["visible_recibo"].toBool());
+    }
+    endResetModel();
+    return true;
+}
+
+

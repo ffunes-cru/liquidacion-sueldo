@@ -297,6 +297,24 @@ bool ExportService::importDataXlsx(const QString &path)
         }
     }
 
+    // Import Employees
+    if (xlsx.selectSheet("Empleados")) {
+        for (int r = 2; r <= xlsx.dimension().lastRow(); r++) {
+            int empId = xlsx.read(r, 1).toInt();
+            QString legajo = xlsx.read(r, 2).toString();
+            QString nombre = xlsx.read(r, 3).toString();
+            QString tipoLiq = xlsx.read(r, 4).toString();
+            QString esquema = xlsx.read(r, 5).toString();
+            int catId = xlsx.read(r, 6).toInt();
+            QString fechaIng = xlsx.read(r, 7).toString();
+            QString cuil = xlsx.read(r, 8).toString();
+
+            if (!nombre.isEmpty()) {
+                m_db->saveEmployee(empId, legajo, nombre, tipoLiq, esquema, catId, fechaIng, cuil);
+            }
+        }
+    }
+
     // Import Variables de Esquema
     if (xlsx.selectSheet("Variables de Esquema")) {
         for (int r = 2; r <= xlsx.dimension().lastRow(); r++) {
@@ -315,14 +333,16 @@ bool ExportService::importDataXlsx(const QString &path)
     // Import Celdas de Cálculo
     if (xlsx.selectSheet("Celdas de Cálculo")) {
         for (int r = 2; r <= xlsx.dimension().lastRow(); r++) {
+            QString secCodigo = xlsx.read(r, 2).toString();
             QString codigoVar = xlsx.read(r, 3).toString();
-            if (codigoVar.isEmpty()) continue;
+            QString desc = xlsx.read(r, 4).toString();
+            if (secCodigo.isEmpty() && desc.isEmpty() && codigoVar.isEmpty()) continue;
 
             m_db->saveCell(
                 0,  // new
-                xlsx.read(r, 2).toString(),  // seccion_codigo
+                secCodigo,
                 codigoVar,
-                xlsx.read(r, 4).toString(),  // descripcion
+                desc,
                 xlsx.read(r, 5).toString(),  // condicion
                 xlsx.read(r, 6).toString(),  // formula_unidad
                 xlsx.read(r, 7).toString(),  // formula_base

@@ -54,6 +54,7 @@ public:
     Q_INVOKABLE bool removeCell(int id);
     Q_INVOKABLE bool moveCellUp(int index);
     Q_INVOKABLE bool moveCellDown(int index);
+    Q_INVOKABLE bool moveCell(int fromIndex, int toIndex);
 
 signals:
     void esquemaCodigoChanged();

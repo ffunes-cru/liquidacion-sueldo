@@ -14,58 +14,52 @@ RowLayout {
     signal deleteClicked()
     signal duplicateClicked()
 
-    spacing: 4
+    spacing: 6
     z: 10
-    visible: AppController.currentRole === "admin"
+    visible: true
 
-    Button {
+    Rectangle {
         visible: root.showDuplicate
-        implicitWidth: 32
-        implicitHeight: 32
-        padding: 0
-        leftPadding: 0
-        rightPadding: 0
-        topPadding: 0
-        bottomPadding: 0
-        flat: true
-        text: "📋"
-        font.pixelSize: 15
-        ToolTip.visible: hovered
-        ToolTip.text: "Duplicar"
-        onClicked: root.duplicateClicked()
+        implicitWidth: 30; implicitHeight: 28; radius: 4
+        color: btnDupArea.containsMouse ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.3) : Qt.rgba(255, 255, 255, 0.08)
+        border.color: Theme.borderColor
+
+        Text { anchors.centerIn: parent; text: "📋"; font.pixelSize: 13 }
+
+        MouseArea {
+            id: btnDupArea
+            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: root.duplicateClicked()
+        }
     }
 
-    Button {
+    Rectangle {
         visible: root.showEdit
-        implicitWidth: 32
-        implicitHeight: 32
-        padding: 0
-        leftPadding: 0
-        rightPadding: 0
-        topPadding: 0
-        bottomPadding: 0
-        flat: true
-        text: "✏️"
-        font.pixelSize: 15
-        ToolTip.visible: hovered
-        ToolTip.text: "Editar"
-        onClicked: root.editClicked()
+        implicitWidth: 30; implicitHeight: 28; radius: 4
+        color: btnEditArea.containsMouse ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.3) : Qt.rgba(255, 255, 255, 0.08)
+        border.color: Theme.borderColor
+
+        Text { anchors.centerIn: parent; text: "✏️"; font.pixelSize: 13 }
+
+        MouseArea {
+            id: btnEditArea
+            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: root.editClicked()
+        }
     }
 
-    Button {
+    Rectangle {
         visible: root.showDelete
-        implicitWidth: 32
-        implicitHeight: 32
-        padding: 0
-        leftPadding: 0
-        rightPadding: 0
-        topPadding: 0
-        bottomPadding: 0
-        flat: true
-        text: "🗑️"
-        font.pixelSize: 15
-        ToolTip.visible: hovered
-        ToolTip.text: "Eliminar"
-        onClicked: root.deleteClicked()
+        implicitWidth: 30; implicitHeight: 28; radius: 4
+        color: btnDelArea.containsMouse ? Qt.rgba(Theme.dangerColor.r, Theme.dangerColor.g, Theme.dangerColor.b, 0.35) : Qt.rgba(255, 255, 255, 0.08)
+        border.color: Theme.borderColor
+
+        Text { anchors.centerIn: parent; text: "🗑️"; font.pixelSize: 13 }
+
+        MouseArea {
+            id: btnDelArea
+            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: root.deleteClicked()
+        }
     }
 }

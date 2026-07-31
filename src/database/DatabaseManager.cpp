@@ -461,8 +461,17 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
         insEsq.exec();
     }
 
-    QSqlQuery q(m_db);
+    bool exists = false;
     if (id > 0) {
+        QSqlQuery chk(m_db);
+        chk.prepare("SELECT id FROM empleados WHERE id = ?");
+        chk.addBindValue(id);
+        chk.exec();
+        exists = chk.next();
+    }
+
+    QSqlQuery q(m_db);
+    if (exists) {
         q.prepare(R"(
             UPDATE empleados
             SET legajo=?, nombre_completo=?, tipo_liquidacion=?,
@@ -483,11 +492,20 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
         }
         return id;
     } else {
-        q.prepare(R"(
-            INSERT INTO empleados (legajo, nombre_completo, tipo_liquidacion,
-                                   esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        )");
+        if (id > 0) {
+            q.prepare(R"(
+                INSERT INTO empleados (id, legajo, nombre_completo, tipo_liquidacion,
+                                       esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            )");
+            q.addBindValue(id);
+        } else {
+            q.prepare(R"(
+                INSERT INTO empleados (legajo, nombre_completo, tipo_liquidacion,
+                                       esquema_codigo, categoria_jornal_id, fecha_ingreso, cuil)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            )");
+        }
         q.addBindValue(legajo);
         q.addBindValue(nombre);
         q.addBindValue(tipoLiq);
@@ -499,7 +517,7 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
             qCritical() << "[DatabaseManager] Error al insertar nuevo empleado:" << q.lastError().text();
             return -1;
         }
-        int newId = q.lastInsertId().toInt();
+        int newId = (id > 0) ? id : q.lastInsertId().toInt();
 
         QSqlQuery insQ(m_db);
         insQ.prepare("INSERT OR IGNORE INTO quincenas_empleado (empleado_id, quincena) VALUES (?, 'Q1')");
@@ -507,7 +525,6 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
         insQ.exec();
 
         syncEmployeeFieldsForSchema(safeEsquema);
-
         return newId;
     }
 }

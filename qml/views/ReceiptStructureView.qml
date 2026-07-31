@@ -9,6 +9,10 @@ Item {
     id: root
 
     property string currentEsquema: "MENSUAL"
+    property bool isDragging: false
+    property int draggedRowIndex: -1
+    property int dropTargetIndex: -1
+    property var ghostData: ({ title: "", variable: "", color: Qt.color("#2ECC71"), isSeparator: false })
 
     Component.onCompleted: {
         refreshSchemas()
@@ -82,6 +86,51 @@ Item {
             newOrd, currentEsquema, "separator", 0, "", 0, true
         )
         refreshCells()
+    }
+
+    // ── Free Floating Drag Ghost Card Overlay ─────────────────────────
+    Rectangle {
+        id: dragGhost
+        z: 9999
+        visible: root.isDragging
+        width: Math.min(520, paystubListView.width * 0.75)
+        height: 46
+        radius: 8
+        color: Qt.rgba(root.ghostData.color.r, root.ghostData.color.g, root.ghostData.color.b, 0.90)
+        border.color: root.ghostData.color
+        border.width: 2
+        rotation: -2
+        opacity: 0.92
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 12; anchors.rightMargin: 12
+            spacing: 10
+
+            Text {
+                text: "⠿"
+                font.pixelSize: 18; font.bold: true; color: "#FFFFFF"
+            }
+
+            BadgePill {
+                text: root.ghostData.variable
+                badgeColor: root.ghostData.color
+                visible: !root.ghostData.isSeparator && root.ghostData.variable !== ""
+                Layout.preferredWidth: 120
+            }
+
+            Label {
+                text: root.ghostData.title
+                font.bold: true; font.pixelSize: 13; color: "#FFFFFF"
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+
+            Label {
+                text: "📍 SOLTAR"
+                font.bold: true; font.pixelSize: 10; color: "#FFFFFF"
+            }
+        }
     }
 
     ColumnLayout {
@@ -166,13 +215,12 @@ Item {
                             anchors.leftMargin: 12; anchors.rightMargin: 12
                             spacing: 10
 
-                            Label { text: "Orden"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 60 }
-                            Label { text: "Cód. Variable"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 120 }
+                            Label { text: "Cód. Variable"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 140 }
                             Label { text: "Descripción del Concepto / Sección"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.fillWidth: true }
                             Label { text: "Unidad / Cant."; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 100 }
                             Label { text: "Base Imponible"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 120 }
-                            Label { text: "Fórmula / Cálculo Monto"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 160 }
-                            Label { text: "Acciones"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 100; horizontalAlignment: Text.AlignRight }
+                            Label { text: "Fórmula / Cálculo Monto"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 180 }
+                            Label { text: "Acciones"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 70; horizontalAlignment: Text.AlignRight }
                         }
                     }
 
@@ -184,6 +232,29 @@ Item {
                         interactive: false
                         spacing: 8
                         model: AppController.cellModel
+
+                        // Snap Line Insertion Indicator
+                        Rectangle {
+                            id: snapLine
+                            z: 500
+                            visible: root.isDragging && root.dropTargetIndex >= 0
+                            width: paystubListView.width
+                            height: 4
+                            radius: 2
+                            color: "#00E5FF" // Neon Cyan
+                            y: root.dropTargetIndex * 58
+
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 120; height: 18; radius: 9
+                                color: "#00E5FF"
+                                Label {
+                                    anchors.centerIn: parent
+                                    text: "📍 INSERTAR AQUÍ"
+                                    font.bold: true; font.pixelSize: 9; color: "#0A1118"
+                                }
+                            }
+                        }
 
                         delegate: Component {
                             Loader {
@@ -214,57 +285,132 @@ Item {
     Component {
         id: separatorComponent
 
-        Rectangle {
+        Item {
             width: parent.width
-            height: 40
-            radius: 6
-            color: Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.15)
-            border.color: Theme.accentColor
-            border.width: 1
+            height: 42
+            opacity: (root.isDragging && root.draggedRowIndex === itemIndex) ? 0.35 : 1.0
 
-            RowLayout {
+            Rectangle {
                 anchors.fill: parent
-                anchors.leftMargin: 10; anchors.rightMargin: 10
-                spacing: 8
+                radius: 6
+                color: Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.22)
+                border.color: Theme.accentColor
+                border.width: 1.5
 
-                Button {
-                    implicitWidth: 26; implicitHeight: 26
-                    text: "▲"; flat: true
-                    enabled: itemIndex > 0
-                    onClicked: AppController.cellModel.moveCellUp(itemIndex)
-                }
-                Button {
-                    implicitWidth: 26; implicitHeight: 26
-                    text: "▼"; flat: true
-                    enabled: itemIndex < AppController.cellModel.count - 1
-                    onClicked: AppController.cellModel.moveCellDown(itemIndex)
+                MouseArea {
+                    id: sepCardDragArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    preventStealing: true
+                    cursorShape: sepCardDragArea.pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+
+                    onPressed: function(mouse) {
+                        root.draggedRowIndex = itemIndex;
+                        root.dropTargetIndex = itemIndex;
+                        root.ghostData = {
+                            title: "SECCIÓN: " + (itemDescripcion || "GENERAL").toUpperCase(),
+                            variable: "",
+                            color: Theme.accentColor,
+                            isSeparator: true
+                        };
+                        root.isDragging = true;
+                        var p = mapToItem(root, mouse.x, mouse.y);
+                        dragGhost.x = p.x - (dragGhost.width / 2);
+                        dragGhost.y = p.y - (dragGhost.height / 2);
+                    }
+
+                    onPositionChanged: function(mouse) {
+                        if (pressed && root.isDragging) {
+                            var p = mapToItem(root, mouse.x, mouse.y);
+                            dragGhost.x = p.x - (dragGhost.width / 2);
+                            dragGhost.y = p.y - (dragGhost.height / 2);
+
+                            var mapped = mapToItem(paystubListView, mouse.x, mouse.y);
+                            var hoverIdx = paystubListView.indexAt(mapped.x, mapped.y);
+                            if (hoverIdx < 0) {
+                                hoverIdx = Math.max(0, Math.min(AppController.cellModel.count - 1, Math.floor((mapped.y + 25) / 58)));
+                            }
+                            root.dropTargetIndex = hoverIdx;
+                        }
+                    }
+
+                    onReleased: function() {
+                        if (root.isDragging) {
+                            if (root.dropTargetIndex >= 0 && root.dropTargetIndex !== root.draggedRowIndex) {
+                                AppController.cellModel.moveCell(root.draggedRowIndex, root.dropTargetIndex);
+                            }
+                            root.isDragging = false;
+                            root.draggedRowIndex = -1;
+                            root.dropTargetIndex = -1;
+                        }
+                    }
                 }
 
-                Label {
-                    text: "⚫  " + (itemDescripcion || "SECCIÓN")
-                    font.bold: true; font.pixelSize: 14; color: Theme.textColor
-                    Layout.fillWidth: true
-                }
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10; anchors.rightMargin: 10
+                    spacing: 8
+                    z: 5
 
-                Button {
-                    text: "+ Concepto"
-                    flat: true
-                    visible: AppController.currentRole === "admin"
-                    onClicked: root.openNewConceptDialog(itemSeccionCodigo || "REMUNERATIVO")
-                }
+                    Label {
+                        text: "⠿"
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: sepCardDragArea.pressed ? Theme.accentColor : (sepCardDragArea.containsMouse ? Theme.textColor : Theme.subtextColor)
+                        Layout.alignment: Qt.AlignVCenter
+                    }
 
-                Button {
-                    implicitWidth: 28; implicitHeight: 28
-                    text: "✏️"; flat: true
-                    visible: AppController.currentRole === "admin"
-                    onClicked: separatorTitleDialog.openEdit(itemId, itemDescripcion)
-                }
+                    Label {
+                        text: "🔷  SECCIÓN: " + (itemDescripcion || "GENERAL").toUpperCase()
+                        font.bold: true; font.pixelSize: 13; color: Theme.textColor
+                        Layout.fillWidth: true
+                    }
 
-                Button {
-                    implicitWidth: 28; implicitHeight: 28
-                    text: "🗑️"; flat: true
-                    visible: AppController.currentRole === "admin"
-                    onClicked: AppController.cellModel.removeCell(itemId)
+                    Rectangle {
+                        implicitWidth: 110; implicitHeight: 28; radius: 4
+                        color: btnAddConceptArea.containsMouse ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.3) : Qt.rgba(255, 255, 255, 0.08)
+                        border.color: Theme.borderColor
+
+                        RowLayout {
+                            anchors.centerIn: parent; spacing: 4
+                            Text { text: "➕"; font.pixelSize: 11 }
+                            Text { text: "Concepto"; font.pixelSize: 11; font.bold: true; color: Theme.textColor }
+                        }
+
+                        MouseArea {
+                            id: btnAddConceptArea
+                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.openNewConceptDialog(itemSeccionCodigo || "REMUNERATIVO")
+                        }
+                    }
+
+                    Rectangle {
+                        implicitWidth: 30; implicitHeight: 28; radius: 4
+                        color: btnSepEditArea.containsMouse ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.3) : Qt.rgba(255, 255, 255, 0.08)
+                        border.color: Theme.borderColor
+
+                        Text { anchors.centerIn: parent; text: "✏️"; font.pixelSize: 13 }
+
+                        MouseArea {
+                            id: btnSepEditArea
+                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: separatorTitleDialog.openEdit(itemId, itemDescripcion)
+                        }
+                    }
+
+                    Rectangle {
+                        implicitWidth: 30; implicitHeight: 28; radius: 4
+                        color: btnSepDelArea.containsMouse ? Qt.rgba(Theme.dangerColor.r, Theme.dangerColor.g, Theme.dangerColor.b, 0.35) : Qt.rgba(255, 255, 255, 0.08)
+                        border.color: Theme.borderColor
+
+                        Text { anchors.centerIn: parent; text: "🗑️"; font.pixelSize: 13 }
+
+                        MouseArea {
+                            id: btnSepDelArea
+                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: AppController.cellModel.removeCell(itemId)
+                        }
+                    }
                 }
             }
         }
@@ -274,74 +420,166 @@ Item {
     Component {
         id: conceptComponent
 
-        Rectangle {
+        Item {
+            id: conceptItem
             width: parent.width
-            height: 48
-            radius: 6
-            color: Theme.cardBg
-            border.color: Theme.borderColor
+            height: 50
+            opacity: (root.isDragging && root.draggedRowIndex === itemIndex) ? 0.35 : 1.0
 
-            RowLayout {
+            property string secUpper: (itemSeccionCodigo || "").toUpperCase()
+            property color themeColor: {
+                if (secUpper.indexOf("REMUNERATIVO") !== -1 && secUpper.indexOf("NO_REMUNERATIVO") === -1 && secUpper.indexOf("NO REMUNERATIVO") === -1)
+                    return Qt.color("#2ECC71") // Green
+                if (secUpper.indexOf("NO_REMUNERATIVO") !== -1 || secUpper.indexOf("NO REMUNERATIVO") !== -1)
+                    return Qt.color("#3498DB") // Cyan
+                if (secUpper.indexOf("DESCUENTO") !== -1 || secUpper.indexOf("DEDUCCION") !== -1 || secUpper.indexOf("RETENCION") !== -1)
+                    return Qt.color("#E74C3C") // Red
+                if (secUpper.indexOf("COSTO") !== -1 || secUpper.indexOf("PATRONAL") !== -1 || secUpper.indexOf("APORTE") !== -1)
+                    return Qt.color("#9B59B6") // Purple
+                return Theme.accentColor
+            }
+
+            Rectangle {
                 anchors.fill: parent
-                anchors.leftMargin: 10; anchors.rightMargin: 10
-                spacing: 8
+                radius: 6
 
-                Button {
-                    implicitWidth: 24; implicitHeight: 24
-                    text: "▲"; flat: true
-                    enabled: itemIndex > 0
-                    onClicked: AppController.cellModel.moveCellUp(itemIndex)
-                }
-                Button {
-                    implicitWidth: 24; implicitHeight: 24
-                    text: "▼"; flat: true
-                    enabled: itemIndex < AppController.cellModel.count - 1
-                    onClicked: AppController.cellModel.moveCellDown(itemIndex)
-                }
+                // Clean dark card background (NO overall blue tint)
+                color: Theme.panelBg
+                border.color: Theme.borderColor
+                border.width: 1
 
-                Label {
-                    text: itemOrden.toString()
-                    font.pixelSize: 11; color: Theme.subtextColor
-                    Layout.preferredWidth: 25
+                // Left 4px section color accent bar
+                Rectangle {
+                    width: 4
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    radius: 2
+                    color: conceptItem.themeColor
                 }
 
-                BadgePill {
-                    text: itemCodigoVariable || ""
-                    badgeColor: Theme.accentColor
-                    Layout.preferredWidth: 110
+                MouseArea {
+                    id: conceptCardDragArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    preventStealing: true
+                    cursorShape: conceptCardDragArea.pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+
+                    onPressed: function(mouse) {
+                        root.draggedRowIndex = itemIndex;
+                        root.dropTargetIndex = itemIndex;
+                        root.ghostData = {
+                            title: itemDescripcion || itemCodigoVariable,
+                            variable: itemCodigoVariable || "",
+                            color: conceptItem.themeColor,
+                            isSeparator: false
+                        };
+                        root.isDragging = true;
+                        var p = mapToItem(root, mouse.x, mouse.y);
+                        dragGhost.x = p.x - (dragGhost.width / 2);
+                        dragGhost.y = p.y - (dragGhost.height / 2);
+                    }
+
+                    onPositionChanged: function(mouse) {
+                        if (pressed && root.isDragging) {
+                            var p = mapToItem(root, mouse.x, mouse.y);
+                            dragGhost.x = p.x - (dragGhost.width / 2);
+                            dragGhost.y = p.y - (dragGhost.height / 2);
+
+                            var mapped = mapToItem(paystubListView, mouse.x, mouse.y);
+                            var hoverIdx = paystubListView.indexAt(mapped.x, mapped.y);
+                            if (hoverIdx < 0) {
+                                hoverIdx = Math.max(0, Math.min(AppController.cellModel.count - 1, Math.floor((mapped.y + 25) / 58)));
+                            }
+                            root.dropTargetIndex = hoverIdx;
+                        }
+                    }
+
+                    onReleased: function() {
+                        if (root.isDragging) {
+                            if (root.dropTargetIndex >= 0 && root.dropTargetIndex !== root.draggedRowIndex) {
+                                AppController.cellModel.moveCell(root.draggedRowIndex, root.dropTargetIndex);
+                            }
+                            root.isDragging = false;
+                            root.draggedRowIndex = -1;
+                            root.dropTargetIndex = -1;
+                        }
+                    }
                 }
 
-                Label {
-                    text: itemDescripcion || ""
-                    font.bold: true; font.pixelSize: 13; color: Theme.textColor
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                }
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12; anchors.rightMargin: 10
+                    spacing: 10
+                    z: 5
 
-                Label {
-                    text: itemFormulaUnidad || "-"
-                    font.family: "Monospace"; font.pixelSize: 11; color: Theme.subtextColor
-                    Layout.preferredWidth: 90
-                    elide: Text.ElideRight
-                }
+                    Label {
+                        text: "⠿"
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: conceptCardDragArea.pressed ? conceptItem.themeColor : (conceptCardDragArea.containsMouse ? Theme.textColor : Theme.subtextColor)
+                        Layout.alignment: Qt.AlignVCenter
+                    }
 
-                Label {
-                    text: itemFormulaBase || "-"
-                    font.family: "Monospace"; font.pixelSize: 11; color: Theme.subtextColor
-                    Layout.preferredWidth: 110
-                    elide: Text.ElideRight
-                }
+                    BadgePill {
+                        text: itemCodigoVariable || ""
+                        badgeColor: conceptItem.themeColor
+                        Layout.preferredWidth: 140
+                    }
 
-                BadgePill {
-                    text: itemTipoCalculo === "simple" ? (itemSimplePorcentaje + "% / $" + itemSimpleMontoFijo) : (itemFormulaMonto || "Fórmula")
-                    badgeColor: itemTipoCalculo === "simple" ? Theme.warningColor : Theme.successColor
-                    Layout.preferredWidth: 150
-                }
+                    Label {
+                        text: itemDescripcion || ""
+                        font.bold: true; font.pixelSize: 13; color: Theme.textColor
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                    }
 
-                AdminActions {
-                    showDuplicate: false
-                    onEditClicked: root.openEditConceptDialog(AppController.cellModel.get(itemIndex))
-                    onDeleteClicked: AppController.cellModel.removeCell(itemId)
+                    Label {
+                        text: itemFormulaUnidad || "-"
+                        font.family: "Monospace"; font.pixelSize: 11; color: Theme.subtextColor
+                        Layout.preferredWidth: 100
+                        elide: Text.ElideRight
+                    }
+
+                    Label {
+                        text: itemFormulaBase || "-"
+                        font.family: "Monospace"; font.pixelSize: 11; color: Theme.subtextColor
+                        Layout.preferredWidth: 120
+                        elide: Text.ElideRight
+                    }
+
+                    RowLayout {
+                        spacing: 6
+                        Layout.preferredWidth: 68
+
+                        Rectangle {
+                            implicitWidth: 30; implicitHeight: 28; radius: 4
+                            color: btnConceptEditArea.containsMouse ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.3) : Qt.rgba(255, 255, 255, 0.08)
+                            border.color: Theme.borderColor
+
+                            Text { anchors.centerIn: parent; text: "✏️"; font.pixelSize: 13 }
+
+                            MouseArea {
+                                id: btnConceptEditArea
+                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: root.openEditConceptDialog(AppController.cellModel.get(itemIndex))
+                            }
+                        }
+
+                        Rectangle {
+                            implicitWidth: 30; implicitHeight: 28; radius: 4
+                            color: btnConceptDelArea.containsMouse ? Qt.rgba(Theme.dangerColor.r, Theme.dangerColor.g, Theme.dangerColor.b, 0.35) : Qt.rgba(255, 255, 255, 0.08)
+                            border.color: Theme.borderColor
+
+                            Text { anchors.centerIn: parent; text: "🗑️"; font.pixelSize: 13 }
+
+                            MouseArea {
+                                id: btnConceptDelArea
+                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: AppController.cellModel.removeCell(itemId)
+                            }
+                        }
+                    }
                 }
             }
         }
