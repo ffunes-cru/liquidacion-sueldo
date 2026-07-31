@@ -13,9 +13,9 @@ Rectangle {
     signal valueSaved(string newValue)
 
     implicitHeight: 42
-    color: window.panelBg
+    color: Theme.panelBg
     radius: 4
-    border.color: window.borderColor
+    border.color: Theme.borderColor
 
     RowLayout {
         anchors.fill: parent
@@ -25,7 +25,7 @@ Rectangle {
         Label {
             text: root.fieldLabel + " (" + root.fieldCode + ")"
             font.pixelSize: 13
-            color: window.textColor
+            color: Theme.textColor
             Layout.preferredWidth: 200
             elide: Text.ElideRight
         }
@@ -40,19 +40,12 @@ Rectangle {
             }
         }
 
-        TextField {
+        StyledTextField {
             visible: root.fieldType !== "bool"
             text: root.value
             Layout.preferredWidth: 140
-            color: window.textColor
             horizontalAlignment: Text.AlignRight
             inputMethodHints: root.fieldType === "number" ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
-
-            background: Rectangle {
-                color: window.inputBg
-                radius: 4
-                border.color: parent.activeFocus ? window.accentColor : window.borderColor
-            }
 
             onEditingFinished: {
                 root.valueSaved(text)

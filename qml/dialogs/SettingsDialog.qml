@@ -2,54 +2,34 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import LiquidacionSueldos 1.0
+import "../components"
 
-Dialog {
+AppDialog {
     id: root
 
     title: "Configuración General del Sistema"
-    modal: true
-    anchors.centerIn: parent
-    width: 520
-    height: 420
+    dialogWidth: 520
+    dialogHeight: 420
     standardButtons: Dialog.Close
-
-    Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.5) }
-
-    background: Rectangle {
-        color: window.panelBg
-        radius: 10
-        border.color: window.borderColor
-        border.width: 1
-    }
-
-    enter: Transition {
-        NumberAnimation { property: "scale"; from: 0.85; to: 1.0; duration: 200; easing.type: Easing.OutBack }
-        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 180 }
-    }
-    exit: Transition {
-        NumberAnimation { property: "scale"; from: 1.0; to: 0.85; duration: 150; easing.type: Easing.InQuad }
-        NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 150 }
-    }
 
     property string statusMsg: ""
 
-    ColumnLayout {
-        anchors.fill: parent
+    contentItem: ColumnLayout {
         spacing: 15
 
-        // ── Apariencia ──────────────────────────────────────────────
+        // ── Apariencia ──────────────────────────────────────────
         Label {
             text: "Apariencia"
             font.bold: true
             font.pixelSize: 15
-            color: window.accentColor
+            color: Theme.accentColor
         }
 
         RowLayout {
             Layout.fillWidth: true
             Label {
                 text: "Modo Oscuro (Dark Theme):"
-                color: window.textColor
+                color: Theme.textColor
                 Layout.fillWidth: true
             }
             Switch {
@@ -62,7 +42,7 @@ Dialog {
             Layout.fillWidth: true
             Label {
                 text: "Modo de Vista por Defecto:"
-                color: window.textColor
+                color: Theme.textColor
                 Layout.fillWidth: true
             }
             ComboBox {
@@ -72,14 +52,14 @@ Dialog {
             }
         }
 
-        Rectangle { Layout.fillWidth: true; height: 1; color: window.borderColor }
+        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderColor }
 
-        // ── Datos ───────────────────────────────────────────────────
+        // ── Datos ───────────────────────────────────────────────
         Label {
             text: "Gestión de Datos"
             font.bold: true
             font.pixelSize: 15
-            color: window.accentColor
+            color: Theme.accentColor
         }
 
         Button {
@@ -109,9 +89,8 @@ Dialog {
             }
         }
 
-        Rectangle { Layout.fillWidth: true; height: 1; color: window.borderColor }
+        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderColor }
 
-        // ── Backup ──────────────────────────────────────────────────
         Button {
             Layout.fillWidth: true
             text: "💾 Crear Copia de Seguridad de BD (Backup)"
@@ -121,11 +100,11 @@ Dialog {
             }
         }
 
-        // ── Status ──────────────────────────────────────────────────
+        // ── Status ──────────────────────────────────────────────
         Label {
             text: root.statusMsg
             visible: root.statusMsg !== ""
-            color: window.accentColor
+            color: Theme.accentColor
             font.pixelSize: 12
             wrapMode: Text.WordWrap
             Layout.fillWidth: true

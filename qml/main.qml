@@ -4,6 +4,7 @@ import QtQuick.Layouts 1.15
 import LiquidacionSueldos 1.0
 import "views"
 import "dialogs"
+import "components"
 
 ApplicationWindow {
     id: window
@@ -12,24 +13,11 @@ ApplicationWindow {
     visible: true
     title: qsTr("Sistema de Liquidación de Sueldos y Costo Laboral")
 
-    // Sleek Dark Theme Palette (Default & Enforced)
-    readonly property bool isDark: true
-    readonly property color bgColor: "#1e1e2e"
-    readonly property color panelBg: "#252538"
-    readonly property color cardBg: "#2b2b40"
-    readonly property color inputBg: "#1e1e2e"
-    readonly property color accentColor: "#74c7ec"
-    readonly property color textColor: "#cdd6f4"
-    readonly property color subtextColor: "#a6adc8"
-    readonly property color dangerColor: "#f38ba8"
-    readonly property color borderColor: "#383852"
-
     background: Rectangle {
-        color: window.bgColor
+        color: Theme.bgColor
     }
 
     // All tabs definition — controlled mapping for role visibility
-    // Each entry: { label, adminOnly, viewIndex }
     readonly property var tabDefinitions: [
         { label: "Empleados",         adminOnly: false, viewIndex: 0 },
         { label: "Empresa",           adminOnly: true,  viewIndex: 1 },
@@ -52,7 +40,6 @@ ApplicationWindow {
         return result
     }
 
-    // Map from TabBar position to StackLayout index
     property int activeViewIndex: 0
 
     ColumnLayout {
@@ -63,7 +50,7 @@ ApplicationWindow {
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: 60
-            color: window.panelBg
+            color: Theme.panelBg
 
             RowLayout {
                 anchors.fill: parent
@@ -75,13 +62,13 @@ ApplicationWindow {
                     text: "Liquidación de Sueldos"
                     font.pixelSize: 20
                     font.bold: true
-                    color: window.accentColor
+                    color: Theme.accentColor
                 }
 
                 Label {
                     text: "(C++ / QML)"
                     font.pixelSize: 13
-                    color: window.subtextColor
+                    color: Theme.subtextColor
                 }
 
                 Item { Layout.fillWidth: true }
@@ -89,7 +76,7 @@ ApplicationWindow {
                 Label {
                     text: "Modo:"
                     font.pixelSize: 14
-                    color: window.textColor
+                    color: Theme.textColor
                 }
 
                 ComboBox {
@@ -98,7 +85,6 @@ ApplicationWindow {
                     currentIndex: AppController.currentRole === "admin" ? 0 : 1
                     onActivated: {
                         AppController.currentRole = (currentIndex === 0) ? "admin" : "user"
-                        // Reset to first tab on role change
                         mainTabBar.currentIndex = 0
                         window.activeViewIndex = window.visibleTabIndices[0]
                     }
@@ -115,7 +101,7 @@ ApplicationWindow {
         TabBar {
             id: mainTabBar
             Layout.fillWidth: true
-            background: Rectangle { color: window.panelBg }
+            background: Rectangle { color: Theme.panelBg }
 
             Repeater {
                 model: window.visibleTabIndices
@@ -124,7 +110,7 @@ ApplicationWindow {
                     property int defIndex: modelData
                     contentItem: Text {
                         text: window.tabDefinitions[defIndex].label
-                        color: parent.checked ? window.accentColor : window.textColor
+                        color: parent.checked ? Theme.accentColor : Theme.textColor
                         font.bold: parent.checked
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
@@ -147,33 +133,18 @@ ApplicationWindow {
             Layout.fillHeight: true
             currentIndex: window.activeViewIndex
 
-            // 0: Empleados
             EmployeesView { Layout.fillWidth: true; Layout.fillHeight: true }
-
-            // 1: Empresa
             CompanyView { Layout.fillWidth: true; Layout.fillHeight: true }
-
-            // 2: Categorías
             CategoriesView { Layout.fillWidth: true; Layout.fillHeight: true }
-
-            // 3: Esquemas
             SchemasView { Layout.fillWidth: true; Layout.fillHeight: true }
-
-            // 4: Campos Globales
             GlobalVarsView { Layout.fillWidth: true; Layout.fillHeight: true }
-
-            // 5: Estructura Recibo
             ReceiptStructureView { Layout.fillWidth: true; Layout.fillHeight: true }
-
-            // 6: Vista Previa
             PreviewView { Layout.fillWidth: true; Layout.fillHeight: true }
-
-            // 7: Historial
             ReceiptHistoryView { Layout.fillWidth: true; Layout.fillHeight: true }
         }
     }
 
-    // ── Dialogs (outside layout, anchored to window) ─────────
+    // ── Dialogs ─────────────────────────────────────────────────
     SettingsDialog {
         id: settingsDialog
     }

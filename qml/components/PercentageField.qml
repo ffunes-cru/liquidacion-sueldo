@@ -7,16 +7,16 @@ TextField {
     property real value: 0.0
 
     placeholderText: "% 0.00"
-    color: window.textColor
+    color: Theme.textColor
     horizontalAlignment: Text.AlignRight
     inputMethodHints: Qt.ImhFormattedNumbersOnly
 
     text: Number(value).toFixed(2) + " %"
 
     background: Rectangle {
-        color: window.inputBg
+        color: Theme.inputBg
         radius: 6
-        border.color: control.activeFocus ? window.accentColor : window.borderColor
+        border.color: control.activeFocus ? Theme.accentColor : Theme.borderColor
         border.width: 1
     }
 

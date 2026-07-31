@@ -61,81 +61,54 @@ Item {
         conceptDialog.open()
     }
 
-    function getSectionColor(code) {
-        if (code === "REMUNERATIVO") return "#a6e3a1"
-        if (code === "NO_REMUNERATIVO") return "#89b4fa"
-        if (code === "DESCUENTO") return "#f38ba8"
-        if (code === "APORTE_PATRONAL") return "#fab387"
-        return window.accentColor
-    }
-
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 15
         spacing: 15
 
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════
         // TOP CONTROL BAR
-        // ═══════════════════════════════════════════════════════════════
-        Rectangle {
-            Layout.fillWidth: true
-            implicitHeight: 60
-            color: window.panelBg
-            radius: 8
-            border.color: window.borderColor
+        // ═══════════════════════════════════════════════════════
+        ActionBar {
+            title: "Estructura del Recibo de Sueldo"
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 15
-                anchors.rightMargin: 15
-                spacing: 15
+            Label { text: "Esquema:"; color: Theme.textColor; font.pixelSize: 13 }
 
-                Label {
-                    text: "Estructura del Recibo de Sueldo"
-                    font.pixelSize: 18
-                    font.bold: true
-                    color: window.textColor
+            ComboBox {
+                id: cbEsquema
+                model: AppController.schemaModel
+                textRole: "code"
+                onActivated: {
+                    root.currentEsquema = currentText
+                    root.refreshCells()
                 }
+            }
 
-                Label { text: "Esquema:"; color: window.textColor; font.pixelSize: 13 }
-                ComboBox {
-                    id: cbEsquema
-                    model: AppController.schemaModel
-                    textRole: "code"
-                    onActivated: {
-                        root.currentEsquema = currentText
-                        root.refreshCells()
-                    }
+            Button {
+                text: "⚙️ Campos de Esquema"
+                onClicked: {
+                    schemaConfigDialog.esquemaCodigo = root.currentEsquema
+                    schemaConfigDialog.open()
                 }
+            }
 
-                Item { Layout.fillWidth: true }
-
-                Button {
-                    text: "⚙️ Campos de Esquema"
-                    onClicked: {
-                        schemaConfigDialog.esquemaCodigo = root.currentEsquema
-                        schemaConfigDialog.open()
-                    }
-                }
-
-                Button {
-                    text: "+ Nuevo Concepto"
-                    highlighted: true
-                    visible: AppController.currentRole === "admin"
-                    onClicked: openNewConceptDialog("REMUNERATIVO")
-                }
+            Button {
+                text: "+ Nuevo Concepto"
+                highlighted: true
+                visible: AppController.currentRole === "admin"
+                onClicked: openNewConceptDialog("REMUNERATIVO")
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        // LIVE DYNAMIC PAYSTUB DOCUMENT (SECCIONES DINÁMICAS)
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════
+        // LIVE DYNAMIC PAYSTUB DOCUMENT
+        // ═══════════════════════════════════════════════════════
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: window.panelBg
+            color: Theme.panelBg
             radius: 8
-            border.color: window.borderColor
+            border.color: Theme.borderColor
 
             ScrollView {
                 anchors.fill: parent
@@ -147,29 +120,21 @@ Item {
                     spacing: 20
 
                     // Header Mockup
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: 50
-                        color: window.cardBg
-                        radius: 6
-                        border.color: window.borderColor
+                    SectionPanel {
+                        padding: 12
 
                         RowLayout {
                             anchors.fill: parent
-                            anchors.margins: 12
                             spacing: 20
 
                             Label {
                                 text: "DOCUMENTO MODELO: RECIBO DE SUELDO (" + root.currentEsquema + ")"
-                                font.bold: true
-                                font.pixelSize: 13
-                                color: window.accentColor
+                                font.bold: true; font.pixelSize: 13; color: Theme.accentColor
                             }
                             Item { Layout.fillWidth: true }
                             Label {
                                 text: AppController.cellModel.count + " líneas configuradas"
-                                font.pixelSize: 12
-                                color: window.subtextColor
+                                font.pixelSize: 12; color: Theme.subtextColor
                             }
                         }
                     }
@@ -178,26 +143,25 @@ Item {
                     Rectangle {
                         Layout.fillWidth: true
                         height: 36
-                        color: "#181825"
+                        color: Theme.headerBg
                         radius: 4
 
                         RowLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 12
+                            anchors.leftMargin: 12; anchors.rightMargin: 12
                             spacing: 10
 
-                            Label { text: "Orden"; font.bold: true; font.pixelSize: 11; color: window.subtextColor; Layout.preferredWidth: 60 }
-                            Label { text: "Cód. Variable"; font.bold: true; font.pixelSize: 11; color: window.subtextColor; Layout.preferredWidth: 110 }
-                            Label { text: "Descripción del Concepto"; font.bold: true; font.pixelSize: 11; color: window.subtextColor; Layout.fillWidth: true }
-                            Label { text: "Unidad / Cant."; font.bold: true; font.pixelSize: 11; color: window.subtextColor; Layout.preferredWidth: 100 }
-                            Label { text: "Base Imponible"; font.bold: true; font.pixelSize: 11; color: window.subtextColor; Layout.preferredWidth: 120 }
-                            Label { text: "Fórmula / Cálculo Monto"; font.bold: true; font.pixelSize: 11; color: window.subtextColor; Layout.preferredWidth: 160 }
-                            Label { text: "Acciones"; font.bold: true; font.pixelSize: 11; color: window.subtextColor; Layout.preferredWidth: 80; horizontalAlignment: Text.AlignRight }
+                            Label { text: "Orden"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 60 }
+                            Label { text: "Cód. Variable"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 110 }
+                            Label { text: "Descripción del Concepto"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.fillWidth: true }
+                            Label { text: "Unidad / Cant."; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 100 }
+                            Label { text: "Base Imponible"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 120 }
+                            Label { text: "Fórmula / Cálculo Monto"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 160 }
+                            Label { text: "Acciones"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 80; horizontalAlignment: Text.AlignRight }
                         }
                     }
 
-                    // ── Dynamic Paystub Sections Repeater ───────────────────
+                    // ── Dynamic Paystub Sections ──────────────────────
                     Repeater {
                         model: root.sectionsList.length > 0 ? root.sectionsList : [
                             { codigo: "REMUNERATIVO", titulo: "HABERES REMUNERATIVOS (Con Aporte)" },
@@ -209,7 +173,7 @@ Item {
                         delegate: PaystubSectionBlock {
                             sectionTitle: modelData.titulo || modelData.codigo
                             sectionCode: modelData.codigo
-                            sectionColor: root.getSectionColor(modelData.codigo)
+                            sectionColor: Theme.sectionColor(modelData.codigo)
                             esquemaCodigo: root.currentEsquema
                             onAddRequested: openNewConceptDialog(modelData.codigo)
                             onEditRequested: function(cellData) { openEditConceptDialog(cellData) }
@@ -220,7 +184,7 @@ Item {
         }
     }
 
-    // ── Dialog Modals ───────────────────────────────────────────────
+    // ── Dialogs ──────────────────────────────────────────────────
     ConceptDialog {
         id: conceptDialog
         onConceptSaved: root.refreshCells()

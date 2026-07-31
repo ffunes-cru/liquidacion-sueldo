@@ -28,7 +28,6 @@ Item {
         var fullText = inputField.text
         var leftText = fullText.substring(0, cursor)
 
-        // Find current word prefix being typed
         var match = leftText.match(/([a-zA-Z0-9_]+)$/)
         var prefix = match ? match[1].toLowerCase() : ""
 
@@ -48,7 +47,7 @@ Item {
     }
 
     function insertSuggestion(codeStr) {
-        var cleanCode = codeStr.split("(")[0] // If function like round(val, n), insert prefix or full
+        var cleanCode = codeStr.split("(")[0]
         var cursor = inputField.cursorPosition
         var fullText = inputField.text
         var leftText = fullText.substring(0, cursor)
@@ -71,9 +70,9 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: window.inputBg
+            color: Theme.inputBg
             radius: 6
-            border.color: inputField.activeFocus ? window.accentColor : window.borderColor
+            border.color: inputField.activeFocus ? Theme.accentColor : Theme.borderColor
             border.width: 1
 
             RowLayout {
@@ -88,7 +87,7 @@ Item {
                     Layout.fillHeight: true
                     font.family: "Monospace"
                     font.pixelSize: 13
-                    color: "#a6e3a1"
+                    color: Theme.successColor
                     background: null
 
                     onTextChanged: {
@@ -151,9 +150,9 @@ Item {
         closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
 
         background: Rectangle {
-            color: window.cardBg
+            color: Theme.cardBg
             radius: 8
-            border.color: window.accentColor
+            border.color: Theme.accentColor
             border.width: 1
         }
 
@@ -167,13 +166,13 @@ Item {
                     text: "Sugerencias de Variables (IDE IntelliSense)"
                     font.pixelSize: 11
                     font.bold: true
-                    color: window.accentColor
+                    color: Theme.accentColor
                 }
                 Item { Layout.fillWidth: true }
                 Label {
                     text: filteredSuggestions.length + " var"
                     font.pixelSize: 10
-                    color: window.subtextColor
+                    color: Theme.subtextColor
                 }
             }
 
@@ -189,7 +188,7 @@ Item {
                     width: suggestionList.width
                     height: 36
                     radius: 4
-                    color: suggestionList.currentIndex === index ? "#383852" : (mouseArea.containsMouse ? "#2e2e42" : "transparent")
+                    color: suggestionList.currentIndex === index ? Theme.selectedBg : (mouseArea.containsMouse ? Theme.hoverBg : "transparent")
 
                     MouseArea {
                         id: mouseArea
@@ -206,21 +205,15 @@ Item {
                         anchors.margins: 6
                         spacing: 8
 
-                        Rectangle {
-                            width: 22
-                            height: 22
-                            radius: 4
-                            color: modelData.category === "Función Motor" ? "#89b4fa" :
-                                   (modelData.category === "Acumulador" ? "#f38ba8" :
-                                   (modelData.category === "Variable Global" ? "#fab387" : "#a6e3a1"))
-
-                            Label {
-                                anchors.centerIn: parent
-                                text: modelData.category ? modelData.category.substring(0, 1) : "V"
-                                font.pixelSize: 10
-                                font.bold: true
-                                color: "#11111b"
-                            }
+                        BadgePill {
+                            text: modelData.category ? modelData.category.substring(0, 1) : "V"
+                            badgeColor: modelData.category === "Función Motor" ? Theme.infoColor :
+                                        (modelData.category === "Acumulador" ? Theme.dangerColor :
+                                        (modelData.category === "Variable Global" ? Theme.warningColor : Theme.successColor))
+                            circular: true
+                            implicitWidth: 22
+                            implicitHeight: 22
+                            fontSize: 10
                         }
 
                         ColumnLayout {
@@ -232,7 +225,7 @@ Item {
                                 font.family: "Monospace"
                                 font.bold: true
                                 font.pixelSize: 12
-                                color: window.textColor
+                                color: Theme.textColor
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
@@ -240,7 +233,7 @@ Item {
                             Label {
                                 text: modelData.description
                                 font.pixelSize: 10
-                                color: window.subtextColor
+                                color: Theme.subtextColor
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }

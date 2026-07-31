@@ -74,6 +74,9 @@ void DatabaseManager::createTables()
         )
     )");
 
+    q.exec("INSERT OR IGNORE INTO esquemas_calculo (codigo, nombre, tipo_liquidacion) VALUES ('MENSUAL', 'Comercio Mensualizado', 'mensual')");
+    q.exec("INSERT OR IGNORE INTO esquemas_calculo (codigo, nombre, tipo_liquidacion) VALUES ('JORNAL', 'Comercio Jornalero (Por hora)', 'jornal')");
+
     q.exec(R"(
         CREATE TABLE IF NOT EXISTS categorias_jornal (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -432,7 +435,21 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
                                    int categoriaJornalId, const QString &fechaIngreso,
                                    const QString &cuil)
 {
-    qInfo() << "[DatabaseManager] Guardando empleado ID:" << id << "Legajo:" << legajo << "Nombre:" << nombre << "Esquema:" << esquemaCodigo;
+    // Ensure scheme code exists in esquemas_calculo to prevent foreign key errors
+    QString safeEsquema = esquemaCodigo.trimmed().isEmpty() ? "MENSUAL" : esquemaCodigo.trimmed().toUpper();
+    QSqlQuery checkEsq(m_db);
+    checkEsq.prepare("SELECT codigo FROM esquemas_calculo WHERE codigo = ?");
+    checkEsq.addBindValue(safeEsquema);
+    checkEsq.exec();
+    if (!checkEsq.next()) {
+        QSqlQuery insEsq(m_db);
+        insEsq.prepare("INSERT OR IGNORE INTO esquemas_calculo (codigo, nombre, tipo_liquidacion) VALUES (?, ?, ?)");
+        insEsq.addBindValue(safeEsquema);
+        insEsq.addBindValue(safeEsquema);
+        insEsq.addBindValue(tipoLiq);
+        insEsq.exec();
+    }
+
     QSqlQuery q(m_db);
     if (id > 0) {
         q.prepare(R"(
@@ -444,12 +461,15 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
         q.addBindValue(legajo);
         q.addBindValue(nombre);
         q.addBindValue(tipoLiq);
-        q.addBindValue(esquemaCodigo);
-        q.addBindValue(categoriaJornalId > 0 ? categoriaJornalId : QVariant());
+        q.addBindValue(safeEsquema);
+        q.addBindValue(categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant(QMetaType(QMetaType::Int)));
         q.addBindValue(fechaIngreso);
         q.addBindValue(cuil);
         q.addBindValue(id);
-        q.exec();
+        if (!q.exec()) {
+            qCritical() << "[DatabaseManager] Error al actualizar empleado ID" << id << ":" << q.lastError().text();
+            return -1;
+        }
         return id;
     } else {
         q.prepare(R"(
@@ -461,10 +481,13 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
         q.addBindValue(nombre);
         q.addBindValue(tipoLiq);
         q.addBindValue(esquemaCodigo);
-        q.addBindValue(categoriaJornalId > 0 ? categoriaJornalId : QVariant());
+        q.addBindValue(categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant(QMetaType(QMetaType::Int)));
         q.addBindValue(fechaIngreso);
         q.addBindValue(cuil);
-        q.exec();
+        if (!q.exec()) {
+            qCritical() << "[DatabaseManager] Error al insertar nuevo empleado:" << q.lastError().text();
+            return -1;
+        }
         int newId = q.lastInsertId().toInt();
 
         syncEmployeeFieldsForSchema(esquemaCodigo);

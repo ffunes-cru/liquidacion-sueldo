@@ -85,7 +85,23 @@ set(QML_FILES
     qml/views/PreviewView.qml
     qml/views/ReceiptHistoryView.qml
 
-    # Components
+    # Components — Template Base
+    qml/components/Theme.qml
+    qml/components/StyledTextField.qml
+    qml/components/BadgePill.qml
+    qml/components/StatusBanner.qml
+    qml/components/AppDialog.qml
+    qml/components/AdminActions.qml
+    qml/components/KpiCard.qml
+    qml/components/SectionPanel.qml
+    qml/components/FormField.qml
+    qml/components/FormDialog.qml
+    qml/components/CrudDelegate.qml
+    qml/components/ActionBar.qml
+    qml/components/CrudView.qml
+    qml/components/MasterDetailView.qml
+
+    # Components — Domain-Specific
     qml/components/MoneyField.qml
     qml/components/PercentageField.qml
     qml/components/FormulaInput.qml
@@ -96,8 +112,6 @@ set(QML_FILES
 
     # Dialogs
     qml/dialogs/ConceptDialog.qml
-    qml/dialogs/CategoryDialog.qml
-    qml/dialogs/GlobalVarDialog.qml
     qml/dialogs/VariableAssistantDialog.qml
     qml/dialogs/SchemaConfigDialog.qml
     qml/dialogs/SettingsDialog.qml
@@ -105,6 +119,11 @@ set(QML_FILES
 
 qt_add_executable(${PROJECT_NAME}
     ${SOURCES}
+)
+
+# Mark Theme.qml as a singleton for the QML module
+set_source_files_properties(qml/components/Theme.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE TRUE
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "liquidacion_sueldos_app")

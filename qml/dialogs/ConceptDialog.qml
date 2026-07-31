@@ -4,7 +4,7 @@ import QtQuick.Layouts 1.15
 import LiquidacionSueldos 1.0
 import "../components"
 
-Dialog {
+AppDialog {
     id: root
 
     property int cellId: -1
@@ -22,38 +22,15 @@ Dialog {
     property alias simpleMontoFijo: txtSimpleMontoFijo.text
     property alias visibleRecibo: chkVisibleRecibo.checked
 
-    // Dynamic sections list loaded from DB
     property var sectionsList: []
 
     signal conceptSaved()
 
     title: cellId > 0 ? "Editar Concepto #" + cellId : "Nuevo Concepto de Recibo"
-    modal: true
-    anchors.centerIn: parent
-    width: 620
-    implicitHeight: Math.min(dialogColumn.implicitHeight + 100, 680)
+    dialogWidth: 620
     standardButtons: Dialog.Save | Dialog.Cancel
 
-    Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.5) }
-
-    background: Rectangle {
-        color: window.panelBg
-        radius: 10
-        border.color: window.borderColor
-        border.width: 1
-    }
-
-    enter: Transition {
-        NumberAnimation { property: "scale"; from: 0.85; to: 1.0; duration: 200; easing.type: Easing.OutBack }
-        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 180 }
-    }
-    exit: Transition {
-        NumberAnimation { property: "scale"; from: 1.0; to: 0.85; duration: 150; easing.type: Easing.InQuad }
-        NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 150 }
-    }
-
     onOpened: {
-        // Load sections dynamically from DB
         sectionsList = AppController.listSections()
         var codes = []
         for (var i = 0; i < sectionsList.length; i++) {
@@ -64,7 +41,6 @@ Dialog {
         }
         cbSeccion.model = codes
 
-        // Set current section
         for (var j = 0; j < cbSeccion.count; j++) {
             if (cbSeccion.textAt(j) === root.seccionCodigo) {
                 cbSeccion.currentIndex = j
@@ -103,13 +79,12 @@ Dialog {
         }
     }
 
-    ScrollView {
-        anchors.fill: parent
+    contentItem: ScrollView {
         clip: true
 
         ColumnLayout {
             id: dialogColumn
-            width: root.width - 40
+            width: root.dialogWidth - 40
             spacing: 12
 
             GridLayout {
@@ -118,40 +93,28 @@ Dialog {
                 rowSpacing: 10
                 columnSpacing: 12
 
-                Label { text: "Sección del Recibo:"; color: window.textColor; font.pixelSize: 13 }
+                Label { text: "Sección del Recibo:"; color: Theme.textColor; font.pixelSize: 13 }
                 ComboBox {
                     id: cbSeccion
                     Layout.fillWidth: true
                     model: ["REMUNERATIVO", "NO_REMUNERATIVO", "DESCUENTO", "APORTE_PATRONAL"]
                 }
 
-                Label { text: "Código de Concepto:"; color: window.textColor; font.pixelSize: 13 }
-                TextField {
+                Label { text: "Código de Concepto:"; color: Theme.textColor; font.pixelSize: 13 }
+                StyledTextField {
                     id: txtCodigoVariable
                     placeholderText: "Ej: JUBILACION"
                     Layout.fillWidth: true
-                    color: window.textColor
-                    background: Rectangle {
-                        color: window.inputBg
-                        radius: 6
-                        border.color: parent.activeFocus ? window.accentColor : window.borderColor
-                    }
                 }
 
-                Label { text: "Descripción:"; color: window.textColor; font.pixelSize: 13 }
-                TextField {
+                Label { text: "Descripción:"; color: Theme.textColor; font.pixelSize: 13 }
+                StyledTextField {
                     id: txtDescripcion
                     placeholderText: "Ej: Jubilación Ley 24.241"
                     Layout.fillWidth: true
-                    color: window.textColor
-                    background: Rectangle {
-                        color: window.inputBg
-                        radius: 6
-                        border.color: parent.activeFocus ? window.accentColor : window.borderColor
-                    }
                 }
 
-                Label { text: "Condición:"; color: window.textColor; font.pixelSize: 13 }
+                Label { text: "Condición:"; color: Theme.textColor; font.pixelSize: 13 }
                 FormulaInput {
                     id: txtCondicion
                     esquemaCodigo: root.esquemaCodigo
@@ -159,7 +122,7 @@ Dialog {
                     Layout.fillWidth: true
                 }
 
-                Label { text: "Modo de Cálculo:"; color: window.textColor; font.pixelSize: 13 }
+                Label { text: "Modo de Cálculo:"; color: Theme.textColor; font.pixelSize: 13 }
                 ComboBox {
                     id: cbTipoCalculo
                     Layout.fillWidth: true
@@ -167,7 +130,7 @@ Dialog {
                 }
             }
 
-            // ── Section 1: IDE Formula Editor ─────────────────────────────
+            // ── IDE Formula Editor ─────────────────────────────────
             ColumnLayout {
                 visible: cbTipoCalculo.currentIndex === 0
                 Layout.fillWidth: true
@@ -175,7 +138,7 @@ Dialog {
 
                 Label {
                     text: "Fórmula Monto ($) — Con Autocompletado IDE:"
-                    color: window.accentColor
+                    color: Theme.accentColor
                     font.bold: true
                     font.pixelSize: 13
                 }
@@ -186,11 +149,7 @@ Dialog {
                     Layout.fillWidth: true
                 }
 
-                Label {
-                    text: "Fórmula Unidad / Cantidad:"
-                    color: window.textColor
-                    font.pixelSize: 13
-                }
+                Label { text: "Fórmula Unidad / Cantidad:"; color: Theme.textColor; font.pixelSize: 13 }
                 FormulaInput {
                     id: txtFormulaUnidad
                     esquemaCodigo: root.esquemaCodigo
@@ -198,11 +157,7 @@ Dialog {
                     Layout.fillWidth: true
                 }
 
-                Label {
-                    text: "Fórmula Base Imponible:"
-                    color: window.textColor
-                    font.pixelSize: 13
-                }
+                Label { text: "Fórmula Base Imponible:"; color: Theme.textColor; font.pixelSize: 13 }
                 FormulaInput {
                     id: txtFormulaBase
                     esquemaCodigo: root.esquemaCodigo
@@ -211,7 +166,7 @@ Dialog {
                 }
             }
 
-            // ── Section 2: Simple Calculator Details ───────────────────────
+            // ── Simple Calculator ──────────────────────────────────
             GridLayout {
                 visible: cbTipoCalculo.currentIndex === 1
                 Layout.fillWidth: true
@@ -219,13 +174,13 @@ Dialog {
                 rowSpacing: 10
                 columnSpacing: 10
 
-                Label { text: "Porcentaje (%):"; color: window.textColor; font.pixelSize: 13 }
+                Label { text: "Porcentaje (%):"; color: Theme.textColor; font.pixelSize: 13 }
                 PercentageField {
                     id: txtSimplePorcentaje
                     Layout.fillWidth: true
                 }
 
-                Label { text: "Variable Base:"; color: window.textColor; font.pixelSize: 13 }
+                Label { text: "Variable Base:"; color: Theme.textColor; font.pixelSize: 13 }
                 FormulaInput {
                     id: txtSimpleBaseVar
                     esquemaCodigo: root.esquemaCodigo
@@ -233,7 +188,7 @@ Dialog {
                     Layout.fillWidth: true
                 }
 
-                Label { text: "Monto Fijo ($):"; color: window.textColor; font.pixelSize: 13 }
+                Label { text: "Monto Fijo ($):"; color: Theme.textColor; font.pixelSize: 13 }
                 MoneyField {
                     id: txtSimpleMontoFijo
                     Layout.fillWidth: true
