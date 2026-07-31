@@ -6,13 +6,15 @@ RowLayout {
     id: root
 
     property string label: ""
-    property string type: "text"          // "text", "number", "combo", "checkbox", "formula"
+    property string type: "text"          // "text", "number", "combo", "checkbox", "formula", "date"
     property alias value: loader.fieldValue
     property string placeholder: ""
     property var comboModel: []
     property int comboCurrentIndex: 0
     property string esquemaCodigo: ""     // Only for type === "formula"
     property bool readOnly: false
+
+    signal userFieldValueChanged(var newValue)
 
     // Access the internal control
     property alias control: loader.item
@@ -35,14 +37,16 @@ RowLayout {
         Layout.alignment: Qt.AlignVCenter
 
         property string fieldValue: ""
+        onFieldValueChanged: root.userFieldValueChanged(fieldValue)
 
         sourceComponent: {
             switch(root.type) {
-                case "number":  return textComponent
-                case "combo":   return comboComponent
+                case "number":   return textComponent
+                case "combo":    return comboComponent
                 case "checkbox": return checkboxComponent
-                case "formula": return formulaComponent
-                default:        return textComponent
+                case "formula":  return formulaComponent
+                case "date":     return dateComponent
+                default:         return textComponent
             }
         }
     }
@@ -59,12 +63,48 @@ RowLayout {
     }
 
     Component {
+        id: dateComponent
+        RowLayout {
+            spacing: 6
+            StyledTextField {
+                Layout.fillWidth: true
+                placeholderText: root.placeholder !== "" ? root.placeholder : "AAAA-MM-DD"
+                text: loader.fieldValue
+                readOnly: root.readOnly
+                inputMethodHints: Qt.ImhDate
+                onTextChanged: loader.fieldValue = text
+            }
+            Button {
+                text: "📅 Hoy"
+                flat: true
+                onClicked: loader.fieldValue = Qt.formatDate(new Date(), "yyyy-MM-dd")
+            }
+        }
+    }
+
+    Component {
         id: comboComponent
-        ComboBox {
+        StyledComboBox {
             model: root.comboModel
+            textRole: (model && model.length > 0 && typeof model[0] === "object" && model[0].text !== undefined) ? "text" : ""
             currentIndex: root.comboCurrentIndex
-            onCurrentTextChanged: loader.fieldValue = currentText
-            onCurrentIndexChanged: root.comboCurrentIndex = currentIndex
+            onCurrentIndexChanged: {
+                root.comboCurrentIndex = currentIndex
+                if (model && model[currentIndex] !== undefined) {
+                    if (typeof model[currentIndex] === "object" && model[currentIndex].id !== undefined) {
+                        loader.fieldValue = model[currentIndex].id.toString()
+                    } else if (typeof model[currentIndex] === "object" && model[currentIndex].value !== undefined) {
+                        loader.fieldValue = model[currentIndex].value.toString()
+                    } else {
+                        loader.fieldValue = currentText
+                    }
+                }
+            }
+            onCurrentTextChanged: {
+                if (!model || model.length === 0 || typeof model[0] !== "object") {
+                    loader.fieldValue = currentText
+                }
+            }
         }
     }
 

@@ -94,7 +94,6 @@ int EmployeeVarsModel::employeeId() const { return m_employeeId; }
 
 void EmployeeVarsModel::setEmployeeId(int id)
 {
-    if (m_employeeId == id) return;
     qDebug() << "[EmployeeVarsModel] Seleccionado Empleado ID:" << id;
     m_employeeId = id;
     emit employeeIdChanged();

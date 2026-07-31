@@ -17,17 +17,17 @@ Item {
         fieldRazonSocial.value = comp.razon_social || ""
         fieldCuit.value = comp.cuit || ""
         fieldDireccion.value = comp.direccion || ""
-        fieldLugarPago.value = comp.lugar_pago || ""
+        fieldLugarPago.value = comp.lugar_de_pago || comp.lugar_pago || ""
     }
 
     ScrollView {
+        id: scrollView
         anchors.fill: parent
         anchors.margins: 20
         clip: true
 
         ColumnLayout {
-            width: Math.min(root.width - 40, 700)
-            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(scrollView.availableWidth > 0 ? scrollView.availableWidth : root.width - 40, 720)
             spacing: 20
 
             // ── Title ─────────────────────────────────────────────
@@ -44,7 +44,7 @@ Item {
                 padding: 25
 
                 ColumnLayout {
-                    anchors.fill: parent
+                    Layout.fillWidth: true
                     spacing: 18
 
                     FormField {

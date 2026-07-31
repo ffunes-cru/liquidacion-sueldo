@@ -93,13 +93,18 @@ Item {
                     onTextChanged: {
                         filterCurrentWord()
                         if (activeFocus && filteredSuggestions.length > 0) {
+                            suggestionPopup.updatePosition()
                             suggestionPopup.open()
                         }
                     }
 
                     onActiveFocusChanged: {
-                        if (activeFocus && filteredSuggestions.length > 0) {
-                            suggestionPopup.open()
+                        if (activeFocus) {
+                            reloadSuggestions()
+                            if (filteredSuggestions.length > 0) {
+                                suggestionPopup.updatePosition()
+                                suggestionPopup.open()
+                            }
                         }
                     }
 
@@ -132,9 +137,13 @@ Item {
                     ToolTip.visible: hovered
                     ToolTip.text: "Variables e IntelliSense para Fórmulas"
                     onClicked: {
-                        filterCurrentWord()
-                        if (suggestionPopup.opened) suggestionPopup.close()
-                        else suggestionPopup.open()
+                        reloadSuggestions()
+                        if (suggestionPopup.opened) {
+                            suggestionPopup.close()
+                        } else {
+                            suggestionPopup.updatePosition()
+                            suggestionPopup.open()
+                        }
                     }
                 }
             }
@@ -143,11 +152,20 @@ Item {
 
     Popup {
         id: suggestionPopup
-        y: root.height + 4
         width: Math.max(root.width, 380)
         implicitHeight: Math.min(contentColumn.implicitHeight + 20, 260)
         padding: 8
         closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
+
+        function updatePosition() {
+            var globalPos = root.mapToItem(null, 0, root.height)
+            var screenHeight = Overlay.overlay ? Overlay.overlay.height : 600
+            if (globalPos.y + 260 > screenHeight) {
+                y = -implicitHeight - 6
+            } else {
+                y = root.height + 4
+            }
+        }
 
         background: Rectangle {
             color: Theme.cardBg
@@ -209,7 +227,8 @@ Item {
                             text: modelData.category ? modelData.category.substring(0, 1) : "V"
                             badgeColor: modelData.category === "Función Motor" ? Theme.infoColor :
                                         (modelData.category === "Acumulador" ? Theme.dangerColor :
-                                        (modelData.category === "Variable Global" ? Theme.warningColor : Theme.successColor))
+                                        (modelData.category === "Variable Global" ? Theme.warningColor :
+                                        (modelData.category === "Variable Local" ? Theme.accentColor : Theme.successColor)))
                             circular: true
                             implicitWidth: 22
                             implicitHeight: 22

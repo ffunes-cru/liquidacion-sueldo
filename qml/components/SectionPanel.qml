@@ -8,7 +8,7 @@ Rectangle {
     property string title: ""
     property color titleColor: Theme.accentColor
     property bool showTitle: title !== ""
-    property int padding: 20
+    property int padding: 18
 
     default property alias content: contentContainer.data
 
@@ -22,7 +22,7 @@ Rectangle {
         id: outerColumn
         anchors.fill: parent
         anchors.margins: root.padding
-        spacing: 15
+        spacing: 12
 
         Label {
             visible: root.showTitle
@@ -32,11 +32,10 @@ Rectangle {
             color: root.titleColor
         }
 
-        Item {
+        ColumnLayout {
             id: contentContainer
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            implicitHeight: childrenRect.height
+            spacing: 10
         }
     }
 }

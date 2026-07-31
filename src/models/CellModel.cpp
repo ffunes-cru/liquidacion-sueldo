@@ -88,6 +88,12 @@ void CellModel::refresh()
     emit countChanged();
 }
 
+QVariantMap CellModel::get(int row) const
+{
+    if (row < 0 || row >= m_data.size()) return {};
+    return m_data[row].toMap();
+}
+
 int CellModel::saveCell(int id, const QString &seccionCodigo, const QString &codigoVariable,
                         const QString &descripcion, const QString &condicion,
                         const QString &formulaUnidad, const QString &formulaBase,

@@ -194,6 +194,64 @@ QString ExportService::exportDataXlsx(const QString &path)
         xlsx.write(2, 5, comp["lugar_pago"].toString());
     }
 
+    // 8. Variables de Esquema (schema_fields)
+    xlsx.addSheet("Variables de Esquema");
+    xlsx.selectSheet("Variables de Esquema");
+    xlsx.write(1, 1, "id");
+    xlsx.write(1, 2, "esquema_codigo");
+    xlsx.write(1, 3, "field_code");
+    xlsx.write(1, 4, "field_label");
+    xlsx.write(1, 5, "field_type");
+    xlsx.write(1, 6, "default_value");
+    xlsx.write(1, 7, "display_order");
+    auto sFields = m_db->listAllSchemaFields();
+    row = 2;
+    for (const auto &sf : sFields) {
+        auto m = sf.toMap();
+        xlsx.write(row, 1, m["id"].toInt());
+        xlsx.write(row, 2, m["esquema_codigo"].toString());
+        xlsx.write(row, 3, m["field_code"].toString());
+        xlsx.write(row, 4, m["field_label"].toString());
+        xlsx.write(row, 5, m["field_type"].toString());
+        xlsx.write(row, 6, m["default_value"].toString());
+        xlsx.write(row, 7, m["display_order"].toInt());
+        row++;
+    }
+
+    // 9. Quincenas Empleado
+    xlsx.addSheet("Quincenas Empleado");
+    xlsx.selectSheet("Quincenas Empleado");
+    xlsx.write(1, 1, "empleado_id");
+    xlsx.write(1, 2, "quincena");
+    auto qEmps = m_db->listAllEmployeeQuincenas();
+    row = 2;
+    for (const auto &qe : qEmps) {
+        auto m = qe.toMap();
+        xlsx.write(row, 1, m["empleado_id"].toInt());
+        xlsx.write(row, 2, m["quincena"].toString());
+        row++;
+    }
+
+    // 10. Valores de Empleados (employee_field_values)
+    xlsx.addSheet("Valores de Empleados");
+    xlsx.selectSheet("Valores de Empleados");
+    xlsx.write(1, 1, "id");
+    xlsx.write(1, 2, "empleado_id");
+    xlsx.write(1, 3, "field_id");
+    xlsx.write(1, 4, "quincena");
+    xlsx.write(1, 5, "value");
+    auto efVals = m_db->listAllEmployeeFieldValues();
+    row = 2;
+    for (const auto &ev : efVals) {
+        auto m = ev.toMap();
+        xlsx.write(row, 1, m["id"].toInt());
+        xlsx.write(row, 2, m["empleado_id"].toInt());
+        xlsx.write(row, 3, m["field_id"].toInt());
+        xlsx.write(row, 4, m["quincena"].toString());
+        xlsx.write(row, 5, m["value"].toString());
+        row++;
+    }
+
     if (xlsx.saveAs(filePath)) {
         qInfo() << "[ExportService] Exportación Excel exitosa:" << filePath;
         return filePath;
@@ -235,6 +293,21 @@ bool ExportService::importDataXlsx(const QString &path)
             double valor = xlsx.read(r, 3).toDouble();
             if (!name.isEmpty()) {
                 m_db->saveCategory(0, name, valor);
+            }
+        }
+    }
+
+    // Import Variables de Esquema
+    if (xlsx.selectSheet("Variables de Esquema")) {
+        for (int r = 2; r <= xlsx.dimension().lastRow(); r++) {
+            QString esq = xlsx.read(r, 2).toString();
+            QString code = xlsx.read(r, 3).toString();
+            QString label = xlsx.read(r, 4).toString();
+            QString type = xlsx.read(r, 5).toString();
+            QString defVal = xlsx.read(r, 6).toString();
+            int order = xlsx.read(r, 7).toInt();
+            if (!esq.isEmpty() && !code.isEmpty()) {
+                m_db->addSchemaField(esq, code, label, type.isEmpty() ? "number" : type, defVal, order);
             }
         }
     }
@@ -285,6 +358,30 @@ bool ExportService::importDataXlsx(const QString &path)
                 xlsx.read(2, 4).toString(),
                 xlsx.read(2, 5).toString()
             );
+        }
+    }
+
+    // Import Quincenas Empleado
+    if (xlsx.selectSheet("Quincenas Empleado")) {
+        for (int r = 2; r <= xlsx.dimension().lastRow(); r++) {
+            int empId = xlsx.read(r, 1).toInt();
+            QString qn = xlsx.read(r, 2).toString();
+            if (empId > 0 && !qn.isEmpty()) {
+                m_db->addQuincena(empId, qn);
+            }
+        }
+    }
+
+    // Import Valores de Empleados
+    if (xlsx.selectSheet("Valores de Empleados")) {
+        for (int r = 2; r <= xlsx.dimension().lastRow(); r++) {
+            int empId = xlsx.read(r, 2).toInt();
+            int fieldId = xlsx.read(r, 3).toInt();
+            QString qn = xlsx.read(r, 4).toString();
+            QString val = xlsx.read(r, 5).toString();
+            if (empId > 0 && fieldId > 0) {
+                m_db->setEmployeeFieldValue(empId, fieldId, qn, val);
+            }
         }
     }
 
@@ -372,6 +469,48 @@ QString ExportService::exportDataCsv(const QString &directoryPath)
             for (const auto &g : m_db->listGlobalVariables()) {
                 auto m = g.toMap();
                 writeCsvLine(ts, {m["id"].toString(), m["codigo"].toString(), m["valor"].toString(), m["descripcion"].toString()});
+            }
+        }
+    }
+
+    // Schema Fields
+    {
+        QFile f(dir + "/schema_fields.csv");
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+            writeCsvLine(ts, {"id", "esquema_codigo", "field_code", "field_label", "field_type", "default_value", "display_order"});
+            for (const auto &sf : m_db->listAllSchemaFields()) {
+                auto m = sf.toMap();
+                writeCsvLine(ts, {m["id"].toString(), m["esquema_codigo"].toString(), m["field_code"].toString(),
+                                  m["field_label"].toString(), m["field_type"].toString(), m["default_value"].toString(),
+                                  m["display_order"].toString()});
+            }
+        }
+    }
+
+    // Quincenas Empleados
+    {
+        QFile f(dir + "/quincenas_empleado.csv");
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+            writeCsvLine(ts, {"empleado_id", "quincena"});
+            for (const auto &qe : m_db->listAllEmployeeQuincenas()) {
+                auto m = qe.toMap();
+                writeCsvLine(ts, {m["empleado_id"].toString(), m["quincena"].toString()});
+            }
+        }
+    }
+
+    // Employee Field Values
+    {
+        QFile f(dir + "/employee_field_values.csv");
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+            writeCsvLine(ts, {"id", "empleado_id", "field_id", "quincena", "value"});
+            for (const auto &ev : m_db->listAllEmployeeFieldValues()) {
+                auto m = ev.toMap();
+                writeCsvLine(ts, {m["id"].toString(), m["empleado_id"].toString(), m["field_id"].toString(),
+                                  m["quincena"].toString(), m["value"].toString()});
             }
         }
     }
@@ -477,27 +616,48 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
         auto c = concepto.toMap();
         QString desc = c["descripcion"].toString();
         QString seccion = c["seccion"].toString();
+        QString tipoCalc = c["tipo_calculo"].toString();
+        QString codigo = c["codigo"].toString();
         double monto = c["monto"].toDouble();
         double unidad = c["unidad"].toDouble();
         double base = c["base"].toDouble();
 
-        painter.drawText(QRect(colDesc, y, colUnit - colDesc - 10, 50), Qt::AlignLeft, desc);
+        bool isSeparator = (tipoCalc == "separator" || codigo.startsWith("SEP_"));
 
-        if (unidad != 0)
-            painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, 50), Qt::AlignRight,
-                             QString::number(unidad, 'f', 2));
-        if (base > 0)
-            painter.drawText(QRect(colBase, y, colHab - colBase - 10, 50), Qt::AlignRight,
-                             QString::number(base, 'f', 2));
+        if (isSeparator) {
+            y += 8;
+            QRect sepRect(0, y, pageW, 55);
+            painter.fillRect(sepRect, QColor(240, 243, 250)); // Light subtle tint background
+            painter.setPen(QPen(QColor(180, 195, 220), 1));
+            painter.drawRect(sepRect);
 
-        if (seccion == "REMUNERATIVO" || seccion == "NO_REMUNERATIVO" || seccion == "COMPOSICION") {
-            painter.drawText(QRect(colHab, y, colDesc2 - colHab - 10, 50), Qt::AlignRight,
-                             QString::number(monto, 'f', 2));
-        } else if (seccion == "DESCUENTO" || seccion == "RECIBO") {
-            painter.drawText(QRect(colDesc2, y, pageW - colDesc2, 50), Qt::AlignRight,
-                             QString::number(monto, 'f', 2));
+            QFont sepFont("Helvetica", 9, QFont::Bold);
+            painter.setFont(sepFont);
+            painter.setPen(QPen(QColor(30, 40, 70)));
+            painter.drawText(QRect(15, y, pageW - 30, 55), Qt::AlignLeft | Qt::AlignVCenter, "■  " + desc.toUpper());
+
+            painter.setFont(normalFont);
+            painter.setPen(QPen(Qt::black));
+            y += 65;
+        } else {
+            painter.drawText(QRect(colDesc, y, colUnit - colDesc - 10, 50), Qt::AlignLeft, desc);
+
+            if (unidad != 0)
+                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, 50), Qt::AlignRight,
+                                 QString::number(unidad, 'f', 2));
+            if (base > 0)
+                painter.drawText(QRect(colBase, y, colHab - colBase - 10, 50), Qt::AlignRight,
+                                 QString::number(base, 'f', 2));
+
+            if (seccion == "REMUNERATIVO" || seccion == "NO_REMUNERATIVO" || seccion == "COMPOSICION") {
+                painter.drawText(QRect(colHab, y, colDesc2 - colHab - 10, 50), Qt::AlignRight,
+                                 QString::number(monto, 'f', 2));
+            } else if (seccion == "DESCUENTO" || seccion == "RECIBO") {
+                painter.drawText(QRect(colDesc2, y, pageW - colDesc2, 50), Qt::AlignRight,
+                                 QString::number(monto, 'f', 2));
+            }
+            y += 55;
         }
-        y += 55;
 
         if (y > writer.height() - 400) {
             writer.newPage();

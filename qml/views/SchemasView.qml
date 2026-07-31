@@ -16,10 +16,13 @@ MasterDetailView {
     property var schemaFieldsList: []
 
     function loadSchema(code, name, tipo) {
-        selectedSchemaCode = code
-        txtCode.value = code
-        txtName.value = name
-        cbTipoLiq.value = (tipo === "jornal") ? "Jornalero" : "Mensual"
+        var c = code || ""
+        var n = name || ""
+        var t = tipo || "mensual"
+        selectedSchemaCode = c
+        txtCode.value = c
+        txtName.value = n
+        cbTipoLiq.value = (t === "jornal") ? "Jornalero" : "Mensual"
         refreshSchemaFields()
     }
 
@@ -44,29 +47,29 @@ MasterDetailView {
         CrudDelegate {
             height: 52
 
-            primaryText: model.code
-            secondaryText: model.name
+            primaryText: model.code || model.codigo || ""
+            secondaryText: model.name || model.nombre || ""
             valueText: ""
             showAdminActions: false
 
             middleContent: Component {
                 BadgePill {
-                    text: model.tipoLiquidacion === "jornal" ? "Jornal" : "Mensual"
-                    badgeColor: model.tipoLiquidacion === "jornal" ? Theme.warningColor : Theme.infoColor
+                    text: (model.tipoLiquidacion || model.tipo_liquidacion) === "jornal" ? "Jornal" : "Mensual"
+                    badgeColor: (model.tipoLiquidacion || model.tipo_liquidacion) === "jornal" ? Theme.warningColor : Theme.infoColor
                     fontSize: 11
                 }
             }
 
             // Override to highlight selected
-            color: root.selectedSchemaCode === model.code ? Theme.selectedBg :
+            color: root.selectedSchemaCode === (model.code || model.codigo) ? Theme.selectedBg :
                    (mouseArea.containsMouse ? Theme.hoverBg : Theme.cardBg)
-            border.color: root.selectedSchemaCode === model.code ? Theme.accentColor : Theme.borderColor
+            border.color: root.selectedSchemaCode === (model.code || model.codigo) ? Theme.accentColor : Theme.borderColor
 
             MouseArea {
                 id: mouseArea
                 anchors.fill: parent
                 hoverEnabled: true
-                onClicked: root.loadSchema(model.code, model.name, model.tipoLiquidacion)
+                onClicked: root.loadSchema(model.code || model.codigo, model.name || model.nombre, model.tipoLiquidacion || model.tipo_liquidacion)
             }
         }
     }
@@ -118,7 +121,7 @@ MasterDetailView {
             padding: 12
 
             GridLayout {
-                anchors.fill: parent
+                Layout.fillWidth: true
                 columns: 4
                 rowSpacing: 12
                 columnSpacing: 15

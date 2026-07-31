@@ -108,15 +108,43 @@ QVariantMap EmployeeModel::get(int row) const
         return {};
     }
 
-    // --- Imprimir todo el contenedor como una lista de mapas ---
-    QVariantList fullList;
-    for (const auto &item : m_filteredData) {
-        fullList.append(item.toMap());
-    }
-    qInfo() << "[EmployeeModel] Contenido completo de m_filteredData:" << fullList;
-    // -----------------------------------------------------------
+    QVariantMap emp = m_filteredData[row].toMap();
 
-    return m_filteredData[row].toMap();
+    int id = emp.contains("id") ? emp["id"].toInt() : emp.value("employeeId").toInt();
+    emp["id"] = id;
+    emp["employeeId"] = id;
+
+    QString legajo = emp.value("legajo").toString();
+    emp["legajo"] = legajo;
+
+    QString nombre = emp.contains("nombre_completo") ? emp["nombre_completo"].toString() : emp.value("nombre").toString();
+    emp["nombre"] = nombre;
+    emp["nombre_completo"] = nombre;
+
+    QString tipoLiq = emp.contains("tipo_liquidacion") ? emp["tipo_liquidacion"].toString() : emp.value("tipoLiquidacion").toString();
+    emp["tipoLiquidacion"] = tipoLiq;
+    emp["tipo_liquidacion"] = tipoLiq;
+
+    QString esquema = emp.contains("esquema_codigo") ? emp["esquema_codigo"].toString() : emp.value("esquema").toString();
+    emp["esquema"] = esquema;
+    emp["esquema_codigo"] = esquema;
+
+    int catId = emp.contains("categoria_jornal_id") ? emp["categoria_jornal_id"].toInt() : emp.value("categoriaId").toInt();
+    emp["categoriaId"] = catId;
+    emp["categoria_jornal_id"] = catId;
+
+    QString catNombre = emp.contains("categoria_nombre") ? emp["categoria_nombre"].toString() : emp.value("categoriaNombre").toString();
+    emp["categoriaNombre"] = catNombre;
+    emp["categoria_nombre"] = catNombre;
+
+    QString fechaIngreso = emp.contains("fecha_ingreso") ? emp["fecha_ingreso"].toString() : emp.value("fechaIngreso").toString();
+    emp["fechaIngreso"] = fechaIngreso;
+    emp["fecha_ingreso"] = fechaIngreso;
+
+    QString cuil = emp.value("cuil").toString();
+    emp["cuil"] = cuil;
+
+    return emp;
 }
 
 int EmployeeModel::idAtRow(int row) const

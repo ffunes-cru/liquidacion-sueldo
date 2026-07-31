@@ -15,14 +15,21 @@ RowLayout {
     signal duplicateClicked()
 
     spacing: 4
+    z: 10
     visible: AppController.currentRole === "admin"
 
     Button {
         visible: root.showDuplicate
-        implicitWidth: 30
-        implicitHeight: 28
+        implicitWidth: 32
+        implicitHeight: 32
+        padding: 0
+        leftPadding: 0
+        rightPadding: 0
+        topPadding: 0
+        bottomPadding: 0
         flat: true
         text: "📋"
+        font.pixelSize: 15
         ToolTip.visible: hovered
         ToolTip.text: "Duplicar"
         onClicked: root.duplicateClicked()
@@ -30,10 +37,16 @@ RowLayout {
 
     Button {
         visible: root.showEdit
-        implicitWidth: 30
-        implicitHeight: 28
+        implicitWidth: 32
+        implicitHeight: 32
+        padding: 0
+        leftPadding: 0
+        rightPadding: 0
+        topPadding: 0
+        bottomPadding: 0
         flat: true
         text: "✏️"
+        font.pixelSize: 15
         ToolTip.visible: hovered
         ToolTip.text: "Editar"
         onClicked: root.editClicked()
@@ -41,10 +54,16 @@ RowLayout {
 
     Button {
         visible: root.showDelete
-        implicitWidth: 30
-        implicitHeight: 28
+        implicitWidth: 32
+        implicitHeight: 32
+        padding: 0
+        leftPadding: 0
+        rightPadding: 0
+        topPadding: 0
+        bottomPadding: 0
         flat: true
         text: "🗑️"
+        font.pixelSize: 15
         ToolTip.visible: hovered
         ToolTip.text: "Eliminar"
         onClicked: root.deleteClicked()

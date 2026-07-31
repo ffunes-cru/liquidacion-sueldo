@@ -5,13 +5,19 @@ import QtQuick.Layouts 1.15
 Dialog {
     id: root
 
-    property int dialogWidth: 460
+    property int dialogWidth: 480
     property int dialogHeight: -1  // -1 = auto from content
 
     modal: true
     anchors.centerIn: parent
     width: dialogWidth
-    implicitHeight: dialogHeight > 0 ? dialogHeight : undefined
+    height: dialogHeight > 0 ? dialogHeight : implicitHeight
+
+    padding: 20
+    topPadding: 15
+    bottomPadding: 18
+    leftPadding: 24
+    rightPadding: 24
 
     Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.5) }
 
@@ -23,14 +29,14 @@ Dialog {
     }
 
     header: Rectangle {
-        implicitHeight: 48
+        implicitHeight: 52
         color: "transparent"
         radius: 10
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 20
-            anchors.rightMargin: 20
+            anchors.leftMargin: 24
+            anchors.rightMargin: 24
 
             Label {
                 text: root.title

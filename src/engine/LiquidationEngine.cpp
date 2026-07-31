@@ -189,14 +189,16 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
     contexto["antiguedad_anios"] = antiguedadAnios;
     contexto["antiguedad"] = antiguedadAnios;
 
-    // Inject valor_hora from hourly category
+    // Inject valor_hora, jornal, basico from category
     int catId = employee.value("categoria_jornal_id").toInt();
+    double valorHora = 0.0;
     if (catId > 0) {
         QVariantMap cat = m_db->getCategory(catId);
-        contexto["valor_hora"] = cat.value("valor_hora", 0.0);
-    } else {
-        contexto["valor_hora"] = 0.0;
+        valorHora = cat.value("valor_hora", 0.0).toDouble();
     }
+    contexto["valor_hora"] = valorHora;
+    contexto["jornal"] = valorHora;
+    contexto["basico"] = valorHora;
 
     // Get schema and cells
     QString esquema = employee.value("esquema_codigo", "MENSUAL").toString();
@@ -230,16 +232,9 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
     aggregator.setQuincenaData(quincenaComputed);
 
     FormulaEngine engine;
-
-    // Register aggregation functions as JS callables
-    // We need to use a lambda approach via QJSEngine
     engine.setContext(contexto);
 
-    // Install aggregation functions into the JS engine
-    // Since we can't directly pass C++ lambdas as JS functions easily,
-    // we pre-compute Q_sum_, Q_avg_ etc. and inject them as variables
     if (esJornal) {
-        // Collect all variable names from quincena data
         QSet<QString> allVarNames;
         for (const auto &qData : quincenaComputed) {
             for (auto vi = qData.begin(); vi != qData.end(); ++vi) {
@@ -247,7 +242,6 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
             }
         }
 
-        // Pre-compute and inject Q_sum_, Q_avg_, Q_max_, Q_min_ for every variable
         for (const QString &varName : allVarNames) {
             engine.setVariable("Q_sum_" + varName, aggregator.sumarQ(varName));
             engine.setVariable("Q_avg_" + varName, aggregator.promedioQ(varName));
@@ -259,10 +253,14 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
 
     // Register helper functions as JS code
     auto setupFunctions = QString(R"(
-        function sumar_q(varName) { return typeof this['Q_sum_' + varName] !== 'undefined' ? this['Q_sum_' + varName] : 0; }
-        function promedio_q(varName) { return typeof this['Q_avg_' + varName] !== 'undefined' ? this['Q_avg_' + varName] : 0; }
-        function max_q(varName) { return typeof this['Q_max_' + varName] !== 'undefined' ? this['Q_max_' + varName] : 0; }
-        function min_q(varName) { return typeof this['Q_min_' + varName] !== 'undefined' ? this['Q_min_' + varName] : 0; }
+        function Q_sum_(varName) { return typeof this['Q_sum_' + varName] !== 'undefined' ? this['Q_sum_' + varName] : 0; }
+        function Q_avg_(varName) { return typeof this['Q_avg_' + varName] !== 'undefined' ? this['Q_avg_' + varName] : 0; }
+        function Q_max_(varName) { return typeof this['Q_max_' + varName] !== 'undefined' ? this['Q_max_' + varName] : 0; }
+        function Q_min_(varName) { return typeof this['Q_min_' + varName] !== 'undefined' ? this['Q_min_' + varName] : 0; }
+        function sumar_q(varName) { return Q_sum_(varName); }
+        function promedio_q(varName) { return Q_avg_(varName); }
+        function max_q(varName) { return Q_max_(varName); }
+        function min_q(varName) { return Q_min_(varName); }
         function cant_q() { return typeof _cant_q !== 'undefined' ? _cant_q : 1; }
     )");
     engine.evaluate(setupFunctions);
@@ -305,7 +303,10 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
         QVariant base;
         double monto = 0.0;
 
-        if (tipoCalc == "porcentaje") {
+        if (tipoCalc == "separator") {
+            // Separator line header - no numeric calculations
+            monto = 0.0;
+        } else if (tipoCalc == "porcentaje") {
             double pct = cell.value("simple_porcentaje", 0.0).toDouble();
             QString baseVar = cell.value("simple_base_variable", "").toString();
             double baseVal = engine.getVariable(baseVar).toDouble();
@@ -366,6 +367,7 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
             {"base", base},
             {"monto", monto},
             {"seccion", seccion},
+            {"tipo_calculo", tipoCalc},
             {"visible_recibo", cell.value("visible_recibo", 1)},
         };
 

@@ -37,7 +37,7 @@ MasterDetailView {
     function refreshQuincenasList() {
         if (selectedEmployeeId > 0) {
             var list = AppController.listEmployeeQuincenas(selectedEmployeeId)
-            cbQuincenas.model = (list && list.length > 0) ? list : ["Q1", "Q2"]
+            cbQuincenas.model = (list && list.length > 0) ? list : ["Q1"]
             if (cbQuincenas.currentIndex < 0 || cbQuincenas.currentIndex >= cbQuincenas.count) {
                 cbQuincenas.currentIndex = 0
             }
@@ -46,12 +46,36 @@ MasterDetailView {
         }
     }
 
+    function getCategoriesCombo() {
+        var list = []
+        var cats = AppController.listCategories()
+        for (var i = 0; i < cats.length; i++) {
+            var c = cats[i]
+            list.push({ id: c.id, text: (c.nombre || "Cat " + c.id) + " ($" + (c.valor_hora || c.valorHora || 0) + "/hs)" })
+        }
+        return list.length > 0 ? list : [{ id: 1, text: "General ($0/hs)" }]
+    }
+
+    function getSchemasCombo(tipoLiq) {
+        var list = []
+        var schemas = AppController.listSchemas()
+        var targetType = (tipoLiq || "mensual").toLowerCase()
+        for (var i = 0; i < schemas.length; i++) {
+            var s = schemas[i]
+            var sType = (s.tipo_liquidacion || s.tipoLiquidacion || "mensual").toLowerCase()
+            if (sType === targetType) {
+                list.push(s.codigo || s.code)
+            }
+        }
+        return list.length > 0 ? list : (targetType === "jornal" ? ["JORNAL"] : ["MENSUAL"])
+    }
+
     // ── Master Delegate ─────────────────────────────────────────
     masterDelegate: Component {
         CrudDelegate {
             height: 60
-            primaryText: model.nombre
-            secondaryText: "Legajo: " + model.legajo + (model.cuil ? " | CUIL: " + model.cuil : "")
+            primaryText: model.nombre || ""
+            secondaryText: "Legajo: " + (model.legajo || "-") + (model.cuil ? " | CUIL: " + model.cuil : "")
             badgeText: model.esquema || "MENSUAL"
             badgeColor: model.tipoLiquidacion === "jornal" ? Theme.warningColor : Theme.infoColor
             showAdminActions: true
@@ -59,26 +83,20 @@ MasterDetailView {
             itemId: model.employeeId || model.id || AppController.employeeModel.idAtRow(index)
             itemData: ({
                 employeeId: model.employeeId || model.id || AppController.employeeModel.idAtRow(index),
-                legajo: model.legajo,
-                nombre: model.nombre,
-                tipoLiquidacion: model.tipoLiquidacion,
-                esquema: model.esquema,
-                categoriaId: model.categoriaId,
-                categoriaNombre: model.categoriaNombre,
-                fechaIngreso: model.fechaIngreso,
-                cuil: model.cuil
+                legajo: model.legajo || "",
+                nombre: model.nombre || "",
+                tipoLiquidacion: model.tipoLiquidacion || "mensual",
+                esquema: model.esquema || "MENSUAL",
+                categoriaId: model.categoriaId || model.categoria_jornal_id || 1,
+                categoriaNombre: model.categoriaNombre || "",
+                fechaIngreso: model.fechaIngreso || "",
+                cuil: model.cuil || ""
             })
 
-            color: root.selectedIndex === index ? Theme.selectedBg :
-                   (mouseArea.containsMouse ? Theme.hoverBg : Theme.cardBg)
+            color: root.selectedIndex === index ? Theme.selectedBg : Theme.cardBg
             border.color: root.selectedIndex === index ? Theme.accentColor : Theme.borderColor
 
-            MouseArea {
-                id: mouseArea
-                anchors.fill: parent
-                hoverEnabled: true
-                onClicked: root.selectEmployeeAtRow(index)
-            }
+            onClicked: root.selectEmployeeAtRow(index)
 
             onEditRequested: function(data) {
                 employeeDialog.openEdit({
@@ -119,7 +137,11 @@ MasterDetailView {
             text: "+ Nuevo Empleado"
             highlighted: true
             visible: AppController.currentRole === "admin"
-            onClicked: employeeDialog.openNew()
+            onClicked: {
+                employeeDialog.setComboModel("esquema", root.getSchemasCombo("mensual"))
+                employeeDialog.setFieldVisible("categoriaId", false)
+                employeeDialog.openNew()
+            }
         }
     }
 
@@ -133,65 +155,66 @@ MasterDetailView {
         // Employee Info Card
         SectionPanel {
             visible: root.selectedEmployeeId > 0
-            title: root.selectedEmployeeData ? root.selectedEmployeeData.nombre : "Empleado Seleccionado"
+            title: root.selectedEmployeeData ? (root.selectedEmployeeData.nombre || root.selectedEmployeeData.nombre_completo || "Empleado Seleccionado") : "Empleado Seleccionado"
+            padding: 16
 
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 12
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 15
 
-                RowLayout {
+                GridLayout {
                     Layout.fillWidth: true
+                    columns: 4
+                    rowSpacing: 8
+                    columnSpacing: 16
 
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 4
-                        rowSpacing: 8
-                        columnSpacing: 15
+                    Label { text: "Legajo:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
+                    Label { text: root.selectedEmployeeData ? (root.selectedEmployeeData.legajo || "-") : "-"; color: Theme.textColor; font.pixelSize: 13 }
 
-                        Label { text: "Legajo:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
-                        Label { text: root.selectedEmployeeData ? root.selectedEmployeeData.legajo : "-"; color: Theme.textColor; font.pixelSize: 13 }
+                    Label { text: "CUIL:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
+                    Label { text: root.selectedEmployeeData ? (root.selectedEmployeeData.cuil || "N/A") : "-"; color: Theme.textColor; font.pixelSize: 13 }
 
-                        Label { text: "CUIL:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
-                        Label { text: root.selectedEmployeeData ? (root.selectedEmployeeData.cuil || "N/A") : "-"; color: Theme.textColor; font.pixelSize: 13 }
+                    Label { text: "Esquema:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
+                    Label { text: root.selectedEmployeeData ? (root.selectedEmployeeData.esquema || root.selectedEmployeeData.esquema_codigo || "-") : "-"; color: Theme.accentColor; font.bold: true; font.pixelSize: 13 }
 
-                        Label { text: "Esquema:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
-                        Label { text: root.selectedEmployeeData ? root.selectedEmployeeData.esquema : "-"; color: Theme.accentColor; font.bold: true; font.pixelSize: 13 }
+                    Label { text: "Categoría:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
+                    Label { text: root.selectedEmployeeData ? (root.selectedEmployeeData.categoriaNombre || root.selectedEmployeeData.categoria_nombre || "General") : "-"; color: Theme.textColor; font.pixelSize: 13 }
 
-                        Label { text: "Categoría:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
-                        Label { text: root.selectedEmployeeData ? (root.selectedEmployeeData.categoriaNombre || "General") : "-"; color: Theme.textColor; font.pixelSize: 13 }
+                    Label { text: "Tipo Liquidación:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
+                    Label { text: root.selectedEmployeeData ? (root.selectedEmployeeData.tipoLiquidacion || root.selectedEmployeeData.tipo_liquidacion || "-") : "-"; color: Theme.textColor; font.pixelSize: 13 }
 
-                        Label { text: "Tipo Liquidación:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
-                        Label { text: root.selectedEmployeeData ? root.selectedEmployeeData.tipoLiquidacion : "-"; color: Theme.textColor; font.pixelSize: 13 }
+                    Label { text: "Fecha Ingreso:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
+                    Label { text: root.selectedEmployeeData ? (root.selectedEmployeeData.fechaIngreso || root.selectedEmployeeData.fecha_ingreso || "N/A") : "-"; color: Theme.textColor; font.pixelSize: 13 }
+                }
 
-                        Label { text: "Fecha Ingreso:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
-                        Label { text: root.selectedEmployeeData ? (root.selectedEmployeeData.fechaIngreso || "N/A") : "-"; color: Theme.textColor; font.pixelSize: 13 }
-                    }
-
-                    Button {
-                        text: "✏️ Editar Ficha"
-                        visible: AppController.currentRole === "admin"
-                        onClicked: {
-                            if (root.selectedEmployeeData) {
-                                employeeDialog.openEdit({
-                                    employeeId: root.selectedEmployeeId,
-                                    legajo: root.selectedEmployeeData.legajo,
-                                    nombre: root.selectedEmployeeData.nombre,
-                                    tipoLiq: root.selectedEmployeeData.tipoLiquidacion,
-                                    esquema: root.selectedEmployeeData.esquema,
-                                    categoriaId: root.selectedEmployeeData.categoriaId,
-                                    fechaIngreso: root.selectedEmployeeData.fechaIngreso,
-                                    cuil: root.selectedEmployeeData.cuil
-                                })
-                            }
+                Button {
+                    text: "✏️ Editar Ficha"
+                    visible: AppController.currentRole === "admin"
+                    Layout.alignment: Qt.AlignTop | Qt.AlignRight
+                    onClicked: {
+                        if (root.selectedEmployeeData) {
+                            var t = (root.selectedEmployeeData.tipoLiquidacion || root.selectedEmployeeData.tipo_liquidacion || "mensual").toLowerCase()
+                            employeeDialog.setComboModel("esquema", root.getSchemasCombo(t))
+                            employeeDialog.setFieldVisible("categoriaId", t === "jornal")
+                            employeeDialog.openEdit({
+                                employeeId: root.selectedEmployeeId,
+                                legajo: root.selectedEmployeeData.legajo || "",
+                                nombre: root.selectedEmployeeData.nombre || root.selectedEmployeeData.nombre_completo || "",
+                                tipoLiq: t,
+                                esquema: root.selectedEmployeeData.esquema || root.selectedEmployeeData.esquema_codigo || (t === "jornal" ? "JORNAL" : "MENSUAL"),
+                                categoriaId: root.selectedEmployeeData.categoriaId || root.selectedEmployeeData.categoria_jornal_id || 1,
+                                fechaIngreso: root.selectedEmployeeData.fechaIngreso || root.selectedEmployeeData.fecha_ingreso || "",
+                                cuil: root.selectedEmployeeData.cuil || ""
+                            })
                         }
                     }
                 }
             }
         }
 
-        // Quincena Selector Bar
+        // Quincena Selector Bar (Only for Jornal / Hourly Employees)
         RowLayout {
-            visible: root.selectedEmployeeId > 0
+            visible: root.selectedEmployeeId > 0 && root.selectedEmployeeData && ((root.selectedEmployeeData.tipoLiquidacion || root.selectedEmployeeData.tipo_liquidacion) === "jornal")
             Layout.fillWidth: true
             spacing: 12
 
@@ -282,9 +305,18 @@ MasterDetailView {
             { key: "nombre",       label: "Nombre Completo:", placeholder: "Ej: Juan Pérez", type: "text" },
             { key: "cuil",         label: "CUIL:",            placeholder: "Ej: 20-12345678-9", type: "text" },
             { key: "tipoLiq",      label: "Tipo Liquidación:", type: "combo", comboModel: ["mensual", "jornal"] },
-            { key: "esquema",      label: "Esquema de Cálculo:", type: "combo", comboModel: ["MENSUAL", "JORNAL"] },
-            { key: "fechaIngreso", label: "Fecha Ingreso:",   placeholder: "YYYY-MM-DD", type: "text" }
+            { key: "esquema",      label: "Esquema de Cálculo:", type: "combo", comboModel: root.getSchemasCombo("mensual") },
+            { key: "categoriaId",  label: "Categoría Jornalera:", type: "combo", comboModel: root.getCategoriesCombo(), visible: false },
+            { key: "fechaIngreso", label: "Fecha Ingreso:",   placeholder: "YYYY-MM-DD", type: "date" }
         ]
+
+        onFieldValueChanged: function(key, newValue) {
+            if (key === "tipoLiq") {
+                var t = (newValue || "mensual").toString().toLowerCase()
+                employeeDialog.setComboModel("esquema", root.getSchemasCombo(t))
+                employeeDialog.setFieldVisible("categoriaId", t === "jornal")
+            }
+        }
 
         onFormAccepted: function(values) {
             var empId = employeeDialog.itemId
@@ -293,19 +325,24 @@ MasterDetailView {
             var cuil = values.cuil ? values.cuil.trim() : ""
             var tipoLiq = values.tipoLiq || "mensual"
             var esquema = values.esquema || "MENSUAL"
+            var catId = (tipoLiq === "jornal" && values.categoriaId) ? (parseInt(values.categoriaId) || 0) : 0
             var fechaIngreso = values.fechaIngreso ? values.fechaIngreso.trim() : ""
-            var catId = 1
 
             if (legajo !== "" && nombre !== "") {
+                var targetId = empId
                 if (empId > 0) {
                     AppController.employeeModel.saveEmployee(empId, legajo, nombre, tipoLiq, esquema, catId, fechaIngreso, cuil)
                 } else {
-                    var newId = AppController.employeeModel.addEmployee(legajo, nombre, tipoLiq, esquema, catId, fechaIngreso, cuil)
-                    if (newId > 0) {
+                    targetId = AppController.employeeModel.addEmployee(legajo, nombre, tipoLiq, esquema, catId, fechaIngreso, cuil)
+                    if (targetId > 0) {
                         AppController.employeeModel.refresh()
                     }
                 }
                 root.selectEmployeeAtRow(root.selectedIndex >= 0 ? root.selectedIndex : 0)
+                if (targetId > 0) {
+                    AppController.employeeVarsModel.employeeId = targetId
+                    AppController.employeeVarsModel.refresh()
+                }
             }
         }
     }

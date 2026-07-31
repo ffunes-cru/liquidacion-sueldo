@@ -43,6 +43,7 @@ public:
     int count() const;
 
     Q_INVOKABLE void refresh();
+    Q_INVOKABLE QVariantMap get(int row) const;
     Q_INVOKABLE int saveCell(int id, const QString &seccionCodigo, const QString &codigoVariable,
                              const QString &descripcion, const QString &condicion,
                              const QString &formulaUnidad, const QString &formulaBase,

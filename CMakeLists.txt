@@ -88,6 +88,7 @@ set(QML_FILES
     # Components — Template Base
     qml/components/Theme.qml
     qml/components/StyledTextField.qml
+    qml/components/StyledComboBox.qml
     qml/components/BadgePill.qml
     qml/components/StatusBanner.qml
     qml/components/AppDialog.qml

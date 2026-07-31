@@ -147,7 +147,7 @@ MasterDetailView {
             visible: root.receiptDetails !== null
 
             GridLayout {
-                anchors.fill: parent
+                Layout.fillWidth: true
                 columns: 2
                 rowSpacing: 10
                 columnSpacing: 15

@@ -9,13 +9,13 @@ AppDialog {
 
     title: "Configuración General del Sistema"
     dialogWidth: 520
-    dialogHeight: 420
+    dialogHeight: -1
     standardButtons: Dialog.Close
 
     property string statusMsg: ""
 
     contentItem: ColumnLayout {
-        spacing: 15
+        spacing: 12
 
         // ── Apariencia ──────────────────────────────────────────
         Label {
@@ -89,8 +89,6 @@ AppDialog {
             }
         }
 
-        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderColor }
-
         Button {
             Layout.fillWidth: true
             text: "💾 Crear Copia de Seguridad de BD (Backup)"
@@ -109,7 +107,5 @@ AppDialog {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
-
-        Item { Layout.fillHeight: true }
     }
 }

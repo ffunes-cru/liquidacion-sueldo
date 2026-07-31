@@ -140,6 +140,17 @@ void DatabaseManager::createTables()
     )");
 
     q.exec(R"(
+        CREATE TABLE IF NOT EXISTS quincenas_empleado (
+            empleado_id INTEGER NOT NULL REFERENCES empleados(id) ON DELETE CASCADE,
+            quincena    TEXT    NOT NULL,
+            PRIMARY KEY(empleado_id, quincena)
+        )
+    )");
+
+    // Seed Q1 in quincenas_empleado for any existing employees
+    q.exec("INSERT OR IGNORE INTO quincenas_empleado (empleado_id, quincena) SELECT id, 'Q1' FROM empleados");
+
+    q.exec(R"(
         CREATE TABLE IF NOT EXISTS celdas_calculo (
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
             seccion_codigo       TEXT    NOT NULL REFERENCES secciones(codigo),
@@ -462,7 +473,7 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
         q.addBindValue(nombre);
         q.addBindValue(tipoLiq);
         q.addBindValue(safeEsquema);
-        q.addBindValue(categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant(QMetaType(QMetaType::Int)));
+        q.addBindValue(categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant());
         q.addBindValue(fechaIngreso);
         q.addBindValue(cuil);
         q.addBindValue(id);
@@ -480,8 +491,8 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
         q.addBindValue(legajo);
         q.addBindValue(nombre);
         q.addBindValue(tipoLiq);
-        q.addBindValue(esquemaCodigo);
-        q.addBindValue(categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant(QMetaType(QMetaType::Int)));
+        q.addBindValue(safeEsquema);
+        q.addBindValue(categoriaJornalId > 0 ? QVariant(categoriaJornalId) : QVariant());
         q.addBindValue(fechaIngreso);
         q.addBindValue(cuil);
         if (!q.exec()) {
@@ -490,7 +501,12 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
         }
         int newId = q.lastInsertId().toInt();
 
-        syncEmployeeFieldsForSchema(esquemaCodigo);
+        QSqlQuery insQ(m_db);
+        insQ.prepare("INSERT OR IGNORE INTO quincenas_empleado (empleado_id, quincena) VALUES (?, 'Q1')");
+        insQ.addBindValue(newId);
+        insQ.exec();
+
+        syncEmployeeFieldsForSchema(safeEsquema);
 
         return newId;
     }
@@ -604,6 +620,53 @@ bool DatabaseManager::renameSchemaField(int fieldId, const QString &newCode, con
     q.addBindValue(newLabel);
     q.addBindValue(fieldId);
     return q.exec();
+}
+
+QVariantList DatabaseManager::listAllSchemaFields() const
+{
+    QVariantList list;
+    QSqlQuery q("SELECT id, esquema_codigo, field_code, field_label, field_type, default_value, display_order FROM schema_fields ORDER BY id", m_db);
+    while (q.next()) {
+        list.append(QVariantMap{
+            {"id", q.value("id").toInt()},
+            {"esquema_codigo", q.value("esquema_codigo").toString()},
+            {"field_code", q.value("field_code").toString()},
+            {"field_label", q.value("field_label").toString()},
+            {"field_type", q.value("field_type").toString()},
+            {"default_value", q.value("default_value").toString()},
+            {"display_order", q.value("display_order").toInt()}
+        });
+    }
+    return list;
+}
+
+QVariantList DatabaseManager::listAllEmployeeFieldValues() const
+{
+    QVariantList list;
+    QSqlQuery q("SELECT id, empleado_id, field_id, quincena, value FROM employee_field_values ORDER BY id", m_db);
+    while (q.next()) {
+        list.append(QVariantMap{
+            {"id", q.value("id").toInt()},
+            {"empleado_id", q.value("empleado_id").toInt()},
+            {"field_id", q.value("field_id").toInt()},
+            {"quincena", q.value("quincena").toString()},
+            {"value", q.value("value").toString()}
+        });
+    }
+    return list;
+}
+
+QVariantList DatabaseManager::listAllEmployeeQuincenas() const
+{
+    QVariantList list;
+    QSqlQuery q("SELECT empleado_id, quincena FROM quincenas_empleado", m_db);
+    while (q.next()) {
+        list.append(QVariantMap{
+            {"empleado_id", q.value("empleado_id").toInt()},
+            {"quincena", q.value("quincena").toString()}
+        });
+    }
+    return list;
 }
 
 QVariantList DatabaseManager::getEmployeeFieldValues(int employeeId, const QString &quincena) const
@@ -733,11 +796,20 @@ QStringList DatabaseManager::listEmployeeQuincenas(int employeeId) const
 {
     QStringList result;
     QSqlQuery q(m_db);
-    q.prepare("SELECT DISTINCT quincena FROM employee_field_values WHERE empleado_id = ? ORDER BY quincena");
+    q.prepare("SELECT quincena FROM quincenas_empleado WHERE empleado_id = ? ORDER BY quincena");
     q.addBindValue(employeeId);
     q.exec();
     while (q.next()) {
         result.append(q.value(0).toString());
+    }
+    if (result.isEmpty()) {
+        QSqlQuery q2(m_db);
+        q2.prepare("SELECT DISTINCT quincena FROM employee_field_values WHERE empleado_id = ? ORDER BY quincena");
+        q2.addBindValue(employeeId);
+        q2.exec();
+        while (q2.next()) {
+            result.append(q2.value(0).toString());
+        }
     }
     if (result.isEmpty()) {
         result.append("Q1");
@@ -750,6 +822,12 @@ bool DatabaseManager::addQuincena(int employeeId, const QString &quincenaCode)
     qInfo() << "[DatabaseManager] Añadiendo quincena" << quincenaCode << "a empleado ID:" << employeeId;
     auto emp = getEmployee(employeeId);
     if (emp.isEmpty()) return false;
+
+    QSqlQuery qIns(m_db);
+    qIns.prepare("INSERT OR IGNORE INTO quincenas_empleado (empleado_id, quincena) VALUES (?, ?)");
+    qIns.addBindValue(employeeId);
+    qIns.addBindValue(quincenaCode);
+    qIns.exec();
 
     QString esquema = emp["esquema_codigo"].toString();
 
@@ -779,11 +857,17 @@ bool DatabaseManager::removeQuincena(int employeeId, const QString &quincenaCode
     qInfo() << "[DatabaseManager] Removiendo quincena" << quincenaCode << "de empleado ID:" << employeeId;
     if (quincenaCode == "Q1") return false;
 
-    QSqlQuery q(m_db);
-    q.prepare("DELETE FROM employee_field_values WHERE empleado_id = ? AND quincena = ?");
-    q.addBindValue(employeeId);
-    q.addBindValue(quincenaCode);
-    return q.exec();
+    QSqlQuery q1(m_db);
+    q1.prepare("DELETE FROM quincenas_empleado WHERE empleado_id = ? AND quincena = ?");
+    q1.addBindValue(employeeId);
+    q1.addBindValue(quincenaCode);
+    q1.exec();
+
+    QSqlQuery q2(m_db);
+    q2.prepare("DELETE FROM employee_field_values WHERE empleado_id = ? AND quincena = ?");
+    q2.addBindValue(employeeId);
+    q2.addBindValue(quincenaCode);
+    return q2.exec();
 }
 
 QVariantList DatabaseManager::listCellsBySchema(const QString &esquemaCodigo) const

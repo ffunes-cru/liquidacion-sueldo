@@ -48,7 +48,7 @@ Item {
                     padding: 12
 
                     GridLayout {
-                        anchors.fill: parent
+                        Layout.fillWidth: true
                         columns: 2
                         rowSpacing: 12
                         columnSpacing: 10
@@ -70,11 +70,17 @@ Item {
                             }
                         }
 
-                        Label { text: "Quincena / Periodo:"; color: Theme.textColor; font.pixelSize: 13 }
+                        Label {
+                            text: "Quincena / Periodo:"
+                            color: Theme.textColor
+                            font.pixelSize: 13
+                            visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
+                        }
                         ComboBox {
                             id: cbQuincena
                             Layout.fillWidth: true
                             model: ["Q1", "Q2"]
+                            visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
                         }
 
                         Label { text: "Fecha Cálculo:"; color: Theme.textColor; font.pixelSize: 13 }
@@ -199,7 +205,7 @@ Item {
                         padding: 12
 
                         ColumnLayout {
-                            anchors.fill: parent
+                            Layout.fillWidth: true
                             spacing: 10
 
                             RowLayout {
@@ -275,7 +281,7 @@ Item {
                         padding: 12
 
                         ColumnLayout {
-                            anchors.fill: parent
+                            Layout.fillWidth: true
                             spacing: 8
 
                             // Table Header
@@ -308,47 +314,68 @@ Item {
                                 Layout.alignment: Qt.AlignHCenter; Layout.margins: 20
                             }
 
-                            // Concept rows
+                            // Concept rows & Separators
                             Repeater {
                                 model: root.liquidationResult ? root.liquidationResult["conceptos"] : []
                                 delegate: Rectangle {
+                                    property bool isSep: (modelData["tipo_calculo"] === "separator" || (modelData["codigo"] || "").indexOf("SEP_") === 0)
                                     Layout.fillWidth: true
-                                    height: 36
-                                    color: index % 2 === 0 ? Qt.alpha("#ffffff", 0.02) : "transparent"
+                                    height: isSep ? 32 : 36
+                                    color: isSep ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.15)
+                                                 : (index % 2 === 0 ? Qt.alpha("#ffffff", 0.02) : "transparent")
                                     radius: 4
+                                    border.color: isSep ? Theme.accentColor : "transparent"
+                                    border.width: isSep ? 1 : 0
 
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: 8; anchors.rightMargin: 8
                                         spacing: 8
 
+                                        // Separator full banner title
                                         Label {
+                                            visible: isSep
+                                            text: "🔹  " + (modelData["descripcion"] || "SECCIÓN")
+                                            color: Theme.textColor
+                                            font.bold: true
+                                            font.pixelSize: 13
+                                            Layout.fillWidth: true
+                                        }
+
+                                        // Regular concept columns
+                                        Label {
+                                            visible: !isSep
                                             text: modelData["codigo"] || modelData["codigo_variable"] || ""
                                             color: Theme.accentColor; font.bold: true; font.family: "Monospace"; font.pixelSize: 12
                                             Layout.preferredWidth: 80; elide: Text.ElideRight
                                         }
                                         Label {
+                                            visible: !isSep
                                             text: modelData["descripcion"] || ""
                                             color: Theme.textColor; font.pixelSize: 13
                                             Layout.fillWidth: true; elide: Text.ElideRight
                                         }
                                         Label {
+                                            visible: !isSep
                                             text: (modelData["unidad"] !== undefined && modelData["unidad"] !== null && Number(modelData["unidad"]) !== 0) ? Number(modelData["unidad"]).toFixed(2) : "-"
                                             color: Theme.subtextColor; font.pixelSize: 12
                                             Layout.preferredWidth: 70; horizontalAlignment: Text.AlignRight
                                         }
                                         Label {
+                                            visible: !isSep
                                             text: (modelData["base"] !== undefined && modelData["base"] !== null && Number(modelData["base"]) > 0) ? "$ " + Number(modelData["base"]).toFixed(2) : "-"
                                             color: Theme.subtextColor; font.pixelSize: 12
                                             Layout.preferredWidth: 90; horizontalAlignment: Text.AlignRight
                                         }
                                         Label {
+                                            visible: !isSep
                                             property string sec: (modelData["seccion"] || "").toUpperCase()
                                             text: (sec === "REMUNERATIVO" || sec === "NO_REMUNERATIVO" || sec === "COMPOSICION" || sec === "HABERES") ? "$ " + Number(modelData["monto"] || 0).toFixed(2) : "-"
                                             color: Theme.successColor; font.bold: true; font.pixelSize: 13
                                             Layout.preferredWidth: 100; horizontalAlignment: Text.AlignRight
                                         }
                                         Label {
+                                            visible: !isSep
                                             property string sec: (modelData["seccion"] || "").toUpperCase()
                                             text: (sec === "DESCUENTO" || sec === "RECIBO" || sec === "RETENCION" || sec === "RETENCIONES") ? "$ " + Number(modelData["monto"] || 0).toFixed(2) : "-"
                                             color: Theme.dangerColor; font.bold: true; font.pixelSize: 13

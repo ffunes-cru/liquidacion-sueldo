@@ -57,6 +57,7 @@ public:
     // ── Schema Fields (schema_fields) ───────────────────────────────
     // Defines the "model" of input variables for a schema
     QVariantList listSchemaFields(const QString &esquemaCodigo) const;
+    QVariantList listAllSchemaFields() const;
     int          addSchemaField(const QString &esquemaCodigo, const QString &fieldCode,
                                 const QString &fieldLabel, const QString &fieldType,
                                 const QString &defaultValue, int displayOrder);
@@ -66,6 +67,7 @@ public:
     // ── Employee Field Values (employee_field_values) ───────────────
     // Actual values per employee, conforming to the schema's field model
     QVariantList getEmployeeFieldValues(int employeeId, const QString &quincena = "Q1") const;
+    QVariantList listAllEmployeeFieldValues() const;
     bool         setEmployeeFieldValue(int employeeId, int fieldId,
                                        const QString &quincena, const QString &value);
     bool         setEmployeeFieldValues(int employeeId, const QString &quincena,
@@ -75,6 +77,7 @@ public:
 
     // ── Quincenas ───────────────────────────────────────────────────
     QStringList  listEmployeeQuincenas(int employeeId) const;
+    QVariantList listAllEmployeeQuincenas() const;
     bool         addQuincena(int employeeId, const QString &quincenaCode);
     bool         removeQuincena(int employeeId, const QString &quincenaCode);
 

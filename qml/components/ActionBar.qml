@@ -40,7 +40,7 @@ Rectangle {
 
         Item { Layout.fillWidth: true }
 
-        Row {
+        RowLayout {
             id: rightContainer
             spacing: 10
             Layout.alignment: Qt.AlignVCenter
