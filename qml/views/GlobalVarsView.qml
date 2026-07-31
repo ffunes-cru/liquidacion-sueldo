@@ -2,175 +2,71 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import LiquidacionSueldos 1.0
+import "../dialogs"
 
 Item {
     id: root
 
-    property int selectedVarId: -1
-    property int selectedRow: -1
-
-    function loadVariable(row) {
-        if (row < 0 || row >= AppController.globalVarsModel.count) {
-            clearForm()
-            return
-        }
-        selectedRow = row
-        var idx = AppController.globalVarsModel.index(row, 0)
-        selectedVarId = AppController.globalVarsModel.data(idx, 257) // IdRole
-        var code = AppController.globalVarsModel.data(idx, 258) // CodeRole
-        var val = AppController.globalVarsModel.data(idx, 259) // ValueRole
-        var desc = AppController.globalVarsModel.data(idx, 260) // DescriptionRole
-
-        txtCodigo.text = code || ""
-        txtValor.text = val !== undefined ? val.toString() : ""
-        txtDescripcion.text = desc || ""
+    function openNewVariable() {
+        globalVarDialog.varId = -1
+        globalVarDialog.code = ""
+        globalVarDialog.value = ""
+        globalVarDialog.description = ""
+        globalVarDialog.open()
     }
 
-    function clearForm() {
-        selectedRow = -1
-        selectedVarId = -1
-        txtCodigo.text = ""
-        txtValor.text = ""
-        txtDescripcion.text = ""
+    function openEditVariable(itemData) {
+        globalVarDialog.varId = itemData.varId
+        globalVarDialog.code = itemData.code
+        globalVarDialog.value = itemData.value
+        globalVarDialog.description = itemData.description
+        globalVarDialog.open()
     }
 
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
         anchors.margins: 15
         spacing: 15
 
-        // ═══════════════════════════════════════════════════════════════
-        // LEFT PANE: Global Variables List
-        // ═══════════════════════════════════════════════════════════════
+        // Header Action Bar
         Rectangle {
-            Layout.fillHeight: true
-            Layout.preferredWidth: 420
+            Layout.fillWidth: true
+            implicitHeight: 60
             color: window.panelBg
             radius: 8
             border.color: window.borderColor
 
-            ColumnLayout {
+            RowLayout {
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 10
+                anchors.leftMargin: 15
+                anchors.rightMargin: 15
+                spacing: 15
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label {
-                        text: "Variables Globales del Sistema"
-                        font.pixelSize: 16
-                        font.bold: true
-                        color: window.textColor
-                    }
-                    Item { Layout.fillWidth: true }
-                    Label {
-                        text: AppController.globalVarsModel.count + " vars"
-                        font.pixelSize: 12
-                        color: window.subtextColor
-                    }
+                Label {
+                    text: "Variables Globales del Sistema"
+                    font.pixelSize: 18
+                    font.bold: true
+                    color: window.textColor
                 }
 
-                ScrollView {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-
-                    ListView {
-                        id: varListView
-                        model: AppController.globalVarsModel
-                        spacing: 6
-
-                        delegate: Rectangle {
-                            width: varListView.width
-                            height: 60
-                            radius: 6
-                            color: root.selectedVarId === model.varId ? (window.isDark ? "#3b3b58" : "#e4e4e9") :
-                                   (mouseArea.containsMouse ? (window.isDark ? "#303045" : "#f0f0f5") : window.cardBg)
-                            border.color: root.selectedVarId === model.varId ? window.accentColor : window.borderColor
-                            border.width: 1
-
-                            MouseArea {
-                                id: mouseArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: {
-                                    root.selectedVarId = model.varId
-                                    root.selectedRow = index
-                                    txtCodigo.text = model.code
-                                    txtValor.text = model.value
-                                    txtDescripcion.text = model.description
-                                }
-                            }
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 10
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 2
-
-                                    Label {
-                                        text: model.code
-                                        font.bold: true
-                                        font.pixelSize: 14
-                                        color: window.textColor
-                                    }
-
-                                    Label {
-                                        text: model.description || "Sin descripción"
-                                        font.pixelSize: 12
-                                        color: window.subtextColor
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-                                }
-
-                                Label {
-                                    text: model.value
-                                    font.bold: true
-                                    font.pixelSize: 14
-                                    color: window.accentColor
-                                }
-                            }
-                        }
-                    }
+                Label {
+                    text: AppController.globalVarsModel.count + " registradas"
+                    font.pixelSize: 12
+                    color: window.subtextColor
                 }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
+                Item { Layout.fillWidth: true }
 
-                    Button {
-                        Layout.fillWidth: true
-                        text: "Nueva Variable"
-                        visible: AppController.currentRole === "admin"
-                        onClicked: {
-                            root.clearForm()
-                            txtCodigo.forceActiveFocus()
-                        }
-                    }
-
-                    Button {
-                        Layout.fillWidth: true
-                        text: "Eliminar"
-                        visible: AppController.currentRole === "admin"
-                        enabled: root.selectedVarId > 0
-                        onClicked: {
-                            if (root.selectedVarId > 0) {
-                                AppController.globalVarsModel.removeVariable(root.selectedVarId)
-                                root.clearForm()
-                            }
-                        }
-                    }
+                Button {
+                    text: "+ Nueva Variable Global"
+                    highlighted: true
+                    visible: AppController.currentRole === "admin"
+                    onClicked: openNewVariable()
                 }
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        // RIGHT PANE: Variable Form / Editor
-        // ═══════════════════════════════════════════════════════════════
+        // Main Global Variables List
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -178,98 +74,127 @@ Item {
             radius: 8
             border.color: window.borderColor
 
-            ColumnLayout {
+            ScrollView {
                 anchors.fill: parent
-                anchors.margins: 20
-                spacing: 15
+                anchors.margins: 15
+                clip: true
 
-                Label {
-                    text: root.selectedVarId > 0 ? "Editar Variable #" + root.selectedVarId : "Nueva Variable Global"
-                    font.pixelSize: 18
-                    font.bold: true
-                    color: window.textColor
-                }
+                ListView {
+                    id: varListView
+                    model: AppController.globalVarsModel
+                    spacing: 8
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    implicitHeight: 220
-                    color: window.cardBg
-                    radius: 6
-                    border.color: window.borderColor
+                    delegate: Rectangle {
+                        width: varListView.width - 20
+                        height: 56
+                        radius: 6
+                        color: mouseArea.containsMouse ? (window.isDark ? "#303045" : "#f0f0f5") : window.cardBg
+                        border.color: window.borderColor
+                        border.width: 1
 
-                    GridLayout {
-                        anchors.fill: parent
-                        anchors.margins: 15
-                        columns: 2
-                        rowSpacing: 15
-                        columnSpacing: 15
-
-                        Label { text: "Código de Variable:"; color: window.textColor; font.pixelSize: 13 }
-                        TextField {
-                            id: txtCodigo
-                            placeholderText: "Ej: TOPE_JUBILATORIO"
-                            Layout.fillWidth: true
-                            color: window.textColor
-                            background: Rectangle {
-                                color: window.inputBg
-                                radius: 4
-                                border.color: parent.activeFocus ? window.accentColor : window.borderColor
+                        MouseArea {
+                            id: mouseArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onDoubleClicked: {
+                                var itemData = {
+                                    varId: model.varId,
+                                    code: model.code,
+                                    value: model.value,
+                                    description: model.description
+                                }
+                                openEditVariable(itemData)
                             }
                         }
 
-                        Label { text: "Valor:"; color: window.textColor; font.pixelSize: 13 }
-                        TextField {
-                            id: txtValor
-                            placeholderText: "Ej: 150000.00"
-                            Layout.fillWidth: true
-                            color: window.textColor
-                            background: Rectangle {
-                                color: window.inputBg
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 15
+
+                            Rectangle {
+                                implicitWidth: 120
+                                implicitHeight: 28
                                 radius: 4
-                                border.color: parent.activeFocus ? window.accentColor : window.borderColor
-                            }
-                        }
-
-                        Label { text: "Descripción:"; color: window.textColor; font.pixelSize: 13 }
-                        TextField {
-                            id: txtDescripcion
-                            placeholderText: "Descripción o tope tope de base imponible..."
-                            Layout.fillWidth: true
-                            color: window.textColor
-                            background: Rectangle {
                                 color: window.inputBg
-                                radius: 4
-                                border.color: parent.activeFocus ? window.accentColor : window.borderColor
+                                border.color: window.accentColor
+
+                                Label {
+                                    anchors.centerIn: parent
+                                    text: model.code
+                                    font.family: "Monospace"
+                                    font.bold: true
+                                    font.pixelSize: 13
+                                    color: window.accentColor
+                                    elide: Text.ElideRight
+                                }
                             }
-                        }
-                    }
-                }
 
-                Item { Layout.fillHeight: true }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
 
-                RowLayout {
-                    Layout.fillWidth: true
+                                Label {
+                                    text: model.description || "Sin descripción"
+                                    font.bold: true
+                                    font.pixelSize: 13
+                                    color: window.textColor
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
 
-                    Item { Layout.fillWidth: true }
+                                Label {
+                                    text: "Doble clic para editar"
+                                    font.pixelSize: 11
+                                    color: window.subtextColor
+                                }
+                            }
 
-                    Button {
-                        text: "Guardar Variable Global"
-                        highlighted: true
-                        visible: AppController.currentRole === "admin"
-                        onClicked: {
-                            if (txtCodigo.text.trim() !== "") {
-                                AppController.globalVarsModel.saveVariable(
-                                    root.selectedVarId > 0 ? root.selectedVarId : 0,
-                                    txtCodigo.text.trim(),
-                                    txtValor.text.trim(),
-                                    txtDescripcion.text.trim()
-                                )
-                                root.clearForm()
+                            Label {
+                                text: model.value
+                                font.bold: true
+                                font.pixelSize: 15
+                                color: "#a6e3a1"
+                            }
+
+                            RowLayout {
+                                spacing: 6
+                                visible: AppController.currentRole === "admin"
+
+                                Button {
+                                    implicitWidth: 32
+                                    implicitHeight: 32
+                                    text: "✏️"
+                                    flat: true
+                                    onClicked: {
+                                        var itemData = {
+                                            varId: model.varId,
+                                            code: model.code,
+                                            value: model.value,
+                                            description: model.description
+                                        }
+                                        openEditVariable(itemData)
+                                    }
+                                }
+
+                                Button {
+                                    implicitWidth: 32
+                                    implicitHeight: 32
+                                    text: "🗑️"
+                                    flat: true
+                                    onClicked: {
+                                        AppController.globalVarsModel.removeVariable(model.varId)
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    GlobalVarDialog {
+        id: globalVarDialog
     }
 }

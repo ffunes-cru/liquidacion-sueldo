@@ -188,38 +188,67 @@ Item {
                 // ── Schema Basic Fields ───────────────────────────────
                 Rectangle {
                     Layout.fillWidth: true
-                    implicitHeight: 110
+                    implicitHeight: schemaGrid.implicitHeight + 24
                     color: window.cardBg
                     radius: 6
                     border.color: window.borderColor
 
                     GridLayout {
+                        id: schemaGrid
                         anchors.fill: parent
-                        anchors.margins: 15
+                        anchors.margins: 12
                         columns: 4
-                        rowSpacing: 10
+                        rowSpacing: 12
                         columnSpacing: 15
 
-                        Label { text: "Código:"; color: window.textColor; font.pixelSize: 13 }
+                        Label {
+                            text: "Código:"
+                            color: window.textColor
+                            font.pixelSize: 13
+                            Layout.alignment: Qt.AlignVCenter
+                        }
                         TextField {
                             id: txtCode
                             placeholderText: "Ej: COMERCIO"
                             Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignVCenter
                             color: window.textColor
+                            background: Rectangle {
+                                color: window.inputBg
+                                radius: 6
+                                border.color: parent.activeFocus ? window.accentColor : window.borderColor
+                            }
                         }
 
-                        Label { text: "Nombre Descriptivo:"; color: window.textColor; font.pixelSize: 13 }
+                        Label {
+                            text: "Nombre Descriptivo:"
+                            color: window.textColor
+                            font.pixelSize: 13
+                            Layout.alignment: Qt.AlignVCenter
+                        }
                         TextField {
                             id: txtName
                             placeholderText: "Ej: Comercio CCT 130/75"
                             Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignVCenter
                             color: window.textColor
+                            background: Rectangle {
+                                color: window.inputBg
+                                radius: 6
+                                border.color: parent.activeFocus ? window.accentColor : window.borderColor
+                            }
                         }
 
-                        Label { text: "Tipo Liquidación:"; color: window.textColor; font.pixelSize: 13 }
+                        Label {
+                            text: "Tipo Liquidación:"
+                            color: window.textColor
+                            font.pixelSize: 13
+                            Layout.alignment: Qt.AlignVCenter
+                        }
                         ComboBox {
                             id: cbTipoLiq
                             Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignVCenter
                             model: ["Mensual", "Jornalero"]
                         }
 

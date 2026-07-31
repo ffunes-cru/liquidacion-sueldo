@@ -17,6 +17,7 @@
 
 class DatabaseManager;
 class LiquidationEngine;
+class ExportService;
 
 class AppController : public QObject
 {
@@ -61,6 +62,9 @@ public:
     Q_INVOKABLE QVariantMap getCompany() const;
     Q_INVOKABLE bool saveCompany(const QString &razonSocial, const QString &direccion, const QString &cuit, const QString &lugarDePago);
 
+    // Sections list
+    Q_INVOKABLE QVariantList listSections();
+
     // Schema fields CRUD
     Q_INVOKABLE QVariantList listSchemaFields(const QString &esquemaCodigo);
     Q_INVOKABLE int addSchemaField(const QString &esquemaCodigo, const QString &fieldCode, const QString &fieldLabel, const QString &fieldType, const QString &defaultValue, int displayOrder);
@@ -71,6 +75,15 @@ public:
     Q_INVOKABLE bool addQuincena(int employeeId, const QString &quincenaCode);
     Q_INVOKABLE bool removeQuincena(int employeeId, const QString &quincenaCode);
 
+    // IDE Autocomplete / Formula variables helper
+    Q_INVOKABLE QVariantList getAvailableFormulaVariables(const QString &esquemaCodigo);
+
+    // ── Export / Import ─────────────────────────────────────────
+    Q_INVOKABLE QString exportDataXlsx(const QString &path);
+    Q_INVOKABLE bool importDataXlsx(const QString &path);
+    Q_INVOKABLE QString exportDataCsv(const QString &directoryPath);
+    Q_INVOKABLE QString exportReceiptPdf(int employeeId, const QVariantMap &liquidationResult, const QString &path);
+
 signals:
     void currentRoleChanged();
     void darkModeChanged();
@@ -78,6 +91,7 @@ signals:
 private:
     DatabaseManager *m_db;
     LiquidationEngine *m_engine;
+    ExportService *m_exportService;
 
     QString m_currentRole = "admin";
 

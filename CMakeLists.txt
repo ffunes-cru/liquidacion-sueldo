@@ -5,8 +5,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+# Suppress Qt private module warning for third-party QXlsx library
+set(QT_NO_PRIVATE_MODULE_WARNING ON)
+
 find_package(Qt6 REQUIRED COMPONENTS
     Core
+    Gui
+    GuiPrivate
     Quick
     QuickControls2
     Sql
@@ -14,6 +19,14 @@ find_package(Qt6 REQUIRED COMPONENTS
 )
 
 qt_standard_project_setup(REQUIRES 6.5)
+
+# Set Qt QML policies
+if(COMMAND qt_policy)
+    qt_policy(SET QTP0004 NEW)
+endif()
+
+# Add QXlsx library
+add_subdirectory(third_party/QXlsx/QXlsx)
 
 # ── Source files ──────────────────────────────────────────────
 set(SOURCES
@@ -49,6 +62,10 @@ set(SOURCES
     src/engine/QuincenaAggregator.h
     src/engine/QuincenaAggregator.cpp
 
+    # Services
+    src/services/ExportService.h
+    src/services/ExportService.cpp
+
     # Controllers
     src/controllers/AppController.h
     src/controllers/AppController.cpp
@@ -57,6 +74,8 @@ set(SOURCES
 # ── QML files ─────────────────────────────────────────────────
 set(QML_FILES
     qml/main.qml
+
+    # Views
     qml/views/EmployeesView.qml
     qml/views/CompanyView.qml
     qml/views/CategoriesView.qml
@@ -65,6 +84,23 @@ set(QML_FILES
     qml/views/ReceiptStructureView.qml
     qml/views/PreviewView.qml
     qml/views/ReceiptHistoryView.qml
+
+    # Components
+    qml/components/MoneyField.qml
+    qml/components/PercentageField.qml
+    qml/components/FormulaInput.qml
+    qml/components/RoleSelector.qml
+    qml/components/QuincenaTabBar.qml
+    qml/components/VariableEditor.qml
+    qml/components/PaystubSectionBlock.qml
+
+    # Dialogs
+    qml/dialogs/ConceptDialog.qml
+    qml/dialogs/CategoryDialog.qml
+    qml/dialogs/GlobalVarDialog.qml
+    qml/dialogs/VariableAssistantDialog.qml
+    qml/dialogs/SchemaConfigDialog.qml
+    qml/dialogs/SettingsDialog.qml
 )
 
 qt_add_executable(${PROJECT_NAME}
@@ -73,7 +109,7 @@ qt_add_executable(${PROJECT_NAME}
 
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "liquidacion_sueldos_app")
 
-# Win32 GUI setup (hides command prompt console window on Windows release builds)
+# Win32 GUI setup
 if(WIN32 AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
@@ -91,10 +127,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
+    Qt6::Gui
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Sql
     Qt6::Qml
+    QXlsx::QXlsx
 )
 
 # Install

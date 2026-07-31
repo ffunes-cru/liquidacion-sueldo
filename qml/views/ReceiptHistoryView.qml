@@ -8,6 +8,7 @@ Item {
 
     property int selectedReceiptId: -1
     property var receiptDetails: null
+    property string statusMsg: ""
 
     Component.onCompleted: {
         if (AppController.employeeModel.count > 0) {
@@ -141,10 +142,11 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    spacing: 8
 
                     Button {
                         Layout.fillWidth: true
-                        text: "Eliminar Recibo Seleccionado"
+                        text: "Eliminar Recibo"
                         visible: AppController.currentRole === "admin"
                         enabled: root.selectedReceiptId > 0
                         onClicked: {
@@ -178,11 +180,42 @@ Item {
                     width: parent.width - 30
                     spacing: 15
 
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: root.selectedReceiptId > 0 ? "Recibo Histórico #" + root.selectedReceiptId : "Seleccione un recibo del historial"
+                            font.pixelSize: 18
+                            font.bold: true
+                            color: window.textColor
+                        }
+                        Item { Layout.fillWidth: true }
+
+                        Button {
+                            text: "📄 Exportar PDF"
+                            visible: root.receiptDetails !== null
+                            onClicked: {
+                                if (root.receiptDetails) {
+                                    try {
+                                        var jsonStr = root.receiptDetails["datos_json"]
+                                        var parsedData = JSON.parse(jsonStr)
+                                        var empId = root.receiptDetails["empleado_id"] || cbFilterEmployee.currentValue
+                                        var pdfPath = AppController.exportReceiptPdf(empId, parsedData, "")
+                                        if (pdfPath !== "") {
+                                            root.statusMsg = "Recibo PDF exportado: " + pdfPath
+                                        }
+                                    } catch(e) {
+                                        root.statusMsg = "Error al parsear datos JSON del recibo."
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Label {
-                        text: root.selectedReceiptId > 0 ? "Recibo Histórico #" + root.selectedReceiptId : "Seleccione un recibo del historial"
-                        font.pixelSize: 18
-                        font.bold: true
-                        color: window.textColor
+                        text: root.statusMsg
+                        visible: root.statusMsg !== ""
+                        color: window.accentColor
+                        font.pixelSize: 12
                     }
 
                     Rectangle {

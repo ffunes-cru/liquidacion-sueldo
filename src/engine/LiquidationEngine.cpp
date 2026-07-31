@@ -275,6 +275,10 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
     // STEP 5: Evaluate all cells sequentially
     // ═══════════════════════════════════════════════════════════════
     QVariantMap resultadosPorSeccion;
+    QVariantList allConceptosList;
+    double totalRemunerativo = 0.0;
+    double totalNoRemunerativo = 0.0;
+    double totalDescuentos = 0.0;
 
     for (const QVariant &c : cells) {
         QVariantMap cell = c.toMap();
@@ -355,18 +359,40 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
 
         // Build result row
         QVariantMap fila = {
+            {"codigo_variable", codigo},
             {"codigo", codigo},
             {"descripcion", cell["descripcion"]},
             {"unidad", unidad},
             {"base", base},
             {"monto", monto},
+            {"seccion", seccion},
             {"visible_recibo", cell.value("visible_recibo", 1)},
         };
 
         QVariantList seccionList = resultadosPorSeccion.value(seccion).toList();
         seccionList.append(fila);
         resultadosPorSeccion[seccion] = seccionList;
+
+        allConceptosList.append(fila);
+
+        // Classify and accumulate totals
+        QString secUpper = seccion.trimmed().toUpper();
+        if (secUpper == "REMUNERATIVO" || secUpper == "COMPOSICION" || secUpper == "HABERES") {
+            totalRemunerativo += monto;
+        } else if (secUpper == "NO_REMUNERATIVO") {
+            totalNoRemunerativo += monto;
+        } else if (secUpper == "DESCUENTO" || secUpper == "RECIBO" || secUpper == "RETENCION" || secUpper == "RETENCIONES") {
+            totalDescuentos += monto;
+        }
     }
+
+    double netoACobrar = (totalRemunerativo + totalNoRemunerativo) - totalDescuentos;
+
+    contexto["total_remunerativo"] = totalRemunerativo;
+    contexto["total_no_remunerativo"] = totalNoRemunerativo;
+    contexto["total_descuentos"] = totalDescuentos;
+    contexto["neto_a_cobrar"] = netoACobrar;
+    contexto["neto"] = netoACobrar;
 
     // ═══════════════════════════════════════════════════════════════
     // STEP 6: Evaluate chart cells
@@ -394,13 +420,13 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
         });
     }
 
-    // Update contexto from engine state
-    // (The engine's variables may have been updated during evaluation)
-    contexto = engine.evaluate("(function() { return {}; })()").toMap(); // dummy
-    // Actually, we've been tracking contexto manually, so just return it
-
     return {
         {"empleado", employee},
+        {"conceptos", allConceptosList},
+        {"total_remunerativo", totalRemunerativo},
+        {"total_no_remunerativo", totalNoRemunerativo},
+        {"total_descuentos", totalDescuentos},
+        {"neto_a_cobrar", netoACobrar},
         {"resultados_por_seccion", resultadosPorSeccion},
         {"resultados_grafico", resultadosGrafico},
         {"contexto_final", contexto},

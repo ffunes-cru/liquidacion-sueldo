@@ -110,3 +110,48 @@ bool CellModel::removeCell(int id)
     if (ok) refresh();
     return ok;
 }
+
+bool CellModel::moveCellUp(int index)
+{
+    if (index <= 0 || index >= m_data.size()) return false;
+
+    QVariantMap item1 = m_data[index].toMap();
+    QVariantMap item2 = m_data[index - 1].toMap();
+
+    int id1 = item1["id"].toInt();
+    int id2 = item2["id"].toInt();
+    int order1 = item1["orden"].toInt();
+    int order2 = item2["orden"].toInt();
+
+    if (order1 == order2) {
+        order1 = index * 10 + 10;
+        order2 = (index - 1) * 10 + 10;
+    }
+
+    // Swap orders
+    m_db->saveCell(id1, item1["seccion_codigo"].toString(), item1["codigo_variable"].toString(),
+                   item1["descripcion"].toString(), item1["condicion"].toString(),
+                   item1["formula_unidad"].toString(), item1["formula_base"].toString(),
+                   item1["formula_monto"].toString(), order2, item1["esquema_codigo"].toString(),
+                   item1["tipo_calculo"].toString(), item1["simple_porcentaje"].toDouble(),
+                   item1["simple_base_variable"].toString(), item1["simple_monto_fijo"].toDouble(),
+                   item1["visible_recibo"].toBool());
+
+    m_db->saveCell(id2, item2["seccion_codigo"].toString(), item2["codigo_variable"].toString(),
+                   item2["descripcion"].toString(), item2["condicion"].toString(),
+                   item2["formula_unidad"].toString(), item2["formula_base"].toString(),
+                   item2["formula_monto"].toString(), order1, item2["esquema_codigo"].toString(),
+                   item2["tipo_calculo"].toString(), item2["simple_porcentaje"].toDouble(),
+                   item2["simple_base_variable"].toString(), item2["simple_monto_fijo"].toDouble(),
+                   item2["visible_recibo"].toBool());
+
+    refresh();
+    return true;
+}
+
+bool CellModel::moveCellDown(int index)
+{
+    if (index < 0 || index >= m_data.size() - 1) return false;
+    return moveCellUp(index + 1);
+}
+

@@ -27,14 +27,15 @@ Item {
         clip: true
 
         ColumnLayout {
-            width: root.width - 40
+            width: Math.min(root.width - 40, 700)
+            anchors.horizontalCenter: parent.horizontalCenter
             spacing: 20
 
             // ── Title Section ─────────────────────────────────────────
             RowLayout {
                 Layout.fillWidth: true
                 Label {
-                    text: "Configuración de la Empresa"
+                    text: "Datos Institucionales de la Empresa"
                     font.pixelSize: 22
                     font.bold: true
                     color: window.textColor
@@ -52,11 +53,11 @@ Item {
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 15
+                    anchors.margins: 25
+                    spacing: 20
 
                     Label {
-                        text: "Datos Institucionales"
+                        text: "Información Fiscal y Domicilio"
                         font.pixelSize: 16
                         font.bold: true
                         color: window.accentColor
@@ -66,7 +67,7 @@ Item {
                         id: companyGrid
                         Layout.fillWidth: true
                         columns: 2
-                        rowSpacing: 15
+                        rowSpacing: 18
                         columnSpacing: 20
 
                         Label {
@@ -104,7 +105,7 @@ Item {
                         }
 
                         Label {
-                            text: "Dirección:"
+                            text: "Dirección Real:"
                             color: window.textColor
                             font.pixelSize: 14
                         }
@@ -159,131 +160,6 @@ Item {
                                     root.statusMessage = "Error al guardar datos de la empresa."
                                 }
                             }
-                        }
-                    }
-                }
-            }
-
-            // ── System Operations Card ─────────────────────────────────
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: sysOpsColumn.implicitHeight + 40
-                color: window.panelBg
-                radius: 8
-                border.color: window.borderColor
-
-                ColumnLayout {
-                    id: sysOpsColumn
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 15
-
-                    Label {
-                        text: "Operaciones del Sistema"
-                        font.pixelSize: 16
-                        font.bold: true
-                        color: window.accentColor
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 15
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 5
-                            Label {
-                                text: "Copia de Seguridad (Backup)"
-                                font.bold: true
-                                color: window.textColor
-                                font.pixelSize: 14
-                            }
-                            Label {
-                                text: "Genera un archivo de respaldo SQLite con la fecha y hora actual."
-                                color: window.subtextColor
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
-
-                        Button {
-                            text: "Crear Backup"
-                            onClicked: {
-                                var backupPath = AppController.createBackup()
-                                root.isError = false
-                                root.statusMessage = "Backup creado en: " + backupPath
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: window.borderColor
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 15
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 5
-                            Label {
-                                text: "Cierre Mensual / Reiniciar Nuevo Mes"
-                                font.bold: true
-                                color: window.textColor
-                                font.pixelSize: 14
-                            }
-                            Label {
-                                text: "Crea una copia de seguridad automática y limpia las variables de empleados para el nuevo mes de liquidación."
-                                color: window.subtextColor
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
-
-                        Button {
-                            text: "Reiniciar Nuevo Mes"
-                            onClicked: {
-                                var backupPath = AppController.resetNewMonth()
-                                root.isError = false
-                                root.statusMessage = "Nuevo mes reiniciado. Backup de seguridad guardado en: " + backupPath
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: window.borderColor
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 15
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 5
-                            Label {
-                                text: "Modo Oscuro (Dark Theme)"
-                                font.bold: true
-                                color: window.textColor
-                                font.pixelSize: 14
-                            }
-                            Label {
-                                text: "Alterna la apariencia de la interfaz."
-                                color: window.subtextColor
-                                font.pixelSize: 12
-                            }
-                        }
-
-                        Switch {
-                            checked: AppController.darkMode
-                            onToggled: AppController.darkMode = checked
                         }
                     }
                 }

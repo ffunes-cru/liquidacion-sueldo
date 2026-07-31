@@ -51,6 +51,8 @@ public:
                              const QString &simpleBaseVariable, double simpleMontoFijo,
                              bool visibleRecibo);
     Q_INVOKABLE bool removeCell(int id);
+    Q_INVOKABLE bool moveCellUp(int index);
+    Q_INVOKABLE bool moveCellDown(int index);
 
 signals:
     void esquemaCodigoChanged();

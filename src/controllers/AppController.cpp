@@ -1,6 +1,7 @@
 #include "AppController.h"
 #include "database/DatabaseManager.h"
 #include "engine/LiquidationEngine.h"
+#include "services/ExportService.h"
 #include "models/EmployeeModel.h"
 #include "models/EmployeeVarsModel.h"
 #include "models/GlobalVarsModel.h"
@@ -16,6 +17,7 @@ AppController::AppController(DatabaseManager *db, QObject *parent)
 {
     qDebug() << "[AppController] Inicializando controlador principal y subsistemas...";
     m_engine = new LiquidationEngine(m_db, this);
+    m_exportService = new ExportService(m_db, this);
 
     m_employeeModel = new EmployeeModel(m_db, this);
     m_employeeVarsModel = new EmployeeVarsModel(m_db, this);
@@ -103,6 +105,11 @@ bool AppController::saveCompany(const QString &razonSocial, const QString &direc
     return m_db->saveCompany(razonSocial, direccion, cuit, lugarDePago);
 }
 
+QVariantList AppController::listSections()
+{
+    return m_db->listSections();
+}
+
 QVariantList AppController::listSchemaFields(const QString &esquemaCodigo)
 {
     return m_db->listSchemaFields(esquemaCodigo);
@@ -143,4 +150,85 @@ bool AppController::removeQuincena(int employeeId, const QString &quincenaCode)
     bool ok = m_db->removeQuincena(employeeId, quincenaCode);
     m_employeeVarsModel->refresh();
     return ok;
+}
+
+QVariantList AppController::getAvailableFormulaVariables(const QString &esquemaCodigo)
+{
+    QVariantList list;
+
+    auto addVar = [&](const QString &code, const QString &desc, const QString &category) {
+        QVariantMap map;
+        map["code"] = code;
+        map["description"] = desc;
+        map["category"] = category;
+        list.append(map);
+    };
+
+    // Built-in functions
+    addVar("round(val, n)", "Redondea un valor a N decimales", "Función Motor");
+    addVar("min(a, b)", "Retorna el mínimo entre dos expresiones", "Función Motor");
+    addVar("max(a, b)", "Retorna el máximo entre dos expresiones", "Función Motor");
+    addVar("abs(val)", "Retorna el valor absoluto", "Función Motor");
+    addVar("Q_sum_(\"var\")", "Suma de una variable en todas las quincenas del mes", "Agregación Quincenal");
+    addVar("Q_avg_(\"var\")", "Promedio de una variable en las quincenas del mes", "Agregación Quincenal");
+    addVar("cant_q()", "Cantidad total de quincenas configuradas", "Agregación Quincenal");
+
+    // Totales y acumuladores
+    addVar("total_remunerativo", "Suma acumulada de conceptos remunerativos previos", "Acumulador");
+    addVar("total_descuentos", "Suma acumulada de descuentos previos", "Acumulador");
+    addVar("total_no_remunerativo", "Suma acumulada de conceptos no remunerativos previos", "Acumulador");
+    addVar("neto_a_cobrar", "Monto neto a cobrar acumulado", "Acumulador");
+
+    // Global variables
+    QVariantList globals = m_db->listGlobalVariables();
+    for (const QVariant &v : globals) {
+        QVariantMap m = v.toMap();
+        addVar(m["codigo"].toString(), m["descripcion"].toString() + " (Global)", "Variable Global");
+    }
+
+    // Schema fields
+    QVariantList fields = m_db->listSchemaFields(esquemaCodigo);
+    for (const QVariant &v : fields) {
+        QVariantMap m = v.toMap();
+        addVar(m["field_code"].toString(), m["field_label"].toString() + " (Empleado)", "Campo Empleado");
+    }
+
+    // Previous concepts in cell list
+    QVariantList cells = m_db->listCellsBySchema(esquemaCodigo);
+    for (const QVariant &v : cells) {
+        QVariantMap m = v.toMap();
+        addVar(m["codigo_variable"].toString(), m["descripcion"].toString(), "Concepto Recibo");
+    }
+
+    return list;
+}
+
+QString AppController::exportDataXlsx(const QString &path)
+{
+    return m_exportService->exportDataXlsx(path);
+}
+
+bool AppController::importDataXlsx(const QString &path)
+{
+    bool ok = m_exportService->importDataXlsx(path);
+    if (ok) {
+        m_employeeModel->refresh();
+        m_globalVarsModel->refresh();
+        m_schemaModel->refresh();
+        m_categoryModel->refresh();
+        m_cellModel->refresh();
+    }
+    return ok;
+}
+
+QString AppController::exportDataCsv(const QString &directoryPath)
+{
+    return m_exportService->exportDataCsv(directoryPath);
+}
+
+QString AppController::exportReceiptPdf(int employeeId, const QVariantMap &liquidationResult, const QString &path)
+{
+    QVariantMap empData = m_db->getEmployee(employeeId);
+    QVariantMap compData = m_db->getCompany();
+    return m_exportService->exportReceiptPdf(liquidationResult, compData, empData, path);
 }

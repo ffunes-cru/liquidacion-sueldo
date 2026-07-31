@@ -519,6 +519,7 @@ Item {
                                         font.pixelSize: 13
                                         color: window.textColor
                                         Layout.preferredWidth: 200
+                                        Layout.alignment: Qt.AlignVCenter
                                         elide: Text.ElideRight
                                     }
 
@@ -528,6 +529,7 @@ Item {
                                     Switch {
                                         visible: model.fieldType === "bool"
                                         checked: model.value === "true" || model.value === "1"
+                                        Layout.alignment: Qt.AlignVCenter
                                         onToggled: {
                                             AppController.employeeVarsModel.setValue(index, checked ? "true" : "false")
                                         }
@@ -539,6 +541,7 @@ Item {
                                         visible: model.fieldType !== "bool"
                                         text: model.value
                                         Layout.preferredWidth: 140
+                                        Layout.alignment: Qt.AlignVCenter
                                         color: window.textColor
                                         horizontalAlignment: Text.AlignRight
                                         inputMethodHints: model.fieldType === "number" ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone

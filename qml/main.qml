@@ -3,6 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import LiquidacionSueldos 1.0
 import "views"
+import "dialogs"
 
 ApplicationWindow {
     id: window
@@ -26,6 +27,33 @@ ApplicationWindow {
     background: Rectangle {
         color: window.bgColor
     }
+
+    // All tabs definition — controlled mapping for role visibility
+    // Each entry: { label, adminOnly, viewIndex }
+    readonly property var tabDefinitions: [
+        { label: "Empleados",         adminOnly: false, viewIndex: 0 },
+        { label: "Empresa",           adminOnly: true,  viewIndex: 1 },
+        { label: "Categorías",        adminOnly: true,  viewIndex: 2 },
+        { label: "Esquemas",          adminOnly: true,  viewIndex: 3 },
+        { label: "Campos Globales",   adminOnly: false, viewIndex: 4 },
+        { label: "Estructura Recibo", adminOnly: true,  viewIndex: 5 },
+        { label: "Vista Previa",      adminOnly: false, viewIndex: 6 },
+        { label: "Historial",         adminOnly: false, viewIndex: 7 }
+    ]
+
+    // Filtered list of visible tab indices
+    property var visibleTabIndices: {
+        var result = []
+        for (var i = 0; i < tabDefinitions.length; i++) {
+            if (!tabDefinitions[i].adminOnly || AppController.currentRole === "admin") {
+                result.push(i)
+            }
+        }
+        return result
+    }
+
+    // Map from TabBar position to StackLayout index
+    property int activeViewIndex: 0
 
     ColumnLayout {
         anchors.fill: parent
@@ -70,7 +98,15 @@ ApplicationWindow {
                     currentIndex: AppController.currentRole === "admin" ? 0 : 1
                     onActivated: {
                         AppController.currentRole = (currentIndex === 0) ? "admin" : "user"
+                        // Reset to first tab on role change
+                        mainTabBar.currentIndex = 0
+                        window.activeViewIndex = window.visibleTabIndices[0]
                     }
+                }
+
+                Button {
+                    text: "⚙️ Configuración"
+                    onClicked: settingsDialog.open()
                 }
             }
         }
@@ -81,80 +117,25 @@ ApplicationWindow {
             Layout.fillWidth: true
             background: Rectangle { color: window.panelBg }
 
-            TabButton {
-                contentItem: Text {
-                    text: "Empleados"
-                    color: parent.checked ? window.accentColor : window.textColor
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
+            Repeater {
+                model: window.visibleTabIndices
+
+                TabButton {
+                    property int defIndex: modelData
+                    contentItem: Text {
+                        text: window.tabDefinitions[defIndex].label
+                        color: parent.checked ? window.accentColor : window.textColor
+                        font.bold: parent.checked
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
                 }
             }
-            TabButton {
-                visible: AppController.currentRole === "admin"
-                contentItem: Text {
-                    text: "Empresa"
-                    color: parent.checked ? window.accentColor : window.textColor
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-            TabButton {
-                visible: AppController.currentRole === "admin"
-                contentItem: Text {
-                    text: "Categorías"
-                    color: parent.checked ? window.accentColor : window.textColor
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-            TabButton {
-                visible: AppController.currentRole === "admin"
-                contentItem: Text {
-                    text: "Esquemas"
-                    color: parent.checked ? window.accentColor : window.textColor
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-            TabButton {
-                contentItem: Text {
-                    text: "Campos Globales"
-                    color: parent.checked ? window.accentColor : window.textColor
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-            TabButton {
-                visible: AppController.currentRole === "admin"
-                contentItem: Text {
-                    text: "Estructura Recibo"
-                    color: parent.checked ? window.accentColor : window.textColor
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-            TabButton {
-                contentItem: Text {
-                    text: "Vista Previa"
-                    color: parent.checked ? window.accentColor : window.textColor
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-            TabButton {
-                contentItem: Text {
-                    text: "Historial"
-                    color: parent.checked ? window.accentColor : window.textColor
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
+
+            onCurrentIndexChanged: {
+                if (currentIndex >= 0 && currentIndex < window.visibleTabIndices.length) {
+                    var defIdx = window.visibleTabIndices[currentIndex]
+                    window.activeViewIndex = window.tabDefinitions[defIdx].viewIndex
                 }
             }
         }
@@ -164,55 +145,36 @@ ApplicationWindow {
             id: contentStack
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: mainTabBar.currentIndex
+            currentIndex: window.activeViewIndex
 
-            // 0: Empleados View (Full CRUD)
-            EmployeesView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
+            // 0: Empleados
+            EmployeesView { Layout.fillWidth: true; Layout.fillHeight: true }
 
-            // 1: Empresa View (Full CRUD)
-            CompanyView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
+            // 1: Empresa
+            CompanyView { Layout.fillWidth: true; Layout.fillHeight: true }
 
-            // 2: Categorías View (Full CRUD)
-            CategoriesView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
+            // 2: Categorías
+            CategoriesView { Layout.fillWidth: true; Layout.fillHeight: true }
 
-            // 3: Esquemas View (Full CRUD + Schema Fields Model)
-            SchemasView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
+            // 3: Esquemas
+            SchemasView { Layout.fillWidth: true; Layout.fillHeight: true }
 
-            // 4: Campos Globales View (Full CRUD)
-            GlobalVarsView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
+            // 4: Campos Globales
+            GlobalVarsView { Layout.fillWidth: true; Layout.fillHeight: true }
 
-            // 5: Estructura Recibo View (Full CRUD Celdas Calculo)
-            ReceiptStructureView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
+            // 5: Estructura Recibo
+            ReceiptStructureView { Layout.fillWidth: true; Layout.fillHeight: true }
 
-            // 6: Vista Previa View (Live Liquidation & PDF/Export)
-            PreviewView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
+            // 6: Vista Previa
+            PreviewView { Layout.fillWidth: true; Layout.fillHeight: true }
 
-            // 7: Historial View (Saved Receipts History)
-            ReceiptHistoryView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
+            // 7: Historial
+            ReceiptHistoryView { Layout.fillWidth: true; Layout.fillHeight: true }
         }
+    }
+
+    // ── Dialogs (outside layout, anchored to window) ─────────
+    SettingsDialog {
+        id: settingsDialog
     }
 }
