@@ -20,6 +20,7 @@
 #define APPCONTROLLER_H
 
 #include <QObject>
+#include <QQuickWindow>
 #include <QString>
 #include <QStringList>
 #include <QVariantMap>
@@ -61,6 +62,11 @@ class AppController : public QObject {
 public:
   explicit AppController(DatabaseManager *db, QObject *parent = nullptr);
   ~AppController();
+
+  Q_INVOKABLE void startWindowMove(QQuickWindow *window);
+  Q_INVOKABLE void minimizeWindow(QQuickWindow *window);
+  Q_INVOKABLE void toggleMaximizeWindow(QQuickWindow *window);
+  Q_INVOKABLE void closeWindow(QQuickWindow *window);
 
   QString currentRole() const;
   void setCurrentRole(const QString &role);

@@ -36,7 +36,8 @@ CrudView {
                 globalVarDialog.openEdit(data)
             }
             onDeleteRequested: function(id) {
-                AppController.globalVarsModel.removeVariable(id)
+                confirmDeleteGlobalVarDialog.targetId = id
+                confirmDeleteGlobalVarDialog.open()
             }
         }
     }
@@ -59,6 +60,18 @@ CrudView {
                 values.value.trim(),
                 values.description.trim()
             )
+        }
+    }
+
+    ConfirmDialog {
+        id: confirmDeleteGlobalVarDialog
+        property int targetId: -1
+        title: "🗑️ Eliminar Variable Global"
+        message: "¿Está seguro de eliminar esta variable global del sistema?"
+        confirmButtonText: "Sí, Eliminar"
+        confirmButtonVariant: "danger"
+        onConfirmed: {
+            if (targetId > 0) AppController.globalVarsModel.removeVariable(targetId)
         }
     }
 }

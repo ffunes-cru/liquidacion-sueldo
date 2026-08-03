@@ -98,9 +98,12 @@ set(QML_FILES
     qml/components/StyledTextArea.qml
     qml/components/StyledTabButton.qml
     qml/components/StyledSpinBox.qml
+    qml/components/PieChartCanvas.qml
     qml/components/BadgePill.qml
     qml/components/StatusBanner.qml
     qml/components/AppDialog.qml
+    qml/components/ConfirmDialog.qml
+    qml/components/CustomTitleBar.qml
     qml/components/AdminActions.qml
     qml/components/KpiCard.qml
     qml/components/SectionPanel.qml
@@ -125,6 +128,7 @@ set(QML_FILES
     qml/dialogs/VariableAssistantDialog.qml
     qml/dialogs/SchemaConfigDialog.qml
     qml/dialogs/SettingsDialog.qml
+    qml/dialogs/EmployeeSelectorDialog.qml
     qml/dialogs/CalculationErrorDialog.qml
     qml/dialogs/AboutDialog.qml
 )

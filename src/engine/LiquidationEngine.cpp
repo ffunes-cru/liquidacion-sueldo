@@ -537,7 +537,9 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
         {"monto", monto},
         {"seccion", seccion},
         {"tipo_calculo", tipoCalc},
-        {"visible_recibo", cell.value("visible_recibo", 1)}
+        {"visible_recibo", cell.value("visible_recibo", 1)},
+        {"en_grafico", cell.value("en_grafico", 0)},
+        {"es_grafico_total", cell.value("es_grafico_total", 0)}
     };
 
     QVariantList seccionList = resultadosPorSeccion.value(seccion).toList();

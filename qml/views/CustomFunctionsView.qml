@@ -60,9 +60,8 @@ MasterDetailView {
                 })
             }
             onDeleteRequested: function(id) {
-                AppController.customFunctionModel.removeFunction(id)
-                if (AppController.customFunctionModel.count > 0) root.selectFunctionAtRow(0)
-                else { root.selectedFuncId = -1; root.selectedFuncData = null }
+                confirmDeleteFuncDialog.targetId = id
+                confirmDeleteFuncDialog.open()
             }
         }
     }
@@ -321,6 +320,22 @@ MasterDetailView {
                 if (resId > 0) {
                     root.selectFunctionAtRow(root.selectedIndex >= 0 ? root.selectedIndex : 0)
                 }
+            }
+        }
+    }
+
+    ConfirmDialog {
+        id: confirmDeleteFuncDialog
+        property int targetId: -1
+        title: "🗑️ Eliminar Función JS"
+        message: "¿Está seguro de eliminar esta función JS personalizada?"
+        confirmButtonText: "Sí, Eliminar"
+        confirmButtonVariant: "danger"
+        onConfirmed: {
+            if (targetId > 0) {
+                AppController.customFunctionModel.removeFunction(targetId)
+                if (AppController.customFunctionModel.count > 0) root.selectFunctionAtRow(0)
+                else { root.selectedFuncId = -1; root.selectedFuncData = null }
             }
         }
     }

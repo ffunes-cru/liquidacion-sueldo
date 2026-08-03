@@ -29,7 +29,9 @@ public:
         SimpleBaseVariableRole,
         SimpleMontoFijoRole,
         VisibleReciboRole,
-        ColorHexRole
+        ColorHexRole,
+        EnGraficoRole,
+        EsGraficoTotalRole
     };
 
     explicit CellModel(DatabaseManager *db, QObject *parent = nullptr);
@@ -51,7 +53,8 @@ public:
                              const QString &formulaMonto, int orden, const QString &esquemaCodigo,
                              const QString &tipoCalculo, double simplePorcentaje,
                              const QString &simpleBaseVariable, double simpleMontoFijo,
-                             bool visibleRecibo, const QString &colorHex = "");
+                             bool visibleRecibo, const QString &colorHex = "",
+                             bool enGrafico = false, bool esGraficoTotal = false);
     Q_INVOKABLE bool updateCellColor(int id, const QString &colorHex);
     Q_INVOKABLE bool removeCell(int id);
     Q_INVOKABLE bool moveCellUp(int index);

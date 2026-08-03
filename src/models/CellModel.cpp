@@ -34,6 +34,8 @@ QVariant CellModel::data(const QModelIndex &index, int role) const
     case SimpleMontoFijoRole:    return c["simple_monto_fijo"];
     case VisibleReciboRole:      return c["visible_recibo"].toBool();
     case ColorHexRole:           return c["color_hex"];
+    case EnGraficoRole:          return c["en_grafico"].toBool();
+    case EsGraficoTotalRole:     return c["es_grafico_total"].toBool();
     default:                     return {};
     }
 }
@@ -56,7 +58,9 @@ QHash<int, QByteArray> CellModel::roleNames() const
         {SimpleBaseVariableRole, "simpleBaseVariable"},
         {SimpleMontoFijoRole, "simpleMontoFijo"},
         {VisibleReciboRole, "visibleRecibo"},
-        {ColorHexRole, "colorHex"}
+        {ColorHexRole, "colorHex"},
+        {EnGraficoRole, "enGrafico"},
+        {EsGraficoTotalRole, "esGraficoTotal"}
     };
 }
 
@@ -102,12 +106,14 @@ int CellModel::saveCell(int id, const QString &seccionCodigo, const QString &cod
                         const QString &formulaMonto, int orden, const QString &esquemaCodigo,
                         const QString &tipoCalculo, double simplePorcentaje,
                         const QString &simpleBaseVariable, double simpleMontoFijo,
-                        bool visibleRecibo, const QString &colorHex)
+                        bool visibleRecibo, const QString &colorHex,
+                        bool enGrafico, bool esGraficoTotal)
 {
     int cellId = m_db->saveCell(id, seccionCodigo, codigoVariable, descripcion, condicion,
                                 formulaUnidad, formulaBase, formulaMonto, orden,
                                 esquemaCodigo, tipoCalculo, simplePorcentaje,
-                                simpleBaseVariable, simpleMontoFijo, visibleRecibo, colorHex);
+                                simpleBaseVariable, simpleMontoFijo, visibleRecibo, colorHex,
+                                enGrafico, esGraficoTotal);
     if (cellId > 0) refresh();
     return cellId;
 }

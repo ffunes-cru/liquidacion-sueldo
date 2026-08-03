@@ -3,6 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import LiquidacionSueldos 1.0
 import "../components"
+import "../dialogs"
 
 Item {
     id: root
@@ -17,116 +18,114 @@ Item {
         companyData = AppController.getCompany()
     }
 
-    RowLayout {
+    EmployeeSelectorDialog {
+        id: employeeSelectorDialog
+        onEmployeeSelected: function(empId, empData) {
+            root.selectedEmployeeId = empId
+            root.employeeData = empData
+            root.refreshQuincenasCombo(empId)
+        }
+    }
+
+    ConfirmDialog {
+        id: confirmHistoryDialog
+        title: "💾 Guardar en Historial"
+        iconText: "ℹ️"
+        message: "¿Desea guardar una copia instantánea de este recibo de sueldo en el historial de liquidaciones?"
+        confirmButtonText: "Sí, Guardar Recibo"
+        confirmButtonVariant: "primary"
+        onConfirmed: {
+            if (root.liquidationResult) {
+                var periodoStr = "Mes " + sbMes.value + "/" + sbAnio.value + " (" + cbQuincena.currentText + ")"
+                var recId = AppController.persistLiquidation(root.liquidationResult, sbMes.value, sbAnio.value, periodoStr)
+                root.statusMsg = recId > 0 ? "Recibo histórico guardado con ID #" + recId : "Error al guardar en el historial."
+                if (recId > 0) AppController.receiptHistoryModel.refresh()
+            }
+        }
+    }
+
+    ColumnLayout {
         anchors.fill: parent
         anchors.margins: 15
         spacing: 15
 
         // ═══════════════════════════════════════════════════════
-        // LEFT PANE: Calculation Parameters & Actions
+        // TOP SELECTION & PARAMETERS BAR
         // ═══════════════════════════════════════════════════════
-        Rectangle {
-            Layout.fillHeight: true
-            Layout.preferredWidth: 340
-            color: Theme.panelBg
-            radius: 8
-            border.color: Theme.borderColor
+        SectionPanel {
+            Layout.fillWidth: true
+            padding: 10
 
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 15
-                spacing: 15
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
 
-                Label {
-                    text: "Parámetros de Liquidación"
-                    font.pixelSize: 18
-                    font.bold: true
-                    color: Theme.textColor
+                // Employee Selector Button
+                StyledButton {
+                    id: btnSelectEmployee
+                    variant: "secondary"
+                    text: root.employeeData ? ("👤 " + (root.employeeData.nombre || root.employeeData.nombre_completo) + " (Leg. " + (root.employeeData.legajo || "-") + ")") : "🔍 Seleccionar Empleado..."
+                    onClicked: employeeSelectorDialog.open()
                 }
 
-                SectionPanel {
-                    padding: 12
+                // Quincena (For Hourly/Jornal employees)
+                Label {
+                    text: "Quincena:"
+                    color: Theme.textColor
+                    font.pixelSize: 13
+                    visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
+                }
+                StyledComboBox {
+                    id: cbQuincena
+                    Layout.preferredWidth: 90
+                    model: ["Q1", "Q2"]
+                    visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
+                }
 
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 2
-                        rowSpacing: 12
-                        columnSpacing: 10
-
-                        Label { text: "Empleado:"; color: Theme.textColor; font.pixelSize: 13 }
-                        StyledComboBox {
-                            id: cbEmpleado
-                            Layout.fillWidth: true
-                            model: AppController.employeeModel
-                            textRole: "nombre"
-                            valueRole: "employeeId"
-                            onActivated: {
-                                var empId = currentValue || -1
-                                root.selectedEmployeeId = empId
-                                refreshQuincenasCombo(empId)
-                                if (empId > 0 && currentIndex >= 0) {
-                                    root.employeeData = AppController.employeeModel.get(currentIndex)
-                                }
-                            }
-                        }
-
-                        Label {
-                            text: "Quincena / Periodo:"
-                            color: Theme.textColor
-                            font.pixelSize: 13
-                            visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
-                        }
-                        StyledComboBox {
-                            id: cbQuincena
-                            Layout.fillWidth: true
-                            model: ["Q1", "Q2"]
-                            visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
-                        }
-
-                        Label { text: "Fecha Cálculo:"; color: Theme.textColor; font.pixelSize: 13 }
-                        StyledTextField {
-                            id: txtFechaCalculo
-                            text: Qt.formatDate(new Date(), "yyyy-MM-dd")
-                            Layout.fillWidth: true
-                            onTextChanged: {
-                                var parts = text.split("-")
-                                if (parts.length === 3) {
-                                    var y = parseInt(parts[0])
-                                    var m = parseInt(parts[1])
-                                    if (m >= 1 && m <= 12) sbMes.value = m
-                                    if (y >= 2000 && y <= 2100) sbAnio.value = y
-                                }
-                            }
-                        }
-
-                        Label { text: "Mes Histórico:"; color: Theme.textColor; font.pixelSize: 13 }
-                        StyledSpinBox {
-                            id: sbMes
-                            from: 1; to: 12
-                            value: (new Date()).getMonth() + 1
-                            Layout.fillWidth: true
-                        }
-
-                        Label { text: "Año Histórico:"; color: Theme.textColor; font.pixelSize: 13 }
-                        StyledSpinBox {
-                            id: sbAnio
-                            from: 2020; to: 2030
-                            value: (new Date()).getFullYear()
-                            Layout.fillWidth: true
+                // Fecha Cálculo
+                Label { text: "Fecha:"; color: Theme.textColor; font.pixelSize: 13 }
+                StyledTextField {
+                    id: txtFechaCalculo
+                    text: Qt.formatDate(new Date(), "yyyy-MM-dd")
+                    Layout.preferredWidth: 110
+                    onTextChanged: {
+                        var parts = text.split("-")
+                        if (parts.length === 3) {
+                            var y = parseInt(parts[0])
+                            var m = parseInt(parts[1])
+                            if (m >= 1 && m <= 12) sbMes.value = m
+                            if (y >= 2000 && y <= 2100) sbAnio.value = y
                         }
                     }
                 }
 
+                // Mes/Año Histórico
+                Label { text: "Mes:"; color: Theme.textColor; font.pixelSize: 13 }
+                StyledSpinBox {
+                    id: sbMes
+                    from: 1; to: 12
+                    value: (new Date()).getMonth() + 1
+                    Layout.preferredWidth: 90
+                }
+
+                Label { text: "Año:"; color: Theme.textColor; font.pixelSize: 13 }
+                StyledSpinBox {
+                    id: sbAnio
+                    from: 2020; to: 2030
+                    value: (new Date()).getFullYear()
+                    Layout.preferredWidth: 100
+                }
+
+                Item { Layout.fillWidth: true }
+
+                // Actions
                 StyledButton {
-                    Layout.fillWidth: true
                     variant: "primary"
-                    text: "⚡ Calcular Liquidación"
-                    enabled: cbEmpleado.currentIndex >= 0
+                    text: "⚡ Calcular"
+                    enabled: root.selectedEmployeeId > 0
                     onClicked: {
-                        var empId = cbEmpleado.currentValue !== undefined ? cbEmpleado.currentValue : -1
+                        var empId = root.selectedEmployeeId
                         if (empId > 0) {
-                            if (cbEmpleado.currentIndex >= 0)
-                                root.employeeData = AppController.employeeModel.get(cbEmpleado.currentIndex)
                             root.companyData = AppController.getCompany()
                             var res = AppController.processLiquidation(empId, cbQuincena.currentText, txtFechaCalculo.text)
                             root.liquidationResult = res
@@ -142,49 +141,29 @@ Item {
                 }
 
                 StyledButton {
-                    Layout.fillWidth: true
                     variant: "secondary"
-                    text: "💾 Guardar en Historial"
+                    text: "💾 Historial"
                     enabled: root.liquidationResult !== null
-                    onClicked: {
-                        if (root.liquidationResult) {
-                            var periodoStr = "Mes " + sbMes.value + "/" + sbAnio.value + " (" + cbQuincena.currentText + ")"
-                            var recId = AppController.persistLiquidation(root.liquidationResult, sbMes.value, sbAnio.value, periodoStr)
-                            root.statusMsg = recId > 0 ? "Recibo histórico guardado con ID #" + recId : "Error al guardar en el historial."
-                            if (recId > 0) AppController.receiptHistoryModel.refresh()
-                        }
-                    }
+                    onClicked: confirmHistoryDialog.open()
                 }
 
                 StyledButton {
-                    Layout.fillWidth: true
                     variant: "secondary"
-                    text: "📄 Exportar a PDF"
+                    text: "📄 Exportar PDF"
                     enabled: root.liquidationResult !== null
                     onClicked: {
-                        var empId = cbEmpleado.currentValue !== undefined ? cbEmpleado.currentValue : -1
+                        var empId = root.selectedEmployeeId
                         if (empId > 0 && root.liquidationResult) {
                             var pdfPath = AppController.exportReceiptPdf(empId, root.liquidationResult, "")
                             root.statusMsg = pdfPath !== "" ? "Recibo PDF generado: " + pdfPath : "Error al generar PDF."
                         }
                     }
                 }
-
-                Label {
-                    text: root.statusMsg
-                    color: root.statusMsg.indexOf("⚠️") !== -1 ? "#EF4444" : Theme.accentColor
-                    font.bold: root.statusMsg.indexOf("⚠️") !== -1
-                    font.pixelSize: 12
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-
-                Item { Layout.fillHeight: true }
             }
         }
 
         // ═══════════════════════════════════════════════════════
-        // RIGHT PANE: Paystub Preview Document
+        // MAIN PANE: Paystub Preview Document
         // ═══════════════════════════════════════════════════════
         Rectangle {
             Layout.fillWidth: true
@@ -212,12 +191,12 @@ Item {
                         }
                         Item { Layout.fillWidth: true }
                         Label {
-                            text: root.liquidationResult ? ("Esquema: " + (root.employeeData ? root.employeeData.esquema_codigo : "")) : "Sin Calcular"
+                            text: root.liquidationResult ? ("Esquema: " + (root.employeeData ? (root.employeeData.esquema || root.employeeData.esquema_codigo || "") : "")) : "Sin Calcular"
                             font.pixelSize: 12; color: Theme.accentColor
                         }
                     }
 
-                    // ── Document Header Card ─────────────────────────
+                    // Document Header Card
                     SectionPanel {
                         padding: 12
 
@@ -239,10 +218,17 @@ Item {
                                     }
                                 }
                                 Item { Layout.fillWidth: true }
-                                BadgePill {
-                                    text: "RECIBO DE SUELDO"
-                                    badgeColor: Theme.accentColor
-                                    fontSize: 11
+                                ColumnLayout {
+                                    spacing: 2
+                                    Layout.alignment: Qt.AlignRight
+                                    Label {
+                                        text: "RECIBO DE HABERES"
+                                        font.bold: true; font.pixelSize: 14; color: Theme.accentColor
+                                    }
+                                    Label {
+                                        text: "Fecha: " + txtFechaCalculo.text
+                                        font.pixelSize: 11; color: Theme.subtextColor
+                                    }
                                 }
                             }
 
@@ -250,135 +236,138 @@ Item {
 
                             GridLayout {
                                 Layout.fillWidth: true
-                                columns: 4; rowSpacing: 6; columnSpacing: 15
+                                columns: 4
+                                rowSpacing: 6
+                                columnSpacing: 15
 
-                                Label { text: "Empleado:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
-                                Label { text: root.employeeData ? root.employeeData.nombre_completo : "-"; color: Theme.textColor; font.bold: true; font.pixelSize: 13 }
-                                Label { text: "Legajo:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
-                                Label { text: root.employeeData ? root.employeeData.legajo : "-"; color: Theme.textColor; font.pixelSize: 13 }
-                                Label { text: "CUIL:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
-                                Label { text: root.employeeData ? (root.employeeData.cuil || "N/A") : "-"; color: Theme.textColor; font.pixelSize: 13 }
-                                Label { text: "Categoría:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
-                                Label { text: root.employeeData ? (root.employeeData.categoria_nombre || "General") : "-"; color: Theme.textColor; font.pixelSize: 13 }
+                                Label { text: "Empleado:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11 }
+                                Label {
+                                    text: root.employeeData ? (root.employeeData.nombre || root.employeeData.nombre_completo || "-") : "-"
+                                    font.bold: true; color: Theme.textColor; font.pixelSize: 12
+                                }
+
+                                Label { text: "Legajo:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11 }
+                                Label {
+                                    text: root.employeeData ? (root.employeeData.legajo || "-") : "-"
+                                    color: Theme.textColor; font.pixelSize: 12
+                                }
+
+                                Label { text: "C.U.I.T.:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11 }
+                                Label {
+                                    text: root.employeeData ? (root.employeeData.cuil || "N/A") : "-"
+                                    color: Theme.textColor; font.pixelSize: 12
+                                }
+
+                                Label { text: "Fecha Ingreso:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11 }
+                                Label {
+                                    text: root.employeeData ? (root.employeeData.fechaIngreso || root.employeeData.fecha_ingreso || "N/A") : "-"
+                                    color: Theme.textColor; font.pixelSize: 12
+                                }
                             }
                         }
                     }
 
-                    // ── Concepts Breakdown Table ──────────────────────
+                    // Table Header Bar
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 32
+                        color: Theme.headerBg
+                        radius: 4
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12; anchors.rightMargin: 12
+                            spacing: 10
+
+                            Label { text: "Cód."; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 80 }
+                            Label { text: "Concepto / Descripción"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.fillWidth: true }
+                            Label { text: "Unidad"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 80; horizontalAlignment: Text.AlignRight }
+                            Label { text: "Base Imponible"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 110; horizontalAlignment: Text.AlignRight }
+                            Label { text: "Monto ($)"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 130; horizontalAlignment: Text.AlignRight }
+                        }
+                    }
+
+                    // Table Body Lines
                     SectionPanel {
-                        Layout.fillHeight: true
-                        padding: 12
+                        padding: 8
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 8
+                            spacing: 4
 
-                            // Table Header
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 32
-                                color: Theme.headerBg
-                                radius: 4
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 8; anchors.rightMargin: 8
-                                    spacing: 8
-
-                                    Label { text: "Cód"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 80 }
-                                    Label { text: "Descripción del Concepto"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.fillWidth: true }
-                                    Label { text: "Unidad"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 80; horizontalAlignment: Text.AlignRight }
-                                    Label { text: "Base Imp."; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 110; horizontalAlignment: Text.AlignRight }
-                                    Label { text: "Monto ($)"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11; Layout.preferredWidth: 130; horizontalAlignment: Text.AlignRight }
-                                }
-                            }
-
-                            // Empty state
-                            Label {
-                                visible: !root.liquidationResult || !root.liquidationResult["conceptos"] || root.liquidationResult["conceptos"].length === 0
-                                text: "Haga clic en '⚡ Calcular Liquidación' para ver los conceptos."
-                                color: Theme.subtextColor
-                                font.italic: true; font.pixelSize: 13
-                                Layout.alignment: Qt.AlignHCenter; Layout.margins: 20
-                            }
-
-                            // Concept rows & Separators
                             Repeater {
-                                model: root.liquidationResult ? root.liquidationResult["conceptos"] : []
-                                delegate: Rectangle {
-                                    property bool isSep: (modelData["tipo_calculo"] === "separator" || (modelData["codigo"] || "").indexOf("SEP_") === 0)
-                                    property bool isTotal: {
-                                        if (isSep) return false;
-                                        var c = (modelData["codigo"] || modelData["codigo_variable"] || "").toUpperCase();
-                                        var d = (modelData["descripcion"] || "").toUpperCase();
-                                        return c.indexOf("TOT_") === 0 || c.indexOf("TOTAL_") === 0 || c.indexOf("NETO") === 0 || d.indexOf("TOTAL") !== -1 || d.indexOf("NETO") !== -1;
-                                    }
-                                    property bool isVisibleInReceipt: {
-                                        var v = modelData["visible_recibo"];
-                                        return v === undefined || v === null || v === true || v === 1 || v === "1" || v === "true";
-                                    }
+                                model: root.liquidationResult ? root.liquidationResult.conceptos : []
 
-                                    visible: isVisibleInReceipt
-                                    Layout.fillWidth: isVisibleInReceipt
-                                    height: isVisibleInReceipt ? (isSep ? 32 : (isTotal ? 40 : 36)) : 0
-                                    color: isSep ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.15)
-                                                 : (isTotal ? "#1E293B" : (index % 2 === 0 ? Qt.alpha("#ffffff", 0.02) : "transparent"))
-                                    radius: 4
-                                    border.color: isSep ? Theme.accentColor : (isTotal ? "#F59E0B" : "transparent")
-                                    border.width: isSep ? 1 : (isTotal ? 1 : 0)
+                                delegate: Item {
+                                    Layout.fillWidth: true
+                                    property bool isSep: modelData["tipo_calculo"] === "separator" || (modelData["codigo"] && modelData["codigo"].indexOf("SEP_") === 0)
+                                    property bool isTotal: (!isSep && (modelData["codigo"].indexOf("TOT_") === 0 || modelData["codigo"].indexOf("TOTAL_") === 0 || modelData["codigo"].indexOf("NETO") === 0 || modelData["descripcion"].toUpperCase().indexOf("TOTAL") !== -1 || modelData["descripcion"].toUpperCase().indexOf("NETO") !== -1))
+                                    implicitHeight: isSep ? 34 : 38
 
-                                    RowLayout {
+                                    Rectangle {
                                         anchors.fill: parent
-                                        anchors.leftMargin: 8; anchors.rightMargin: 8
-                                        spacing: 8
+                                        radius: 4
+                                        color: isSep ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.15) : (isTotal ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.25) : (index % 2 === 0 ? Theme.panelBg : Theme.cardBg))
+                                        border.color: isTotal ? Theme.accentColor : (isSep ? Theme.accentColor : "transparent")
+                                        border.width: isTotal ? 1.5 : (isSep ? 1 : 0)
 
-                                        // Separator full banner title
-                                        Label {
-                                            visible: isSep
-                                            text: "🔹  " + (modelData["descripcion"] || "SECCIÓN")
-                                            color: Theme.accentColor
-                                            font.bold: true
-                                            font.pixelSize: 13
-                                            Layout.fillWidth: true
-                                        }
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 12; anchors.rightMargin: 12
+                                            spacing: 10
 
-                                        // Regular concept columns
-                                        Label {
-                                            visible: !isSep
-                                            text: modelData["codigo"] || modelData["codigo_variable"] || ""
-                                            color: isTotal ? "#F59E0B" : Theme.accentColor; font.bold: true; font.family: "Monospace"; font.pixelSize: isTotal ? 13 : 12
-                                            Layout.preferredWidth: 80; elide: Text.ElideRight
-                                        }
-                                        Label {
-                                            visible: !isSep
-                                            text: modelData["descripcion"] || ""
-                                            color: isTotal ? "#F8FAFC" : Theme.textColor; font.bold: isTotal; font.pixelSize: isTotal ? 13 : 13
-                                            Layout.fillWidth: true; elide: Text.ElideRight
-                                        }
-                                        Label {
-                                            visible: !isSep
-                                            text: formatNumber(modelData["unidad"], 2)
-                                            color: isTotal ? "#F8FAFC" : "#94A3B8"; font.family: "Monospace"; font.pixelSize: isTotal ? 13 : 12
-                                            Layout.preferredWidth: 80; horizontalAlignment: Text.AlignRight
-                                        }
-                                        Label {
-                                            visible: !isSep
-                                            text: formatMoney(modelData["base"])
-                                            color: isTotal ? "#38BDF8" : "#94A3B8"; font.family: "Monospace"; font.pixelSize: isTotal ? 13 : 12
-                                            Layout.preferredWidth: 110; horizontalAlignment: Text.AlignRight
-                                        }
-                                        Label {
-                                            visible: !isSep
-                                            property string sec: (modelData["seccion"] || "").toUpperCase()
-                                            property bool isDesc: (sec === "DESCUENTO" || sec === "RECIBO" || sec === "RETENCION" || sec === "RETENCIONES" || sec === "DESCUENTOS")
-                                            text: formatMoney(modelData["monto"])
-                                            color: isTotal ? "#F59E0B" : (isDesc ? "#EF4444" : "#10B981"); font.bold: true; font.family: "Monospace"; font.pixelSize: isTotal ? 14 : 13
-                                            Layout.preferredWidth: 130; horizontalAlignment: Text.AlignRight
+                                            // Separator Header
+                                            Label {
+                                                visible: isSep
+                                                text: "■  " + (modelData["descripcion"] || "").toUpperCase()
+                                                font.bold: true; font.pixelSize: 12; color: Theme.accentColor
+                                                Layout.fillWidth: true
+                                            }
+
+                                            // Concept Regular Row
+                                            Label {
+                                                visible: !isSep
+                                                text: modelData["codigo"] || ""
+                                                font.family: "Monospace"; font.pixelSize: 11; color: Theme.subtextColor
+                                                Layout.preferredWidth: 80; elide: Text.ElideRight
+                                            }
+                                            Label {
+                                                visible: !isSep
+                                                text: modelData["descripcion"] || ""
+                                                color: isTotal ? Theme.accentColor : Theme.textColor; font.bold: isTotal; font.pixelSize: isTotal ? 13 : 13
+                                                Layout.fillWidth: true; elide: Text.ElideRight
+                                            }
+                                            Label {
+                                                visible: !isSep
+                                                text: root.formatNumber(modelData["unidad"], 2)
+                                                color: Theme.subtextColor; font.family: "Monospace"; font.pixelSize: 12
+                                                Layout.preferredWidth: 80; horizontalAlignment: Text.AlignRight
+                                            }
+                                            Label {
+                                                visible: !isSep
+                                                text: root.formatMoney(modelData["base"])
+                                                color: Theme.subtextColor; font.family: "Monospace"; font.pixelSize: 12
+                                                Layout.preferredWidth: 110; horizontalAlignment: Text.AlignRight
+                                            }
+                                            Label {
+                                                visible: !isSep
+                                                text: root.formatMoney(modelData["monto"])
+                                                color: isTotal ? Theme.accentColor : Theme.textColor; font.bold: true; font.family: "Monospace"; font.pixelSize: isTotal ? 14 : 13
+                                                Layout.preferredWidth: 130; horizontalAlignment: Text.AlignRight
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+
+                    PieChartCanvas {
+                        id: previewPieChart
+                        Layout.fillWidth: true
+                        visible: root.liquidationResult !== null && slices && slices.length > 0
+                        slices: root.getChartSlices()
+                        totalReference: root.getChartTotalReference()
                     }
                 }
             }
@@ -407,5 +396,60 @@ Item {
         } else {
             cbQuincena.model = ["Q1", "Q2"]
         }
+    }
+
+    function getChartSlices() {
+        if (!root.liquidationResult || !root.liquidationResult.conceptos) return [];
+        var res = [];
+        var conceptos = root.liquidationResult.conceptos;
+        for (var i = 0; i < conceptos.length; i++) {
+            var c = conceptos[i];
+            var inChart = c.en_grafico === true || c.en_grafico === 1 || c.en_grafico === "1";
+            if (!inChart) {
+                var code = (c.codigo || c.codigo_variable || "").toLowerCase();
+                for (var j = 0; j < AppController.cellModel.count; j++) {
+                    var cell = AppController.cellModel.get(j);
+                    if ((cell.codigoVariable || "").toLowerCase() === code) {
+                        inChart = cell.enGrafico;
+                        if (!c.color_hex && cell.colorHex) c.color_hex = cell.colorHex;
+                        break;
+                    }
+                }
+            }
+            if (inChart) {
+                var mVal = Math.abs(Number(c.monto) || 0);
+                if (mVal > 0) {
+                    res.push({
+                        label: c.descripcion || c.codigo || c.codigo_variable,
+                        value: mVal,
+                        color: c.color_hex ? c.color_hex : undefined
+                    });
+                }
+            }
+        }
+        return res;
+    }
+
+    function getChartTotalReference() {
+        if (!root.liquidationResult || !root.liquidationResult.conceptos) return 0.0;
+        var conceptos = root.liquidationResult.conceptos;
+        for (var i = 0; i < conceptos.length; i++) {
+            var c = conceptos[i];
+            var isTotalRef = c.es_grafico_total === true || c.es_grafico_total === 1 || c.es_grafico_total === "1";
+            if (!isTotalRef) {
+                var code = (c.codigo || c.codigo_variable || "").toLowerCase();
+                for (var j = 0; j < AppController.cellModel.count; j++) {
+                    var cell = AppController.cellModel.get(j);
+                    if ((cell.codigoVariable || "").toLowerCase() === code) {
+                        isTotalRef = cell.esGraficoTotal;
+                        break;
+                    }
+                }
+            }
+            if (isTotalRef) {
+                return Math.abs(Number(c.monto) || 0.0);
+            }
+        }
+        return 0.0;
     }
 }

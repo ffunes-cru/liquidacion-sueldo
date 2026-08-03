@@ -22,6 +22,8 @@ AppDialog {
     property string simpleBaseVariable: ""
     property alias simpleMontoFijo: txtSimpleMontoFijo.text
     property alias visibleRecibo: chkVisibleRecibo.checked
+    property alias enGrafico: chkEnGrafico.checked
+    property alias esGraficoTotal: chkEsGraficoTotal.checked
 
     property var sectionsList: []
 
@@ -33,22 +35,7 @@ AppDialog {
     standardButtons: Dialog.Save | Dialog.Cancel
 
     onOpened: {
-        sectionsList = AppController.listSections()
-        var codes = []
-        for (var i = 0; i < sectionsList.length; i++) {
-            codes.push(sectionsList[i].codigo)
-        }
-        if (codes.length === 0) {
-            codes = ["REMUNERATIVO", "NO_REMUNERATIVO", "DESCUENTO", "APORTE_PATRONAL"]
-        }
-        cbSeccion.model = codes
-
-        for (var j = 0; j < cbSeccion.count; j++) {
-            if (cbSeccion.textAt(j) === root.seccionCodigo) {
-                cbSeccion.currentIndex = j
-                break
-            }
-        }
+        // Base variables model for ComboBox
 
         // Base variables model for ComboBox
         var varsList = AppController.getAvailableFormulaVariables(root.esquemaCodigo)
@@ -95,7 +82,7 @@ AppDialog {
         if (code !== "") {
             AppController.cellModel.saveCell(
                 cellId > 0 ? cellId : 0,
-                cbSeccion.currentText,
+                "COMPOSICION",
                 code,
                 desc !== "" ? desc : code,
                 cond,
@@ -108,7 +95,10 @@ AppDialog {
                 parseFloat(txtSimplePorcentaje.text) || 0.0,
                 baseVarVal,
                 parseFloat(txtSimpleMontoFijo.text) || 0.0,
-                chkVisibleRecibo.checked
+                chkVisibleRecibo.checked,
+                "",
+                chkEnGrafico.checked,
+                chkEsGraficoTotal.checked
             )
             conceptSaved()
         }
@@ -128,12 +118,7 @@ AppDialog {
                 rowSpacing: 10
                 columnSpacing: 14
 
-                Label { text: "Sección del Recibo:"; color: Theme.textColor; font.pixelSize: 13 }
-                StyledComboBox {
-                    id: cbSeccion
-                    Layout.fillWidth: true
-                    model: ["REMUNERATIVO", "NO_REMUNERATIVO", "DESCUENTO", "APORTE_PATRONAL"]
-                }
+
 
                 Label { text: "Código de Variable:"; color: Theme.textColor; font.pixelSize: 13 }
                 StyledTextField {
@@ -241,10 +226,24 @@ AppDialog {
 
             RowLayout {
                 Layout.fillWidth: true
+                spacing: 15
+
                 StyledCheckBox {
                     id: chkVisibleRecibo
-                    text: "Visible en la impresión del Recibo de Sueldo"
+                    text: "Visible en Recibo"
                     checked: true
+                }
+
+                StyledCheckBox {
+                    id: chkEnGrafico
+                    text: "Incluir en Gráfico"
+                    checked: false
+                }
+
+                StyledCheckBox {
+                    id: chkEsGraficoTotal
+                    text: "Es Total de Referencia (100%)"
+                    checked: false
                 }
             }
         }

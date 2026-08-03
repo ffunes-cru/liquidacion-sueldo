@@ -45,7 +45,7 @@ Item {
     function openNewConceptDialog(secCode) {
         conceptDialog.cellId = -1
         conceptDialog.esquemaCodigo = currentEsquema
-        conceptDialog.seccionCodigo = secCode || "REMUNERATIVO"
+        conceptDialog.seccionCodigo = "COMPOSICION"
         conceptDialog.tipoCalculo = "formula"
         conceptDialog.codigoVariable = ""
         conceptDialog.descripcion = ""
@@ -58,6 +58,8 @@ Item {
         conceptDialog.simpleBaseVariable = ""
         conceptDialog.simpleMontoFijo = "0.0"
         conceptDialog.visibleRecibo = true
+        conceptDialog.enGrafico = false
+        conceptDialog.esGraficoTotal = false
         conceptDialog.open()
     }
 
@@ -78,6 +80,10 @@ Item {
         conceptDialog.simpleMontoFijo = (cellData.simpleMontoFijo !== undefined ? cellData.simpleMontoFijo : (cellData.simple_monto_fijo !== undefined ? cellData.simple_monto_fijo : 0.0)).toString()
         var vis = (cellData.visibleRecibo !== undefined) ? cellData.visibleRecibo : cellData.visible_recibo;
         conceptDialog.visibleRecibo = (vis === true || vis === 1 || vis === "1" || vis === "true");
+        var eg = (cellData.enGrafico !== undefined) ? cellData.enGrafico : cellData.en_grafico;
+        conceptDialog.enGrafico = (eg === true || eg === 1 || eg === "1" || eg === "true");
+        var egt = (cellData.esGraficoTotal !== undefined) ? cellData.esGraficoTotal : cellData.es_grafico_total;
+        conceptDialog.esGraficoTotal = (egt === true || egt === 1 || egt === "1" || egt === "true");
         conceptDialog.open()
     }
 
@@ -164,7 +170,7 @@ Item {
                 variant: "primary"
                 text: "+ Nuevo Concepto"
                 visible: AppController.currentRole === "admin"
-                onClicked: openNewConceptDialog("REMUNERATIVO")
+                onClicked: openNewConceptDialog("COMPOSICION")
             }
         }
 
@@ -204,27 +210,6 @@ Item {
                                 text: AppController.cellModel.count + " elementos (conceptos y separadores)"
                                 font.pixelSize: 12; color: Theme.subtextColor
                             }
-                        }
-                    }
-
-                    // Table Header Bar
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 36
-                        color: Theme.headerBg
-                        radius: 4
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 12; anchors.rightMargin: 12
-                            spacing: 10
-
-                            Label { text: "Cód. Variable"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 140 }
-                            Label { text: "Descripción del Concepto / Sección"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.fillWidth: true }
-                            Label { text: "Unidad / Cant."; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 100 }
-                            Label { text: "Base Imponible"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 120 }
-                            Label { text: "Fórmula / Cálculo Monto"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 180 }
-                            Label { text: "Acciones"; font.bold: true; font.pixelSize: 11; color: Theme.subtextColor; Layout.preferredWidth: 70; horizontalAlignment: Text.AlignRight }
                         }
                     }
 
@@ -276,6 +261,9 @@ Item {
                                 property string itemFormulaBase: model.formulaBase || ""
                                 property string itemFormulaMonto: model.formulaMonto || ""
                                 property string itemColorHex: model.colorHex || ""
+                                property bool itemVisibleRecibo: model.visibleRecibo !== undefined ? model.visibleRecibo : true
+                                property bool itemEnGrafico: model.enGrafico !== undefined ? model.enGrafico : false
+                                property bool itemEsGraficoTotal: model.esGraficoTotal !== undefined ? model.esGraficoTotal : false
 
                                 sourceComponent: model.tipoCalculo === "separator" ? separatorComponent : conceptComponent
                             }
@@ -420,7 +408,11 @@ Item {
                         MouseArea {
                             id: btnSepDelArea
                             anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: AppController.cellModel.removeCell(itemId)
+                            onClicked: {
+                                confirmDeleteCellDialog.targetId = itemId
+                                confirmDeleteCellDialog.targetDesc = itemDescripcion || "Título Separador"
+                                confirmDeleteCellDialog.open()
+                            }
                         }
                     }
                 }
@@ -436,7 +428,7 @@ Item {
             id: conceptItem
             width: parent.width
             height: 50
-            opacity: (root.isDragging && root.draggedRowIndex === itemIndex) ? 0.35 : 1.0
+            opacity: (root.isDragging && root.draggedRowIndex === itemIndex) ? 0.35 : (!itemVisibleRecibo ? 0.55 : 1.0)
 
             property bool isTotalItem: (itemCodigoVariable.indexOf("total_") === 0) || (itemDescripcion.toUpperCase().indexOf("TOTAL") !== -1)
             property string secUpper: (itemSeccionCodigo || "").toUpperCase()
@@ -554,6 +546,24 @@ Item {
                         elide: Text.ElideRight
                     }
 
+                    BadgePill {
+                        visible: !itemVisibleRecibo
+                        text: "Oculto"
+                        badgeColor: Theme.subtextColor
+                    }
+
+                    BadgePill {
+                        visible: itemEnGrafico
+                        text: "Gráfico"
+                        badgeColor: Theme.accentColor
+                    }
+
+                    BadgePill {
+                        visible: itemEsGraficoTotal
+                        text: "Total Gráfico"
+                        badgeColor: Theme.warningColor
+                    }
+
                     Label {
                         text: itemFormulaUnidad || "-"
                         font.family: "Monospace"; font.pixelSize: 11; color: Theme.subtextColor
@@ -596,12 +606,29 @@ Item {
                             MouseArea {
                                 id: btnConceptDelArea
                                 anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                onClicked: AppController.cellModel.removeCell(itemId)
+                                onClicked: {
+                                    confirmDeleteCellDialog.targetId = itemId
+                                    confirmDeleteCellDialog.targetDesc = itemDescripcion || itemCodigo
+                                    confirmDeleteCellDialog.open()
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    ConfirmDialog {
+        id: confirmDeleteCellDialog
+        property int targetId: -1
+        property string targetDesc: ""
+        title: "🗑️ Eliminar del Esquema"
+        message: "¿Está seguro de eliminar '" + targetDesc + "' del esquema de liquidación?"
+        confirmButtonText: "Sí, Eliminar"
+        confirmButtonVariant: "danger"
+        onConfirmed: {
+            if (targetId > 0) AppController.cellModel.removeCell(targetId)
         }
     }
 

@@ -57,103 +57,101 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.leftMargin: 20
                 anchors.rightMargin: 20
-                spacing: 15
+                spacing: 16
 
-                Label {
-                    text: "Liquidación de Sueldos"
-                    font.pixelSize: 18
-                    font.bold: true
-                    color: Theme.accentColor
+                // App Brand Title
+                ColumnLayout {
+                    spacing: 2
+                    Label {
+                        text: "SISTEMA DE LIQUIDACIÓN"
+                        font.pixelSize: 16
+                        font.bold: true
+                        color: Theme.textColor
+                    }
+                    Label {
+                        text: "Sueldos & Costo Laboral"
+                        font.pixelSize: 11
+                        color: Theme.subtextColor
+                    }
                 }
 
-                Label {
-                    text: "(C++ / QML)"
-                    font.pixelSize: 12
-                    color: Theme.subtextColor
+                // Role Selector Pill
+                RoleSelector {
+                    Layout.alignment: Qt.AlignVCenter
                 }
 
                 Item { Layout.fillWidth: true }
 
-                Label {
-                    text: "Modo:"
-                    font.pixelSize: 13
-                    color: Theme.subtextColor
-                }
-
-                StyledComboBox {
-                    id: roleCombo
-                    implicitWidth: 170
-                    model: ["Administrador", "Usuario Operativo"]
-                    currentIndex: AppController.currentRole === "admin" ? 0 : 1
-                    onActivated: {
-                        AppController.currentRole = (currentIndex === 0) ? "admin" : "user"
-                        mainTabBar.currentIndex = 0
-                        window.activeViewIndex = window.visibleTabIndices[0]
-                    }
-                }
-
+                // Settings Gear Button
                 StyledButton {
                     variant: "secondary"
                     text: "⚙️ Configuración"
                     onClicked: settingsDialog.open()
                 }
             }
-        }
 
-        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderColor }
-
-        // ── Navigation TabBar Area ──────────────────────────────
-        Rectangle {
-            Layout.fillWidth: true
-            implicitHeight: 50
-            color: Theme.panelBg
-
-            TabBar {
-                id: mainTabBar
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                anchors.topMargin: 4
-                anchors.bottomMargin: 4
-                spacing: 6
-                background: Rectangle { color: "transparent" }
-
-                Repeater {
-                    model: window.visibleTabIndices
-
-                    StyledTabButton {
-                        property int defIndex: modelData
-                        text: window.tabDefinitions[defIndex].label
-                    }
-                }
-
-                onCurrentIndexChanged: {
-                    if (currentIndex >= 0 && currentIndex < window.visibleTabIndices.length) {
-                        var defIdx = window.visibleTabIndices[currentIndex]
-                        window.activeViewIndex = window.tabDefinitions[defIdx].viewIndex
-                    }
-                }
+            // Header Bottom Separator
+            Rectangle {
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 1
+                color: Theme.borderColor
             }
         }
 
-        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderColor }
+        // ── Navigation Bar (Tab Buttons) ────────────────────────
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: 46
+            color: Theme.headerBg
 
-        // ── Main Content Area ───────────────────────────────────
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 15
+                anchors.rightMargin: 15
+                spacing: 4
+
+                Repeater {
+                    model: visibleTabIndices
+
+                    delegate: StyledTabButton {
+                        property var def: tabDefinitions[modelData]
+                        text: def.label
+                        checked: activeViewIndex === def.viewIndex
+                        onClicked: activeViewIndex = def.viewIndex
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+            }
+
+            // Tab Bar Bottom Line
+            Rectangle {
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 1
+                color: Theme.borderColor
+            }
+        }
+
+        // ── Content Area (StackLayout for Views) ───────────────
         StackLayout {
-            id: contentStack
+            id: viewStack
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: window.activeViewIndex
+            currentIndex: activeViewIndex
 
-            EmployeesView { Layout.fillWidth: true; Layout.fillHeight: true }
-            CompanyView { Layout.fillWidth: true; Layout.fillHeight: true }
-            CategoriesView { Layout.fillWidth: true; Layout.fillHeight: true }
-            SchemasView { Layout.fillWidth: true; Layout.fillHeight: true }
-            GlobalVarsView { Layout.fillWidth: true; Layout.fillHeight: true }
-            CustomFunctionsView { Layout.fillWidth: true; Layout.fillHeight: true }
-            ReceiptStructureView { Layout.fillWidth: true; Layout.fillHeight: true }
-            PreviewView { Layout.fillWidth: true; Layout.fillHeight: true }
-            ReceiptHistoryView { Layout.fillWidth: true; Layout.fillHeight: true }
+            EmployeesView         { Layout.fillWidth: true; Layout.fillHeight: true }
+            CompanyView           { Layout.fillWidth: true; Layout.fillHeight: true }
+            CategoriesView        { Layout.fillWidth: true; Layout.fillHeight: true }
+            SchemasView           { Layout.fillWidth: true; Layout.fillHeight: true }
+            GlobalVarsView        { Layout.fillWidth: true; Layout.fillHeight: true }
+            CustomFunctionsView   { Layout.fillWidth: true; Layout.fillHeight: true }
+            ReceiptStructureView  { Layout.fillWidth: true; Layout.fillHeight: true }
+            PreviewView           { Layout.fillWidth: true; Layout.fillHeight: true }
+            ReceiptHistoryView    { Layout.fillWidth: true; Layout.fillHeight: true }
         }
     }
 

@@ -768,12 +768,121 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
             }
             y += isTotal ? 65 : 55;
         }
-
-        if (y > writer.height() - 400) {
-            writer.newPage();
-            y = 50;
-        }
     }
+
+    // ── Vector Pie Chart PDF Rendering (Drawn once at the bottom) ──
+    struct ChartSlice {
+        QString label;
+        double value;
+        QColor color;
+    };
+        QList<ChartSlice> chartSlices;
+        double refTotal = 0.0;
+
+        static const QList<QColor> chartColors = {
+            QColor(116, 199, 236), QColor(166, 227, 161), QColor(250, 179, 135),
+            QColor(243, 139, 168), QColor(203, 166, 247), QColor(137, 180, 250),
+            QColor(249, 226, 175), QColor(148, 226, 213)
+        };
+
+        int colorIdx = 0;
+        for (const auto &cVar : conceptos) {
+            QVariantMap cMap = cVar.toMap();
+            bool inChart = cMap.value("en_grafico").toBool() || cMap.value("en_grafico").toInt() == 1;
+            bool isTotalRef = cMap.value("es_grafico_total").toBool() || cMap.value("es_grafico_total").toInt() == 1;
+            double mVal = std::abs(cMap.value("monto").toDouble());
+
+            if (isTotalRef && mVal > 0) {
+                refTotal = mVal;
+            }
+            if (inChart && mVal > 0) {
+                QString colHex = cMap.value("color_hex").toString();
+                QColor sColor = colHex.isEmpty() ? chartColors[colorIdx % chartColors.size()] : QColor(colHex);
+                colorIdx++;
+                chartSlices.append({cMap.value("descripcion").toString(), mVal, sColor});
+            }
+        }
+
+        if (!chartSlices.isEmpty()) {
+            int reqHeight = qRound(pageW * 0.42);
+            if (y > writer.height() - reqHeight) {
+                writer.newPage();
+                y = 50;
+            }
+
+            y += 20;
+            // Title Header Bar
+            int headerH = qMax(36, qRound(pageW * 0.035));
+            QRect chartHeaderRect(0, y, pageW, headerH);
+            painter.fillRect(chartHeaderRect, QColor(241, 245, 249));
+            painter.setPen(QPen(QColor(203, 213, 225), 1.5));
+            painter.drawRect(chartHeaderRect);
+
+            int titleFontSize = qMax(11, qRound(pageW * 0.015));
+            QFont titleFont("Helvetica", titleFontSize, QFont::Bold);
+            painter.setFont(titleFont);
+            painter.setPen(QPen(QColor(15, 23, 42)));
+            painter.drawText(chartHeaderRect.adjusted(16, 0, -16, 0), Qt::AlignLeft | Qt::AlignVCenter, "📊 DISTRIBUCIÓN Y ANÁLISIS DEL RECIBO");
+            y += headerH + 20;
+
+            double sumVal = 0;
+            for (const auto &sl : chartSlices) sumVal += sl.value;
+            double baseTotal = (refTotal > 0) ? refTotal : (sumVal > 0 ? sumVal : 1.0);
+
+            int pieDiameter = qRound(pageW * 0.36);
+            int pieX = qRound(pageW * 0.03);
+            int pieY = y;
+
+            // Draw pie slices vectorially
+            int startAngle = 90 * 16; // 12 o'clock in 1/16th degrees
+            for (const auto &sl : chartSlices) {
+                int spanAngle = -qRound((sl.value / baseTotal) * 360.0 * 16.0);
+                painter.setBrush(QBrush(sl.color));
+                painter.setPen(QPen(Qt::white, 2.0));
+                painter.drawPie(pieX, pieY, pieDiameter, pieDiameter, startAngle, spanAngle);
+                startAngle += spanAngle;
+            }
+
+            // Draw center donut circle for modern flat visual
+            int innerD = qRound(pieDiameter * 0.40);
+            int innerX = pieX + (pieDiameter - innerD) / 2;
+            int innerY = pieY + (pieDiameter - innerD) / 2;
+            painter.setBrush(QBrush(Qt::white));
+            painter.setPen(QPen(QColor(226, 232, 240), 1.5));
+            painter.drawEllipse(innerX, innerY, innerD, innerD);
+
+            // Draw legend column to the right
+            int legendX = pieX + pieDiameter + qRound(pageW * 0.04);
+            int legendY = pieY + qRound(pieDiameter * 0.04);
+            int legendW = pageW - legendX - 10;
+
+            int legendFontSize = qMax(10, qRound(pageW * 0.013));
+            QFont legendFont("Helvetica", legendFontSize, QFont::Bold);
+            painter.setFont(legendFont);
+
+            int boxSize = qMax(16, qRound(pageW * 0.020));
+            int lineH = qMax(28, qRound(pageW * 0.035));
+
+            for (const auto &sl : chartSlices) {
+                // Color box
+                QRect boxRect(legendX, legendY + (lineH - boxSize) / 2, boxSize, boxSize);
+                painter.fillRect(boxRect, sl.color);
+                painter.setPen(QPen(QColor(148, 163, 184), 1.5));
+                painter.drawRect(boxRect);
+
+                // Label & percentage
+                painter.setPen(QPen(QColor(15, 23, 42)));
+                double pct = (sl.value / baseTotal) * 100.0;
+                QString lineText = QString("%1:  %2  (%3%)")
+                                   .arg(sl.label)
+                                   .arg(fmtMoney(sl.value))
+                                   .arg(QString::number(pct, 'f', 1));
+                painter.drawText(QRect(legendX + boxSize + 14, legendY, legendW - boxSize - 14, lineH), Qt::AlignLeft | Qt::AlignVCenter, lineText);
+                legendY += lineH + qRound(pageW * 0.008);
+            }
+
+            y = std::max(pieY + pieDiameter + 40, legendY + 20);
+        }
 
     painter.end();
 

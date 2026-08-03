@@ -115,9 +115,8 @@ MasterDetailView {
                 employeeDialog.setFieldVisible("categoriaId", t === "jornal")
             }
             onDeleteRequested: function(id) {
-                AppController.employeeModel.removeEmployee(id)
-                if (AppController.employeeModel.count > 0) root.selectEmployeeAtRow(0)
-                else { root.selectedEmployeeId = -1; root.selectedEmployeeData = null }
+                confirmDeleteEmployeeDialog.targetId = id
+                confirmDeleteEmployeeDialog.open()
             }
             onDuplicateRequested: function(data) {
                 AppController.employeeModel.duplicateEmployee(data.employeeId)
@@ -235,12 +234,7 @@ MasterDetailView {
                 variant: "danger"
                 text: "🗑️ Eliminar Quincena"
                 visible: AppController.currentRole === "admin" && cbQuincenas.count > 1 && cbQuincenas.currentText !== "Q1"
-                onClicked: {
-                    if (cbQuincenas.currentText && cbQuincenas.currentText !== "") {
-                        AppController.removeQuincena(root.selectedEmployeeId, cbQuincenas.currentText)
-                        root.refreshQuincenasList()
-                    }
-                }
+                onClicked: confirmDeleteQuincenaDialog.open()
             }
         }
 
@@ -338,6 +332,36 @@ MasterDetailView {
                     AppController.employeeVarsModel.employeeId = targetId
                     AppController.employeeVarsModel.refresh()
                 }
+            }
+        }
+    }
+
+    ConfirmDialog {
+        id: confirmDeleteEmployeeDialog
+        property int targetId: -1
+        title: "🗑️ Eliminar Empleado"
+        message: "¿Está seguro de eliminar a este empleado y toda su información registrada?"
+        confirmButtonText: "Sí, Eliminar"
+        confirmButtonVariant: "danger"
+        onConfirmed: {
+            if (targetId > 0) {
+                AppController.employeeModel.removeEmployee(targetId)
+                if (AppController.employeeModel.count > 0) root.selectEmployeeAtRow(0)
+                else { root.selectedEmployeeId = -1; root.selectedEmployeeData = null }
+            }
+        }
+    }
+
+    ConfirmDialog {
+        id: confirmDeleteQuincenaDialog
+        title: "🗑️ Eliminar Quincena"
+        message: "¿Está seguro de eliminar los datos guardados para la quincena " + (cbQuincenas.currentText || "") + "?"
+        confirmButtonText: "Sí, Eliminar Quincena"
+        confirmButtonVariant: "danger"
+        onConfirmed: {
+            if (cbQuincenas.currentText && cbQuincenas.currentText !== "") {
+                AppController.removeQuincena(root.selectedEmployeeId, cbQuincenas.currentText)
+                root.refreshQuincenasList()
             }
         }
     }

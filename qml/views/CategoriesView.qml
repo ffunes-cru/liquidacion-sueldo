@@ -31,7 +31,8 @@ CrudView {
                 categoryDialog.openEdit(data)
             }
             onDeleteRequested: function(id) {
-                AppController.categoryModel.removeCategory(id)
+                confirmDeleteCatDialog.targetId = id
+                confirmDeleteCatDialog.open()
             }
         }
     }
@@ -53,6 +54,18 @@ CrudView {
                 values.name.trim(),
                 val
             )
+        }
+    }
+
+    ConfirmDialog {
+        id: confirmDeleteCatDialog
+        property int targetId: -1
+        title: "🗑️ Eliminar Categoría Jornalera"
+        message: "¿Está seguro de eliminar esta categoría jornalera?"
+        confirmButtonText: "Sí, Eliminar"
+        confirmButtonVariant: "danger"
+        onConfirmed: {
+            if (targetId > 0) AppController.categoryModel.removeCategory(targetId)
         }
     }
 }

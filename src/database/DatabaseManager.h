@@ -92,7 +92,8 @@ public:
                           const QString &formulaMonto, int orden, const QString &esquemaCodigo,
                           const QString &tipoCalculo, double simplePorcentaje,
                           const QString &simpleBaseVariable, double simpleMontoFijo,
-                          bool visibleRecibo, const QString &colorHex = "");
+                          bool visibleRecibo, const QString &colorHex = "",
+                          bool enGrafico = false, bool esGraficoTotal = false);
     bool         updateCellColor(int id, const QString &colorHex);
     bool         deleteCell(int id);
 

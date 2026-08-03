@@ -93,12 +93,7 @@ MasterDetailView {
             variant: "danger"
             text: "🗑️ Eliminar"
             enabled: root.selectedSchemaCode !== "" && root.selectedSchemaCode !== "MENSUAL"
-            onClicked: {
-                if (root.selectedSchemaCode !== "") {
-                    AppController.schemaModel.removeSchema(root.selectedSchemaCode)
-                    root.clearForm()
-                }
-            }
+            onClicked: confirmDeleteSchemaDialog.open()
         }
     }
 
@@ -312,6 +307,20 @@ MasterDetailView {
                     values.default_value.trim() || "0"
                 )
                 root.refreshSchemaFields()
+            }
+        }
+    }
+
+    ConfirmDialog {
+        id: confirmDeleteSchemaDialog
+        title: "🗑️ Eliminar Esquema de Cálculo"
+        message: "¿Está seguro de eliminar el esquema '" + root.selectedSchemaCode + "' y toda su configuración de celdas?"
+        confirmButtonText: "Sí, Eliminar Esquema"
+        confirmButtonVariant: "danger"
+        onConfirmed: {
+            if (root.selectedSchemaCode !== "") {
+                AppController.schemaModel.removeSchema(root.selectedSchemaCode)
+                root.clearForm()
             }
         }
     }

@@ -167,6 +167,9 @@ void DatabaseManager::createTables()
             simple_base_variable TEXT,
             simple_monto_fijo    REAL,
             visible_recibo       INTEGER DEFAULT 1,
+            color_hex            TEXT DEFAULT '',
+            en_grafico           INTEGER DEFAULT 0,
+            es_grafico_total     INTEGER DEFAULT 0,
             UNIQUE(esquema_codigo, codigo_variable)
         )
     )");
@@ -242,6 +245,8 @@ void DatabaseManager::runMigrations()
 {
     QSqlQuery q(m_db);
     q.exec("ALTER TABLE celdas_calculo ADD COLUMN color_hex TEXT DEFAULT ''");
+    q.exec("ALTER TABLE celdas_calculo ADD COLUMN en_grafico INTEGER DEFAULT 0");
+    q.exec("ALTER TABLE celdas_calculo ADD COLUMN es_grafico_total INTEGER DEFAULT 0");
 }
 
 QVariantList DatabaseManager::listSchemas() const
@@ -942,6 +947,8 @@ QVariantList DatabaseManager::listCellsBySchema(const QString &esquemaCodigo) co
             {"simple_monto_fijo", q.value("simple_monto_fijo")},
             {"visible_recibo", q.value("visible_recibo")},
             {"color_hex", q.value("color_hex")},
+            {"en_grafico", q.value("en_grafico")},
+            {"es_grafico_total", q.value("es_grafico_total")},
         });
     }
     return result;
@@ -976,6 +983,8 @@ QVariantList DatabaseManager::listAllCells() const
             {"simple_monto_fijo", q.value("simple_monto_fijo")},
             {"visible_recibo", q.value("visible_recibo")},
             {"color_hex", q.value("color_hex")},
+            {"en_grafico", q.value("en_grafico")},
+            {"es_grafico_total", q.value("es_grafico_total")},
         });
     }
     return result;
@@ -987,9 +996,19 @@ int DatabaseManager::saveCell(int id, const QString &seccionCodigo, const QStrin
                                const QString &formulaMonto, int orden, const QString &esquemaCodigo,
                                const QString &tipoCalculo, double simplePorcentaje,
                                const QString &simpleBaseVariable, double simpleMontoFijo,
-                               bool visibleRecibo, const QString &colorHex)
+                               bool visibleRecibo, const QString &colorHex,
+                               bool enGrafico, bool esGraficoTotal)
 {
     qInfo() << "[DatabaseManager] Guardando celda de cálculo:" << codigoVariable << "Esquema:" << esquemaCodigo;
+
+    // Enforce unique total per schema: if esGraficoTotal is true, reset any previous total for this schema
+    if (esGraficoTotal) {
+        QSqlQuery resetTotal(m_db);
+        resetTotal.prepare("UPDATE celdas_calculo SET es_grafico_total = 0 WHERE esquema_codigo = ?");
+        resetTotal.addBindValue(esquemaCodigo);
+        resetTotal.exec();
+    }
+
     QSqlQuery q(m_db);
     if (id > 0) {
         q.prepare(R"(
@@ -997,7 +1016,8 @@ int DatabaseManager::saveCell(int id, const QString &seccionCodigo, const QStrin
             SET seccion_codigo=?, codigo_variable=?, descripcion=?, condicion=?,
                 formula_unidad=?, formula_base=?, formula_monto=?, orden=?,
                 esquema_codigo=?, tipo_calculo=?, simple_porcentaje=?,
-                simple_base_variable=?, simple_monto_fijo=?, visible_recibo=?, color_hex=?
+                simple_base_variable=?, simple_monto_fijo=?, visible_recibo=?, color_hex=?,
+                en_grafico=?, es_grafico_total=?
             WHERE id=?
         )");
         q.addBindValue(seccionCodigo);
@@ -1015,6 +1035,8 @@ int DatabaseManager::saveCell(int id, const QString &seccionCodigo, const QStrin
         q.addBindValue(simpleMontoFijo);
         q.addBindValue(visibleRecibo ? 1 : 0);
         q.addBindValue(colorHex);
+        q.addBindValue(enGrafico ? 1 : 0);
+        q.addBindValue(esGraficoTotal ? 1 : 0);
         q.addBindValue(id);
         q.exec();
         return id;
@@ -1023,8 +1045,9 @@ int DatabaseManager::saveCell(int id, const QString &seccionCodigo, const QStrin
             INSERT INTO celdas_calculo
             (seccion_codigo, codigo_variable, descripcion, condicion,
              formula_unidad, formula_base, formula_monto, orden, esquema_codigo,
-             tipo_calculo, simple_porcentaje, simple_base_variable, simple_monto_fijo, visible_recibo, color_hex)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             tipo_calculo, simple_porcentaje, simple_base_variable, simple_monto_fijo, visible_recibo, color_hex,
+             en_grafico, es_grafico_total)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         )");
         q.addBindValue(seccionCodigo);
         q.addBindValue(codigoVariable);
@@ -1041,6 +1064,8 @@ int DatabaseManager::saveCell(int id, const QString &seccionCodigo, const QStrin
         q.addBindValue(simpleMontoFijo);
         q.addBindValue(visibleRecibo ? 1 : 0);
         q.addBindValue(colorHex);
+        q.addBindValue(enGrafico ? 1 : 0);
+        q.addBindValue(esGraficoTotal ? 1 : 0);
         q.exec();
         return q.lastInsertId().toInt();
     }

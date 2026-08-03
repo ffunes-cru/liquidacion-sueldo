@@ -34,6 +34,34 @@ AppController::AppController(DatabaseManager *db, QObject *parent)
 
 AppController::~AppController() {}
 
+void AppController::startWindowMove(QQuickWindow *window) {
+  if (window) {
+    window->startSystemMove();
+  }
+}
+
+void AppController::minimizeWindow(QQuickWindow *window) {
+  if (window) {
+    window->showMinimized();
+  }
+}
+
+void AppController::toggleMaximizeWindow(QQuickWindow *window) {
+  if (window) {
+    if (window->visibility() == QWindow::Maximized) {
+      window->showNormal();
+    } else {
+      window->showMaximized();
+    }
+  }
+}
+
+void AppController::closeWindow(QQuickWindow *window) {
+  if (window) {
+    window->close();
+  }
+}
+
 QString AppController::currentRole() const { return m_currentRole; }
 
 void AppController::setCurrentRole(const QString &role) {
