@@ -13,6 +13,7 @@ AppDialog {
     standardButtons: Dialog.Close
 
     property string statusMsg: ""
+    signal aboutRequested()
 
     contentItem: ColumnLayout {
         spacing: 12
@@ -95,6 +96,25 @@ AppDialog {
             onClicked: {
                 var bp = AppController.createBackup()
                 root.statusMsg = bp !== "" ? "Backup creado: " + bp : "Error al crear backup"
+            }
+        }
+
+        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderColor }
+
+        // ── Acerca de & Licencias ──────────────────────────────
+        Label {
+            text: "Licencias y Créditos"
+            font.bold: true
+            font.pixelSize: 15
+            color: Theme.accentColor
+        }
+
+        Button {
+            Layout.fillWidth: true
+            text: "ℹ️ Acerca del Sistema y Licencia GPLv3..."
+            onClicked: {
+                root.close()
+                root.aboutRequested()
             }
         }
 

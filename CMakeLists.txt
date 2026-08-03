@@ -120,6 +120,7 @@ set(QML_FILES
     qml/dialogs/SchemaConfigDialog.qml
     qml/dialogs/SettingsDialog.qml
     qml/dialogs/CalculationErrorDialog.qml
+    qml/dialogs/AboutDialog.qml
 )
 
 qt_add_executable(${PROJECT_NAME}
@@ -137,6 +138,13 @@ set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "liquidacion_sueldo
 if(WIN32 AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
+
+# Copy LICENSE next to executable post-build for portable deployment
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/LICENSE"
+)
 
 qt_add_qml_module(${PROJECT_NAME}
     URI LiquidacionSueldos
@@ -160,7 +168,25 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 # Install
+include(GNUInstallDirs)
+
 install(TARGETS ${PROJECT_NAME}
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/${PROJECT_NAME}
+)
+
+# ── Packaging & Installer Configuration (CPack) ───────────────
+set(CPACK_PACKAGE_NAME "LiquidacionSueldos")
+set(CPACK_PACKAGE_VENDOR "LiquidacionSueldos Team")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Sistema de Liquidación de Sueldos con Motor de Fórmulas Dinámico")
+set(CPACK_PACKAGE_VERSION_MAJOR 1)
+set(CPACK_PACKAGE_VERSION_MINOR 0)
+set(CPACK_PACKAGE_VERSION_PATCH 0)
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+
+include(CPack)
+

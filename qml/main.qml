@@ -149,6 +149,11 @@ ApplicationWindow {
     // ── Dialogs ─────────────────────────────────────────────────
     SettingsDialog {
         id: settingsDialog
+        onAboutRequested: aboutDialog.open()
+    }
+
+    AboutDialog {
+        id: aboutDialog
     }
 
     CalculationErrorDialog {
