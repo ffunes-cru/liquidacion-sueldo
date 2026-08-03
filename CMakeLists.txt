@@ -53,6 +53,8 @@ set(SOURCES
     src/models/ChartCellModel.cpp
     src/models/ReceiptHistoryModel.h
     src/models/ReceiptHistoryModel.cpp
+    src/models/CustomFunctionModel.h
+    src/models/CustomFunctionModel.cpp
 
     # Engine
     src/engine/FormulaEngine.h
@@ -81,6 +83,7 @@ set(QML_FILES
     qml/views/CategoriesView.qml
     qml/views/SchemasView.qml
     qml/views/GlobalVarsView.qml
+    qml/views/CustomFunctionsView.qml
     qml/views/ReceiptStructureView.qml
     qml/views/PreviewView.qml
     qml/views/ReceiptHistoryView.qml

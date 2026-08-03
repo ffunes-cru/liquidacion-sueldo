@@ -88,6 +88,15 @@ Item {
                             id: txtFechaCalculo
                             text: Qt.formatDate(new Date(), "yyyy-MM-dd")
                             Layout.fillWidth: true
+                            onTextChanged: {
+                                var parts = text.split("-")
+                                if (parts.length === 3) {
+                                    var y = parseInt(parts[0])
+                                    var m = parseInt(parts[1])
+                                    if (m >= 1 && m <= 12) sbMes.value = m
+                                    if (y >= 2000 && y <= 2100) sbAnio.value = y
+                                }
+                            }
                         }
 
                         Label { text: "Mes Histórico:"; color: Theme.textColor; font.pixelSize: 13 }

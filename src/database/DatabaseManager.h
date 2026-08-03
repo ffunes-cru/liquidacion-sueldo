@@ -108,6 +108,16 @@ public:
                                      const QString &description);
     bool         deleteGlobalVariable(int id);
 
+    // ── Custom Functions (custom_functions) ───────────────────────
+    QVariantList listCustomFunctions(const QString &esquemaCodigo = "") const;
+    int          saveCustomFunction(int id, const QString &name, const QString &params,
+                                     const QString &body, const QString &description,
+                                     const QString &esquemaCodigo = "");
+    bool         deleteCustomFunction(int id);
+
+    // ── Validation ────────────────────────────────────────────────
+    static QString validateVariableCode(const QString &code);
+
     // ── Company (empresa) ───────────────────────────────────────────
     QVariantMap  getCompany() const;
     bool         saveCompany(const QString &razonSocial, const QString &direccion,

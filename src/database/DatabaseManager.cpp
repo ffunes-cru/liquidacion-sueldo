@@ -225,6 +225,17 @@ void DatabaseManager::createTables()
             valor TEXT NOT NULL
         )
     )");
+
+    q.exec(R"(
+        CREATE TABLE IF NOT EXISTS custom_functions (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT UNIQUE NOT NULL,
+            params          TEXT NOT NULL DEFAULT '',
+            body            TEXT NOT NULL,
+            description     TEXT DEFAULT '',
+            esquema_codigo  TEXT DEFAULT ''
+        )
+    )");
 }
 
 void DatabaseManager::runMigrations()
@@ -612,6 +623,18 @@ int DatabaseManager::addSchemaField(const QString &esquemaCodigo, const QString 
     syncEmployeeFieldsForSchema(esquemaCodigo);
 
     return fieldId;
+}
+
+QString DatabaseManager::validateVariableCode(const QString &code)
+{
+    if (code.trimmed().isEmpty()) {
+        return "El código de variable no puede estar vacío.";
+    }
+    static const QRegularExpression validIdent(R"(^[A-Za-z_][A-Za-z0-9_]*$)");
+    if (!validIdent.match(code.trimmed()).hasMatch()) {
+        return "El código '" + code + "' no es válido. Solo se permiten letras, números y guión bajo (_). No puede contener espacios ni caracteres especiales.";
+    }
+    return "";
 }
 
 bool DatabaseManager::removeSchemaField(int fieldId)
@@ -1114,6 +1137,13 @@ QVariantList DatabaseManager::listGlobalVariables() const
 int DatabaseManager::saveGlobalVariable(int id, const QString &code, const QString &value,
                                           const QString &description)
 {
+    // Validate code
+    QString validationError = validateVariableCode(code);
+    if (!validationError.isEmpty()) {
+        qWarning() << "[DatabaseManager] Código de variable global inválido:" << code << "-" << validationError;
+        return -1;
+    }
+
     qInfo() << "[DatabaseManager] Guardando variable global:" << code << "=" << value;
     QSqlQuery q(m_db);
     if (id > 0) {
@@ -1139,6 +1169,82 @@ bool DatabaseManager::deleteGlobalVariable(int id)
     qInfo() << "[DatabaseManager] Eliminando variable global ID:" << id;
     QSqlQuery q(m_db);
     q.prepare("DELETE FROM variables_globales WHERE id = ?");
+    q.addBindValue(id);
+    return q.exec();
+}
+
+// ── Custom Functions CRUD ─────────────────────────────────────
+
+QVariantList DatabaseManager::listCustomFunctions(const QString &esquemaCodigo) const
+{
+    QVariantList result;
+    QSqlQuery q(m_db);
+    if (esquemaCodigo.isEmpty()) {
+        q.exec("SELECT * FROM custom_functions ORDER BY name");
+    } else {
+        q.prepare("SELECT * FROM custom_functions WHERE esquema_codigo = '' OR esquema_codigo = ? ORDER BY name");
+        q.addBindValue(esquemaCodigo);
+        q.exec();
+    }
+    while (q.next()) {
+        result.append(QVariantMap{
+            {"id", q.value("id")},
+            {"name", q.value("name")},
+            {"params", q.value("params")},
+            {"body", q.value("body")},
+            {"description", q.value("description")},
+            {"esquema_codigo", q.value("esquema_codigo")},
+        });
+    }
+    return result;
+}
+
+int DatabaseManager::saveCustomFunction(int id, const QString &name, const QString &params,
+                                         const QString &body, const QString &description,
+                                         const QString &esquemaCodigo)
+{
+    // Validate name
+    QString validationError = validateVariableCode(name);
+    if (!validationError.isEmpty()) {
+        qWarning() << "[DatabaseManager] Nombre de función inválido:" << name << "-" << validationError;
+        return -1;
+    }
+
+    qInfo() << "[DatabaseManager] Guardando función custom:" << name;
+    QSqlQuery q(m_db);
+    if (id > 0) {
+        q.prepare("UPDATE custom_functions SET name=?, params=?, body=?, description=?, esquema_codigo=? WHERE id=?");
+        q.addBindValue(name);
+        q.addBindValue(params);
+        q.addBindValue(body);
+        q.addBindValue(description);
+        q.addBindValue(esquemaCodigo);
+        q.addBindValue(id);
+        if (!q.exec()) {
+            qWarning() << "[DatabaseManager] Error al actualizar función:" << q.lastError().text();
+            return -1;
+        }
+        return id;
+    } else {
+        q.prepare("INSERT INTO custom_functions (name, params, body, description, esquema_codigo) VALUES (?, ?, ?, ?, ?)");
+        q.addBindValue(name);
+        q.addBindValue(params);
+        q.addBindValue(body);
+        q.addBindValue(description);
+        q.addBindValue(esquemaCodigo);
+        if (!q.exec()) {
+            qWarning() << "[DatabaseManager] Error al insertar función:" << q.lastError().text();
+            return -1;
+        }
+        return q.lastInsertId().toInt();
+    }
+}
+
+bool DatabaseManager::deleteCustomFunction(int id)
+{
+    qInfo() << "[DatabaseManager] Eliminando función custom ID:" << id;
+    QSqlQuery q(m_db);
+    q.prepare("DELETE FROM custom_functions WHERE id = ?");
     q.addBindValue(id);
     return q.exec();
 }

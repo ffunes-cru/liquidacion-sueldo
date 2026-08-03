@@ -24,9 +24,10 @@ ApplicationWindow {
         { label: "Categorías",        adminOnly: true,  viewIndex: 2 },
         { label: "Esquemas",          adminOnly: true,  viewIndex: 3 },
         { label: "Campos Globales",   adminOnly: false, viewIndex: 4 },
-        { label: "Estructura Recibo", adminOnly: true,  viewIndex: 5 },
-        { label: "Vista Previa",      adminOnly: false, viewIndex: 6 },
-        { label: "Historial",         adminOnly: false, viewIndex: 7 }
+        { label: "Funciones JS",      adminOnly: true,  viewIndex: 5 },
+        { label: "Estructura Recibo", adminOnly: true,  viewIndex: 6 },
+        { label: "Vista Previa",      adminOnly: false, viewIndex: 7 },
+        { label: "Historial",         adminOnly: false, viewIndex: 8 }
     ]
 
     // Filtered list of visible tab indices
@@ -138,6 +139,7 @@ ApplicationWindow {
             CategoriesView { Layout.fillWidth: true; Layout.fillHeight: true }
             SchemasView { Layout.fillWidth: true; Layout.fillHeight: true }
             GlobalVarsView { Layout.fillWidth: true; Layout.fillHeight: true }
+            CustomFunctionsView { Layout.fillWidth: true; Layout.fillHeight: true }
             ReceiptStructureView { Layout.fillWidth: true; Layout.fillHeight: true }
             PreviewView { Layout.fillWidth: true; Layout.fillHeight: true }
             ReceiptHistoryView { Layout.fillWidth: true; Layout.fillHeight: true }

@@ -127,6 +127,7 @@ AppDialog {
         else if (data.employeeId !== undefined && data.employeeId > 0) itemId = data.employeeId
         else if (data.catId !== undefined && data.catId > 0) itemId = data.catId
         else if (data.varId !== undefined && data.varId > 0) itemId = data.varId
+        else if (data.funcId !== undefined && data.funcId > 0) itemId = data.funcId
         else if (data.cellId !== undefined && data.cellId > 0) itemId = data.cellId
         else if (data.receiptId !== undefined && data.receiptId > 0) itemId = data.receiptId
         else itemId = -1
@@ -165,10 +166,10 @@ AppDialog {
             }
 
             // Slot for extra custom content below the form
-            Item {
+            ColumnLayout {
                 id: extraContentContainer
                 Layout.fillWidth: true
-                implicitHeight: childrenRect.height
+                spacing: 8
                 visible: children.length > 0
             }
         }

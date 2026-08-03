@@ -2,9 +2,9 @@
 #define LIQUIDATIONENGINE_H
 
 #include <QObject>
-#include <QVariantMap>
-#include <QVariantList>
 #include <QString>
+#include <QVariantList>
+#include <QVariantMap>
 
 class DatabaseManager;
 class FormulaEngine;
@@ -22,46 +22,49 @@ class QuincenaAggregator;
  * 6. Evaluate chart cells
  * 7. Return complete result
  */
-class LiquidationEngine : public QObject
-{
-    Q_OBJECT
+class LiquidationEngine : public QObject {
+  Q_OBJECT
 
 public:
-    explicit LiquidationEngine(DatabaseManager *db, QObject *parent = nullptr);
+  explicit LiquidationEngine(DatabaseManager *db, QObject *parent = nullptr);
 
-    /**
-     * @brief Process the complete liquidation for an employee.
-     * @param employeeId The employee ID
-     * @param quincenaSel Selected quincena (for jornaleros), or empty for monthly
-     * @param fechaCalculo Calculation date (YYYY-MM-DD), defaults to today
-     * @return QVariantMap with keys:
-     *   - "empleado": employee data
-     *   - "resultados_por_seccion": { sectionCode: [{codigo, descripcion, unidad, base, monto, visible_recibo}] }
-     *   - "resultados_grafico": [{etiqueta, valor}]
-     *   - "contexto_final": all computed variables
-     *   - "errores": [error strings]
-     *   - "quincena_sel": selected quincena
-     */
-    Q_INVOKABLE QVariantMap processLiquidation(int employeeId,
-                                                const QString &quincenaSel = "",
-                                                const QString &fechaCalculo = "");
+  /**
+   * @brief Process the complete liquidation for an employee.
+   * @param employeeId The employee ID
+   * @param quincenaSel Selected quincena (for jornaleros), or empty for monthly
+   * @param fechaCalculo Calculation date (YYYY-MM-DD), defaults to today
+   * @return QVariantMap with keys:
+   *   - "empleado": employee data
+   *   - "resultados_por_seccion": { sectionCode: [{codigo, descripcion, unidad,
+   * base, monto, visible_recibo}] }
+   *   - "resultados_grafico": [{etiqueta, valor}]
+   *   - "contexto_final": all computed variables
+   *   - "errores": [error strings]
+   *   - "quincena_sel": selected quincena
+   */
+  Q_INVOKABLE QVariantMap processLiquidation(int employeeId,
+                                             const QString &quincenaSel = "",
+                                             const QString &fechaCalculo = "");
 
-    /**
-     * @brief Persist the current liquidation result as a receipt snapshot.
-     */
-    Q_INVOKABLE int persistLiquidation(const QVariantMap &result, int mes, int anio, const QString &periodo);
+  /**
+   * @brief Persist the current liquidation result as a receipt snapshot.
+   */
+  Q_INVOKABLE int persistLiquidation(const QVariantMap &result, int mes,
+                                     int anio, const QString &periodo);
 
 private:
-    int calculateSeniorityYears(const QString &fechaIngreso, const QString &fechaCalculo) const;
+  int calculateSeniorityYears(const QString &fechaIngreso,
+                              const QString &fechaCalculo) const;
 
-    /// Build the evaluation context for a specific quincena of a jornalero
-    QVariantMap buildQuincenaContext(int employeeId, const QString &quincenaCode,
-                                     const QVariantMap &globalFlat,
-                                     const QMap<QString, QVariantMap> &globalNamespaces,
-                                     const QVariantMap &baseContext,
-                                     const QVariantList &cells);
+  /// Build the evaluation context for a specific quincena of a jornalero
+  QVariantMap buildQuincenaContext(int employeeId, const QString &quincenaCode,
+                                   const QVariantMap &globalFlat,
+                                   const QMap<QString, QVariantMap> &globalNamespaces,
+                                   const QVariantMap &baseContext,
+                                   const QVariantList &cells,
+                                   const QVariantMap &baseEnvObj = QVariantMap());
 
-    DatabaseManager *m_db;
+  DatabaseManager *m_db;
 };
 
 #endif // LIQUIDATIONENGINE_H

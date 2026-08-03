@@ -1,12 +1,13 @@
 #ifndef FORMULAENGINE_H
 #define FORMULAENGINE_H
 
-#include <QObject>
 #include <QJSEngine>
 #include <QJSValue>
-#include <QVariantMap>
-#include <QString>
+#include <QObject>
 #include <QRegularExpression>
+#include <QString>
+#include <QVariantList>
+#include <QVariantMap>
 
 /**
  * @brief Wrapper around QJSEngine for evaluating payroll formulas safely.
@@ -18,42 +19,47 @@
  * - Historical functions: sumatoria_mes, maximo_semestre, etc.
  * - Dynamic variable resolution via context
  */
-class FormulaEngine : public QObject
-{
-    Q_OBJECT
+class FormulaEngine : public QObject {
+  Q_OBJECT
 
 public:
-    explicit FormulaEngine(QObject *parent = nullptr);
-    ~FormulaEngine();
+  explicit FormulaEngine(QObject *parent = nullptr);
+  ~FormulaEngine();
 
-    /// Set the evaluation context (variable name -> value)
-    void setContext(const QVariantMap &context);
+  /// Set the evaluation context (variable name -> value)
+  void setContext(const QVariantMap &context);
 
-    /// Update a single variable in the current context
-    void setVariable(const QString &name, const QVariant &value);
+  /// Update a single variable in the current context
+  void setVariable(const QString &name, const QVariant &value);
 
-    /// Get a variable from the current context
-    QVariant getVariable(const QString &name) const;
+  /// Get a variable from the current context
+  QVariant getVariable(const QString &name) const;
 
-    /// Register a callable JS function in the engine
-    void registerFunction(const QString &name, QJSValue callable);
+  /// Register a callable JS function in the engine
+  void registerFunction(const QString &name, QJSValue callable);
 
-    /// Evaluate a formula string and return the result
-    QVariant evaluate(const QString &formula, QString *error = nullptr);
+  /// Evaluate a formula string and return the result
+  QVariant evaluate(const QString &formula, QString *error = nullptr);
 
-    /// Evaluate a boolean condition
-    bool evaluateCondition(const QString &condition, QString *error = nullptr);
+  /// Register custom user-defined functions from DB
+  void registerCustomFunctions(const QVariantList &functions);
 
-    /// Clear all variables and reset the engine
-    void reset();
+  /// Set the 'env' global object for user functions
+  void setEnvObject(const QVariantMap &envData);
+
+  /// Evaluate a boolean condition
+  bool evaluateCondition(const QString &condition, QString *error = nullptr);
+
+  /// Clear all variables and reset the engine
+  void reset();
 
 private:
-    void setupBuiltinFunctions();
-    void syncContextToEngine();
+  void setupBuiltinFunctions();
+  void syncContextToEngine();
 
-    QJSEngine *m_engine = nullptr;
-    QVariantMap m_context;
-    bool m_contextDirty = true;
+  QJSEngine *m_engine = nullptr;
+  QVariantMap m_context;
+  bool m_contextDirty = true;
 };
 
 #endif // FORMULAENGINE_H

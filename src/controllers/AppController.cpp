@@ -27,6 +27,7 @@ AppController::AppController(DatabaseManager *db, QObject *parent)
   m_cellModel = new CellModel(m_db, this);
   m_chartCellModel = new ChartCellModel(m_db, this);
   m_receiptHistoryModel = new ReceiptHistoryModel(m_db, this);
+  m_customFunctionModel = new CustomFunctionModel(m_db, this);
   qInfo()
       << "[AppController] Controlador y modelos inicializados correctamente.";
 }
@@ -60,9 +61,7 @@ EmployeeVarsModel *AppController::employeeVarsModel() const {
 GlobalVarsModel *AppController::globalVarsModel() const {
   return m_globalVarsModel;
 }
-SchemaModel *AppController::schemaModel() const {
-  return m_schemaModel;
-}
+SchemaModel *AppController::schemaModel() const { return m_schemaModel; }
 CategoryModel *AppController::categoryModel() const { return m_categoryModel; }
 CellModel *AppController::cellModel() const { return m_cellModel; }
 ChartCellModel *AppController::chartCellModel() const {
@@ -71,17 +70,24 @@ ChartCellModel *AppController::chartCellModel() const {
 ReceiptHistoryModel *AppController::receiptHistoryModel() const {
   return m_receiptHistoryModel;
 }
+CustomFunctionModel *AppController::customFunctionModel() const {
+  return m_customFunctionModel;
+}
 
 QVariantMap AppController::processLiquidation(int employeeId,
                                               const QString &quincenaSel,
                                               const QString &fechaCalculo) {
-  qInfo() << "[AppController] Ejecutando procesamiento de liquidación para Empleado ID:"
+  qInfo() << "[AppController] Ejecutando procesamiento de liquidación para "
+             "Empleado ID:"
           << employeeId << "Quincena:" << quincenaSel;
-  QVariantMap result = m_engine->processLiquidation(employeeId, quincenaSel, fechaCalculo);
+  QVariantMap result =
+      m_engine->processLiquidation(employeeId, quincenaSel, fechaCalculo);
   QVariantList errores = result.value("errores").toList();
   if (!errores.isEmpty()) {
-      qWarning() << "[AppController] Se detectaron errores en la liquidación para empleado ID:" << employeeId << ":" << errores;
-      emit calculationErrorOccurred(errores);
+    qWarning() << "[AppController] Se detectaron errores en la liquidación "
+                  "para empleado ID:"
+               << employeeId << ":" << errores;
+    emit calculationErrorOccurred(errores);
   }
   return result;
 }
@@ -140,18 +146,23 @@ int AppController::addSchemaField(const QString &esquemaCodigo,
   return id;
 }
 
-bool AppController::renameSchemaField(int fieldId, const QString &newCode, const QString &newLabel) {
-  qInfo() << "[AppController] Renombrando campo de esquema ID:" << fieldId << "->" << newCode;
+bool AppController::renameSchemaField(int fieldId, const QString &newCode,
+                                      const QString &newLabel) {
+  qInfo() << "[AppController] Renombrando campo de esquema ID:" << fieldId
+          << "->" << newCode;
   bool ok = m_db->renameSchemaField(fieldId, newCode, newLabel);
   m_employeeVarsModel->refresh();
   return ok;
 }
 
-bool AppController::updateSchemaField(int fieldId, const QString &fieldCode, const QString &fieldLabel, const QString &fieldType, const QString &defaultValue)
-{
-    bool ok = m_db->updateSchemaField(fieldId, fieldCode, fieldLabel, fieldType, defaultValue);
-    m_employeeVarsModel->refresh();
-    return ok;
+bool AppController::updateSchemaField(int fieldId, const QString &fieldCode,
+                                      const QString &fieldLabel,
+                                      const QString &fieldType,
+                                      const QString &defaultValue) {
+  bool ok = m_db->updateSchemaField(fieldId, fieldCode, fieldLabel, fieldType,
+                                    defaultValue);
+  m_employeeVarsModel->refresh();
+  return ok;
 }
 
 bool AppController::removeSchemaField(int fieldId) {
@@ -186,6 +197,14 @@ QVariantList AppController::listSchemas() { return m_db->listSchemas(); }
 
 QVariantList AppController::listCategories() { return m_db->listCategories(); }
 
+QVariantList AppController::listCustomFunctions() {
+  return m_db->listCustomFunctions();
+}
+
+QString AppController::validateVariableCode(const QString &code) {
+  return DatabaseManager::validateVariableCode(code);
+}
+
 QVariantList
 AppController::getAvailableFormulaVariables(const QString &esquemaCodigo) {
   QVariantList list;
@@ -206,17 +225,27 @@ AppController::getAvailableFormulaVariables(const QString &esquemaCodigo) {
   addVar("abs(val)", "Retorna el valor absoluto", "Función Motor");
 
   // Quincena functions
-  addVar("Q1(\"var\")", "Valor de una variable en la Quincena 1", "Agregación Quincenal");
-  addVar("Q2(\"var\")", "Valor de una variable en la Quincena 2", "Agregación Quincenal");
-  addVar("Q_sum(\"var\")", "Suma de una variable en las quincenas del mes", "Agregación Quincenal");
-  addVar("Q_avg(\"var\")", "Promedio de una variable en las quincenas del mes", "Agregación Quincenal");
-  addVar("Q_max(\"var\")", "Valor máximo de una variable en las quincenas del mes", "Agregación Quincenal");
+  addVar("Q1(\"var\")", "Valor de una variable en la Quincena 1",
+         "Agregación Quincenal");
+  addVar("Q2(\"var\")", "Valor de una variable en la Quincena 2",
+         "Agregación Quincenal");
+  addVar("Q_sum(\"var\")", "Suma de una variable en las quincenas del mes",
+         "Agregación Quincenal");
+  addVar("Q_avg(\"var\")", "Promedio de una variable en las quincenas del mes",
+         "Agregación Quincenal");
+  addVar("Q_max(\"var\")",
+         "Valor máximo de una variable en las quincenas del mes",
+         "Agregación Quincenal");
 
   // Historical functions
-  addVar("H_sum(\"var\", meses)", "Sumatoria de los últimos N meses recibidos", "Histórico Mensual");
-  addVar("H_max(\"var\", meses)", "Valor máximo de los últimos N meses (para SAC)", "Histórico Mensual");
-  addVar("H_avg(\"var\", meses)", "Promedio de los últimos N meses", "Histórico Mensual");
-  addVar("H_val(\"var\", offset)", "Valor de una variable N meses atrás (offset)", "Histórico Mensual");
+  addVar("H_sum(\"var\", meses)", "Sumatoria de los últimos N meses recibidos",
+         "Histórico Mensual");
+  addVar("H_max(\"var\", meses)",
+         "Valor máximo de los últimos N meses (para SAC)", "Histórico Mensual");
+  addVar("H_avg(\"var\", meses)", "Promedio de los últimos N meses",
+         "Histórico Mensual");
+  addVar("H_val(\"var\", offset)",
+         "Valor de una variable N meses atrás (offset)", "Histórico Mensual");
 
   // Local concept execution variables
   addVar("unidad", "Valor de la columna Unidad/Cantidad del concepto actual",

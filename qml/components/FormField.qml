@@ -88,6 +88,27 @@ RowLayout {
             model: root.comboModel
             textRole: (model && model.length > 0 && typeof model[0] === "object" && model[0].text !== undefined) ? "text" : ""
             currentIndex: root.comboCurrentIndex
+
+            Connections {
+                target: loader
+                function onFieldValueChanged() {
+                    if (!root.comboModel || root.comboModel.length === 0) return;
+                    for (var i = 0; i < root.comboModel.length; i++) {
+                        var item = root.comboModel[i];
+                        var valToMatch = "";
+                        if (typeof item === "object") {
+                            valToMatch = (item.id !== undefined) ? item.id.toString() : ((item.value !== undefined) ? item.value.toString() : (item.text !== undefined ? item.text.toString() : ""));
+                        } else {
+                            valToMatch = item.toString();
+                        }
+                        if (valToMatch === loader.fieldValue.toString()) {
+                            root.comboCurrentIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+
             onCurrentIndexChanged: {
                 root.comboCurrentIndex = currentIndex
                 if (model && model[currentIndex] !== undefined) {

@@ -138,6 +138,7 @@ MasterDetailView {
             highlighted: true
             visible: AppController.currentRole === "admin"
             onClicked: {
+                employeeDialog.setComboModel("categoriaId", root.getCategoriesCombo())
                 employeeDialog.setComboModel("esquema", root.getSchemasCombo("mensual"))
                 employeeDialog.setFieldVisible("categoriaId", false)
                 employeeDialog.openNew()
@@ -194,6 +195,7 @@ MasterDetailView {
                     onClicked: {
                         if (root.selectedEmployeeData) {
                             var t = (root.selectedEmployeeData.tipoLiquidacion || root.selectedEmployeeData.tipo_liquidacion || "mensual").toLowerCase()
+                            employeeDialog.setComboModel("categoriaId", root.getCategoriesCombo())
                             employeeDialog.setComboModel("esquema", root.getSchemasCombo(t))
                             employeeDialog.setFieldVisible("categoriaId", t === "jornal")
                             employeeDialog.openEdit({
