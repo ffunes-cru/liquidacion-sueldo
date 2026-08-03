@@ -54,7 +54,7 @@ Item {
                         columnSpacing: 10
 
                         Label { text: "Empleado:"; color: Theme.textColor; font.pixelSize: 13 }
-                        ComboBox {
+                        StyledComboBox {
                             id: cbEmpleado
                             Layout.fillWidth: true
                             model: AppController.employeeModel
@@ -76,7 +76,7 @@ Item {
                             font.pixelSize: 13
                             visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
                         }
-                        ComboBox {
+                        StyledComboBox {
                             id: cbQuincena
                             Layout.fillWidth: true
                             model: ["Q1", "Q2"]
@@ -100,7 +100,7 @@ Item {
                         }
 
                         Label { text: "Mes Histórico:"; color: Theme.textColor; font.pixelSize: 13 }
-                        SpinBox {
+                        StyledSpinBox {
                             id: sbMes
                             from: 1; to: 12
                             value: (new Date()).getMonth() + 1
@@ -108,7 +108,7 @@ Item {
                         }
 
                         Label { text: "Año Histórico:"; color: Theme.textColor; font.pixelSize: 13 }
-                        SpinBox {
+                        StyledSpinBox {
                             id: sbAnio
                             from: 2020; to: 2030
                             value: (new Date()).getFullYear()
@@ -117,10 +117,10 @@ Item {
                     }
                 }
 
-                Button {
+                StyledButton {
                     Layout.fillWidth: true
+                    variant: "primary"
                     text: "⚡ Calcular Liquidación"
-                    highlighted: true
                     enabled: cbEmpleado.currentIndex >= 0
                     onClicked: {
                         var empId = cbEmpleado.currentValue !== undefined ? cbEmpleado.currentValue : -1
@@ -141,8 +141,9 @@ Item {
                     }
                 }
 
-                Button {
+                StyledButton {
                     Layout.fillWidth: true
+                    variant: "secondary"
                     text: "💾 Guardar en Historial"
                     enabled: root.liquidationResult !== null
                     onClicked: {
@@ -155,8 +156,9 @@ Item {
                     }
                 }
 
-                Button {
+                StyledButton {
                     Layout.fillWidth: true
+                    variant: "secondary"
                     text: "📄 Exportar a PDF"
                     enabled: root.liquidationResult !== null
                     onClicked: {

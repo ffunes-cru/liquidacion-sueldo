@@ -74,9 +74,9 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         Item { Layout.fillWidth: true }
-                        Button {
-                            text: "Guardar Datos de Empresa"
-                            highlighted: true
+                        StyledButton {
+                            variant: "primary"
+                            text: "💾 Guardar Datos de Empresa"
                             onClicked: {
                                 var ok = AppController.saveCompany(
                                     fieldRazonSocial.value.trim(),

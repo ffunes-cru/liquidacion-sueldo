@@ -74,9 +74,9 @@ RowLayout {
                 inputMethodHints: Qt.ImhDate
                 onTextChanged: loader.fieldValue = text
             }
-            Button {
+            StyledButton {
+                variant: "secondary"
                 text: "📅 Hoy"
-                flat: true
                 onClicked: loader.fieldValue = Qt.formatDate(new Date(), "yyyy-MM-dd")
             }
         }

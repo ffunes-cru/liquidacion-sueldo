@@ -21,11 +21,13 @@
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickStyle>
 
 #include "controllers/AppController.h"
 #include "database/DatabaseManager.h"
 
 int main(int argc, char *argv[]) {
+  QQuickStyle::setStyle("Basic");
   QGuiApplication app(argc, argv);
   app.setOrganizationName("Antigravity");
   app.setApplicationName("LiquidacionSueldosQML");

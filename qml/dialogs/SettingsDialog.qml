@@ -33,7 +33,7 @@ AppDialog {
                 color: Theme.textColor
                 Layout.fillWidth: true
             }
-            Switch {
+            StyledSwitch {
                 checked: AppController.darkMode
                 onToggled: AppController.darkMode = checked
             }
@@ -46,7 +46,7 @@ AppDialog {
                 color: Theme.textColor
                 Layout.fillWidth: true
             }
-            ComboBox {
+            StyledComboBox {
                 model: ["Administrador", "Usuario Operativo"]
                 currentIndex: AppController.currentRole === "admin" ? 0 : 1
                 onActivated: AppController.currentRole = (currentIndex === 0) ? "admin" : "user"
@@ -63,8 +63,9 @@ AppDialog {
             color: Theme.accentColor
         }
 
-        Button {
+        StyledButton {
             Layout.fillWidth: true
+            variant: "secondary"
             text: "📤 Exportar Datos a Excel (.xlsx)"
             onClicked: {
                 var path = AppController.exportDataXlsx("")
@@ -72,8 +73,9 @@ AppDialog {
             }
         }
 
-        Button {
+        StyledButton {
             Layout.fillWidth: true
+            variant: "secondary"
             text: "📥 Importar Datos desde Excel (.xlsx)"
             onClicked: {
                 var ok = AppController.importDataXlsx("")
@@ -81,8 +83,9 @@ AppDialog {
             }
         }
 
-        Button {
+        StyledButton {
             Layout.fillWidth: true
+            variant: "secondary"
             text: "📤 Exportar Datos a CSV"
             onClicked: {
                 var path = AppController.exportDataCsv("")
@@ -90,8 +93,9 @@ AppDialog {
             }
         }
 
-        Button {
+        StyledButton {
             Layout.fillWidth: true
+            variant: "secondary"
             text: "💾 Crear Copia de Seguridad de BD (Backup)"
             onClicked: {
                 var bp = AppController.createBackup()
@@ -109,8 +113,9 @@ AppDialog {
             color: Theme.accentColor
         }
 
-        Button {
+        StyledButton {
             Layout.fillWidth: true
+            variant: "primary"
             text: "ℹ️ Acerca del Sistema y Licencia GPLv3..."
             onClicked: {
                 root.close()

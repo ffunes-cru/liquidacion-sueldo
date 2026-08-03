@@ -106,9 +106,9 @@ AppDialog {
                 visible: root.editingFieldId <= 0
             }
 
-            Button {
+            StyledButton {
+                variant: "primary"
                 text: root.editingFieldId > 0 ? "Guardar" : "Agregar"
-                highlighted: true
                 onClicked: {
                     if (txtFieldCode.text.trim() !== "") {
                         if (root.editingFieldId > 0) {
@@ -131,7 +131,8 @@ AppDialog {
                 }
             }
 
-            Button {
+            StyledButton {
+                variant: "secondary"
                 text: "Cancelar"
                 visible: root.editingFieldId > 0
                 onClicked: {

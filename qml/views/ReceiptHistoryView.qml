@@ -62,7 +62,7 @@ MasterDetailView {
                 font.pixelSize: 13
             }
 
-            ComboBox {
+            StyledComboBox {
                 id: cbFilterEmployee
                 Layout.fillWidth: true
                 model: AppController.employeeModel
@@ -77,9 +77,10 @@ MasterDetailView {
             }
         },
 
-        Button {
+        StyledButton {
             Layout.fillWidth: true
-            text: "Eliminar Recibo"
+            variant: "danger"
+            text: "🗑️ Eliminar Recibo"
             visible: AppController.currentRole === "admin"
             enabled: root.selectedReceiptId > 0
             onClicked: {
@@ -114,7 +115,8 @@ MasterDetailView {
 
             Item { Layout.fillWidth: true }
 
-            Button {
+            StyledButton {
+                variant: "secondary"
                 text: "📄 Exportar PDF"
                 visible: root.receiptDetails !== null
                 onClicked: {

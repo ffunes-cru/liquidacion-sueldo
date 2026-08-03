@@ -79,17 +79,19 @@ MasterDetailView {
         Layout.fillWidth: true
         spacing: 8
 
-        Button {
+        StyledButton {
             Layout.fillWidth: true
-            text: "Nuevo Esquema"
+            variant: "secondary"
+            text: "➕ Nuevo Esquema"
             onClicked: {
                 root.clearForm()
             }
         }
 
-        Button {
+        StyledButton {
             Layout.fillWidth: true
-            text: "Eliminar"
+            variant: "danger"
+            text: "🗑️ Eliminar"
             enabled: root.selectedSchemaCode !== "" && root.selectedSchemaCode !== "MENSUAL"
             onClicked: {
                 if (root.selectedSchemaCode !== "") {
@@ -145,7 +147,7 @@ MasterDetailView {
                 }
 
                 Label { text: "Tipo Liquidación:"; color: Theme.textColor; font.pixelSize: 13 }
-                ComboBox {
+                StyledComboBox {
                     id: _cbTipoLiq
                     Layout.fillWidth: true
                     model: ["Mensual", "Jornalero"]
@@ -184,8 +186,9 @@ MasterDetailView {
 
             Item { Layout.fillWidth: true }
 
-            Button {
-                text: "Agregar Variable"
+            StyledButton {
+                variant: "secondary"
+                text: "➕ Agregar Variable"
                 enabled: root.selectedSchemaCode !== ""
                 onClicked: addFieldDialog.open()
             }
@@ -239,9 +242,9 @@ MasterDetailView {
             Layout.fillWidth: true
             Item { Layout.fillWidth: true }
 
-            Button {
-                text: "Guardar Esquema"
-                highlighted: true
+            StyledButton {
+                variant: "primary"
+                text: "💾 Guardar Esquema"
                 onClicked: {
                     if (txtCode.value.trim() !== "" && txtName.value.trim() !== "") {
                         AppController.schemaModel.saveSchema(

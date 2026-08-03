@@ -9,19 +9,13 @@ RowLayout {
     Label {
         text: "Modo de Vista:"
         font.pixelSize: 13
-        color: window.textColor
+        color: Theme.textColor
     }
 
-    ComboBox {
+    StyledComboBox {
         id: roleCombo
         model: ["Administrador", "Usuario Operativo"]
         currentIndex: AppController.currentRole === "admin" ? 0 : 1
-
-        background: Rectangle {
-            color: window.cardBg
-            radius: 6
-            border.color: window.borderColor
-        }
 
         onActivated: {
             AppController.currentRole = (currentIndex === 0) ? "admin" : "user"

@@ -50,7 +50,7 @@ ApplicationWindow {
         // ── Header Bar ──────────────────────────────────────────
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: 60
+            implicitHeight: 56
             color: Theme.panelBg
 
             RowLayout {
@@ -61,14 +61,14 @@ ApplicationWindow {
 
                 Label {
                     text: "Liquidación de Sueldos"
-                    font.pixelSize: 20
+                    font.pixelSize: 18
                     font.bold: true
                     color: Theme.accentColor
                 }
 
                 Label {
                     text: "(C++ / QML)"
-                    font.pixelSize: 13
+                    font.pixelSize: 12
                     color: Theme.subtextColor
                 }
 
@@ -76,12 +76,13 @@ ApplicationWindow {
 
                 Label {
                     text: "Modo:"
-                    font.pixelSize: 14
-                    color: Theme.textColor
+                    font.pixelSize: 13
+                    color: Theme.subtextColor
                 }
 
-                ComboBox {
+                StyledComboBox {
                     id: roleCombo
+                    implicitWidth: 170
                     model: ["Administrador", "Usuario Operativo"]
                     currentIndex: AppController.currentRole === "admin" ? 0 : 1
                     onActivated: {
@@ -91,41 +92,51 @@ ApplicationWindow {
                     }
                 }
 
-                Button {
+                StyledButton {
+                    variant: "secondary"
                     text: "⚙️ Configuración"
                     onClicked: settingsDialog.open()
                 }
             }
         }
 
-        // ── Navigation TabBar ───────────────────────────────────
-        TabBar {
-            id: mainTabBar
+        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderColor }
+
+        // ── Navigation TabBar Area ──────────────────────────────
+        Rectangle {
             Layout.fillWidth: true
-            background: Rectangle { color: Theme.panelBg }
+            implicitHeight: 50
+            color: Theme.panelBg
 
-            Repeater {
-                model: window.visibleTabIndices
+            TabBar {
+                id: mainTabBar
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                anchors.topMargin: 4
+                anchors.bottomMargin: 4
+                spacing: 6
+                background: Rectangle { color: "transparent" }
 
-                TabButton {
-                    property int defIndex: modelData
-                    contentItem: Text {
+                Repeater {
+                    model: window.visibleTabIndices
+
+                    StyledTabButton {
+                        property int defIndex: modelData
                         text: window.tabDefinitions[defIndex].label
-                        color: parent.checked ? Theme.accentColor : Theme.textColor
-                        font.bold: parent.checked
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                onCurrentIndexChanged: {
+                    if (currentIndex >= 0 && currentIndex < window.visibleTabIndices.length) {
+                        var defIdx = window.visibleTabIndices[currentIndex]
+                        window.activeViewIndex = window.tabDefinitions[defIdx].viewIndex
                     }
                 }
             }
-
-            onCurrentIndexChanged: {
-                if (currentIndex >= 0 && currentIndex < window.visibleTabIndices.length) {
-                    var defIdx = window.visibleTabIndices[currentIndex]
-                    window.activeViewIndex = window.tabDefinitions[defIdx].viewIndex
-                }
-            }
         }
+
+        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderColor }
 
         // ── Main Content Area ───────────────────────────────────
         StackLayout {

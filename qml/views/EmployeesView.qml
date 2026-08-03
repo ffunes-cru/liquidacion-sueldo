@@ -136,10 +136,10 @@ MasterDetailView {
             onTextChanged: AppController.employeeModel.filterText = text
         }
 
-        Button {
+        StyledButton {
             Layout.fillWidth: true
-            text: "+ Nuevo Empleado"
-            highlighted: true
+            variant: "primary"
+            text: "➕ Nuevo Empleado"
             visible: AppController.currentRole === "admin"
             onClicked: {
                 employeeDialog.setComboModel("categoriaId", root.getCategoriesCombo())
@@ -191,30 +191,6 @@ MasterDetailView {
                     Label { text: "Fecha Ingreso:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 12 }
                     Label { text: root.selectedEmployeeData ? (root.selectedEmployeeData.fechaIngreso || root.selectedEmployeeData.fecha_ingreso || "N/A") : "-"; color: Theme.textColor; font.pixelSize: 13 }
                 }
-
-                Button {
-                    text: "✏️ Editar Ficha"
-                    visible: AppController.currentRole === "admin"
-                    Layout.alignment: Qt.AlignTop | Qt.AlignRight
-                    onClicked: {
-                        if (root.selectedEmployeeData) {
-                            var t = (root.selectedEmployeeData.tipoLiquidacion || root.selectedEmployeeData.tipo_liquidacion || "mensual").toLowerCase()
-                            employeeDialog.setComboModel("categoriaId", root.getCategoriesCombo())
-                            employeeDialog.setComboModel("esquema", root.getSchemasCombo(t))
-                            employeeDialog.setFieldVisible("categoriaId", t === "jornal")
-                            employeeDialog.openEdit({
-                                employeeId: root.selectedEmployeeId,
-                                legajo: root.selectedEmployeeData.legajo || "",
-                                nombre: root.selectedEmployeeData.nombre || root.selectedEmployeeData.nombre_completo || "",
-                                tipoLiq: t,
-                                esquema: root.selectedEmployeeData.esquema || root.selectedEmployeeData.esquema_codigo || (t === "jornal" ? "JORNAL" : "MENSUAL"),
-                                categoriaId: root.selectedEmployeeData.categoriaId || root.selectedEmployeeData.categoria_jornal_id || 1,
-                                fechaIngreso: root.selectedEmployeeData.fechaIngreso || root.selectedEmployeeData.fecha_ingreso || "",
-                                cuil: root.selectedEmployeeData.cuil || ""
-                            })
-                        }
-                    }
-                }
             }
         }
 
@@ -231,7 +207,7 @@ MasterDetailView {
                 color: Theme.accentColor
             }
 
-            ComboBox {
+            StyledComboBox {
                 id: cbQuincenas
                 Layout.preferredWidth: 120
                 onCurrentTextChanged: {
@@ -244,13 +220,26 @@ MasterDetailView {
 
             Item { Layout.fillWidth: true }
 
-            Button {
-                text: "+ Agregar Quincena"
+            StyledButton {
+                variant: "secondary"
+                text: "➕ Agregar Quincena"
                 visible: AppController.currentRole === "admin"
                 onClicked: {
                     var nextQ = "Q" + (cbQuincenas.count + 1)
                     AppController.addQuincena(root.selectedEmployeeId, nextQ)
                     root.refreshQuincenasList()
+                }
+            }
+
+            StyledButton {
+                variant: "danger"
+                text: "🗑️ Eliminar Quincena"
+                visible: AppController.currentRole === "admin" && cbQuincenas.count > 1 && cbQuincenas.currentText !== "Q1"
+                onClicked: {
+                    if (cbQuincenas.currentText && cbQuincenas.currentText !== "") {
+                        AppController.removeQuincena(root.selectedEmployeeId, cbQuincenas.currentText)
+                        root.refreshQuincenasList()
+                    }
                 }
             }
         }

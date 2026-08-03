@@ -147,21 +147,22 @@ Item {
         ActionBar {
             title: "Estructura del Recibo de Sueldo"
 
-            Button {
+            StyledButton {
+                variant: "secondary"
                 text: "📋 Esquema: " + root.currentEsquema
-                highlighted: true
                 onClicked: selectSchemaDialog.open()
             }
 
-            Button {
+            StyledButton {
+                variant: "secondary"
                 text: "➕ Agregar Separador"
                 visible: AppController.currentRole === "admin"
                 onClicked: separatorTitleDialog.openNew()
             }
 
-            Button {
+            StyledButton {
+                variant: "primary"
                 text: "+ Nuevo Concepto"
-                highlighted: true
                 visible: AppController.currentRole === "admin"
                 onClicked: openNewConceptDialog("REMUNERATIVO")
             }
@@ -646,13 +647,14 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                Button {
+                StyledButton {
+                    variant: "secondary"
                     text: "Cancelar"
                     onClicked: separatorTitleDialog.close()
                 }
-                Button {
-                    text: "Guardar Separador"
-                    highlighted: true
+                StyledButton {
+                    variant: "primary"
+                    text: "💾 Guardar Separador"
                     onClicked: {
                         var title = fldSepTitle.value.trim()
                         if (title !== "") {

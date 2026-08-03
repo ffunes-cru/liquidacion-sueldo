@@ -72,10 +72,10 @@ MasterDetailView {
         Layout.fillWidth: true
         spacing: 8
 
-        Button {
+        StyledButton {
             Layout.fillWidth: true
-            text: "+ Nueva Función JS"
-            highlighted: true
+            variant: "primary"
+            text: "➕ Nueva Función JS"
             visible: AppController.currentRole === "admin"
             onClicked: {
                 funcDialog.currentBodyText = ""
@@ -113,7 +113,8 @@ MasterDetailView {
                         color: Theme.textColor
                         Layout.fillWidth: true
                     }
-                    Button {
+                    StyledButton {
+                        variant: "primary"
                         text: "✏️ Editar Función"
                         visible: AppController.currentRole === "admin"
                         onClicked: {
@@ -140,30 +141,12 @@ MasterDetailView {
                     font.pixelSize: 12
                 }
 
-                Rectangle {
+                StyledTextArea {
+                    id: txtBodyViewer
                     Layout.fillWidth: true
                     Layout.preferredHeight: 200
-                    color: Qt.rgba(0, 0, 0, 0.2)
-                    border.color: Theme.borderColor
-                    radius: 6
-
-                    Flickable {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        contentWidth: txtBodyViewer.implicitWidth
-                        contentHeight: txtBodyViewer.implicitHeight
-                        clip: true
-
-                        TextArea.flickable: TextArea {
-                            id: txtBodyViewer
-                            readOnly: true
-                            text: root.selectedFuncData ? root.selectedFuncData.funcBody : ""
-                            font.family: "Monospace"
-                            font.pixelSize: 13
-                            color: Theme.accentColor
-                            wrapMode: TextEdit.Wrap
-                        }
-                    }
+                    readOnly: true
+                    text: root.selectedFuncData ? (root.selectedFuncData.funcBody || root.selectedFuncData.body || "") : ""
                 }
             }
         }
@@ -307,24 +290,11 @@ MasterDetailView {
                 font.pixelSize: 13
             }
 
-            ScrollView {
+            StyledTextArea {
+                id: txtBody
                 Layout.fillWidth: true
                 Layout.preferredHeight: 180
-                clip: true
-
-                TextArea {
-                    id: txtBody
-                    placeholderText: "var ret = 0;\nfor (var i = 0; i < env.quincenas.length; i++) {\n    ret += env.quincenas[i][variable_code] || 0;\n}\nreturn ret;"
-                    font.family: "Monospace"
-                    font.pixelSize: 13
-                    color: Theme.textColor
-                    wrapMode: TextEdit.Wrap
-                    background: Rectangle {
-                        color: Theme.inputBg
-                        border.color: Theme.borderColor
-                        radius: 6
-                    }
-                }
+                placeholderText: "var ret = 0;\nfor (var i = 0; i < env.quincenas.length; i++) {\n    ret += env.quincenas[i][variable_code] || 0;\n}\nreturn ret;"
             }
         }
 

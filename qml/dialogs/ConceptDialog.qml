@@ -129,7 +129,7 @@ AppDialog {
                 columnSpacing: 14
 
                 Label { text: "Sección del Recibo:"; color: Theme.textColor; font.pixelSize: 13 }
-                ComboBox {
+                StyledComboBox {
                     id: cbSeccion
                     Layout.fillWidth: true
                     model: ["REMUNERATIVO", "NO_REMUNERATIVO", "DESCUENTO", "APORTE_PATRONAL"]
@@ -158,7 +158,7 @@ AppDialog {
                 }
 
                 Label { text: "Modo de Cálculo:"; color: Theme.textColor; font.pixelSize: 13 }
-                ComboBox {
+                StyledComboBox {
                     id: cbTipoCalculo
                     Layout.fillWidth: true
                     model: ["Fórmula JavaScript (IDE)", "Porcentaje (%)", "Monto Fijo ($)"]
@@ -216,7 +216,7 @@ AppDialog {
                 }
 
                 Label { text: "Variable Base:"; color: Theme.textColor; font.pixelSize: 13 }
-                ComboBox {
+                StyledComboBox {
                     id: cbSimpleBaseVar
                     Layout.fillWidth: true
                     editable: true
@@ -241,7 +241,7 @@ AppDialog {
 
             RowLayout {
                 Layout.fillWidth: true
-                CheckBox {
+                StyledCheckBox {
                     id: chkVisibleRecibo
                     text: "Visible en la impresión del Recibo de Sueldo"
                     checked: true

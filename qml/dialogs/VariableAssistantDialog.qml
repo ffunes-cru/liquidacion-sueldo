@@ -87,9 +87,9 @@ AppDialog {
                             }
                         }
 
-                        Button {
+                        StyledButton {
+                            variant: "secondary"
                             text: "Insertar"
-                            flat: true
                             onClicked: {
                                 root.variableSelected(modelData.code)
                                 root.close()

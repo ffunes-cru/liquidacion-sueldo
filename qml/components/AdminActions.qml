@@ -20,9 +20,12 @@ RowLayout {
 
     Rectangle {
         visible: root.showDuplicate
-        implicitWidth: 30; implicitHeight: 28; radius: 4
-        color: btnDupArea.containsMouse ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.3) : Qt.rgba(255, 255, 255, 0.08)
-        border.color: Theme.borderColor
+        implicitWidth: 32; implicitHeight: 30; radius: 6
+        color: btnDupArea.containsMouse ? Theme.hoverBg : Theme.cardBg
+        border.color: btnDupArea.containsMouse ? Theme.accentColor : Theme.borderColor
+
+        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on border.color { ColorAnimation { duration: 120 } }
 
         Text { anchors.centerIn: parent; text: "📋"; font.pixelSize: 13 }
 
@@ -35,9 +38,12 @@ RowLayout {
 
     Rectangle {
         visible: root.showEdit
-        implicitWidth: 30; implicitHeight: 28; radius: 4
-        color: btnEditArea.containsMouse ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.3) : Qt.rgba(255, 255, 255, 0.08)
-        border.color: Theme.borderColor
+        implicitWidth: 32; implicitHeight: 30; radius: 6
+        color: btnEditArea.containsMouse ? Theme.hoverBg : Theme.cardBg
+        border.color: btnEditArea.containsMouse ? Theme.accentColor : Theme.borderColor
+
+        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on border.color { ColorAnimation { duration: 120 } }
 
         Text { anchors.centerIn: parent; text: "✏️"; font.pixelSize: 13 }
 
@@ -50,9 +56,12 @@ RowLayout {
 
     Rectangle {
         visible: root.showDelete
-        implicitWidth: 30; implicitHeight: 28; radius: 4
-        color: btnDelArea.containsMouse ? Qt.rgba(Theme.dangerColor.r, Theme.dangerColor.g, Theme.dangerColor.b, 0.35) : Qt.rgba(255, 255, 255, 0.08)
-        border.color: Theme.borderColor
+        implicitWidth: 32; implicitHeight: 30; radius: 6
+        color: btnDelArea.containsMouse ? Qt.rgba(Theme.dangerColor.r, Theme.dangerColor.g, Theme.dangerColor.b, 0.2) : Theme.cardBg
+        border.color: btnDelArea.containsMouse ? Theme.dangerColor : Theme.borderColor
+
+        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on border.color { ColorAnimation { duration: 120 } }
 
         Text { anchors.centerIn: parent; text: "🗑️"; font.pixelSize: 13 }
 

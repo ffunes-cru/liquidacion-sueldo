@@ -57,6 +57,17 @@ Dialog {
         }
     }
 
+    footer: DialogButtonBox {
+        visible: count > 0
+        padding: 12
+        spacing: 10
+        alignment: Qt.AlignRight
+        background: Rectangle { color: "transparent" }
+        delegate: StyledButton {
+            variant: (DialogButtonBox.buttonRole === DialogButtonBox.AcceptRole || DialogButtonBox.buttonRole === DialogButtonBox.ApplyRole) ? "primary" : "secondary"
+        }
+    }
+
     enter: Transition {
         NumberAnimation { property: "scale"; from: 0.85; to: 1.0; duration: 200; easing.type: Easing.OutBack }
         NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 180 }

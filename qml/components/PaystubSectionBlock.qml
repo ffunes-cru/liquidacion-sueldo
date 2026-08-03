@@ -45,10 +45,9 @@ ColumnLayout {
 
             Item { Layout.fillWidth: true }
 
-            Button {
-                implicitHeight: 24
-                text: "+ Agregar"
-                flat: true
+            StyledButton {
+                variant: "ghost"
+                text: "➕ Agregar"
                 visible: AppController.currentRole === "admin"
                 onClicked: root.addRequested()
             }
@@ -92,14 +91,16 @@ ColumnLayout {
                         spacing: 0
                         visible: AppController.currentRole === "admin"
 
-                        Button {
-                            implicitWidth: 20; implicitHeight: 18
-                            text: "▲"; flat: true
+                        StyledButton {
+                            implicitWidth: 22; implicitHeight: 18
+                            variant: "ghost"
+                            text: "▲"
                             onClicked: AppController.cellModel.moveCellUp(index)
                         }
-                        Button {
-                            implicitWidth: 20; implicitHeight: 18
-                            text: "▼"; flat: true
+                        StyledButton {
+                            implicitWidth: 22; implicitHeight: 18
+                            variant: "ghost"
+                            text: "▼"
                             onClicked: AppController.cellModel.moveCellDown(index)
                         }
                     }

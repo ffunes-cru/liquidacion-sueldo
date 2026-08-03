@@ -92,6 +92,12 @@ set(QML_FILES
     qml/components/Theme.qml
     qml/components/StyledTextField.qml
     qml/components/StyledComboBox.qml
+    qml/components/StyledButton.qml
+    qml/components/StyledCheckBox.qml
+    qml/components/StyledSwitch.qml
+    qml/components/StyledTextArea.qml
+    qml/components/StyledTabButton.qml
+    qml/components/StyledSpinBox.qml
     qml/components/BadgePill.qml
     qml/components/StatusBanner.qml
     qml/components/AppDialog.qml

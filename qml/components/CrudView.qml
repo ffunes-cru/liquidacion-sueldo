@@ -39,9 +39,9 @@ Item {
             title: root.title
             subtitle: (root.model && root.model.count !== undefined ? root.model.count : 0) + " " + root.counterSuffix
 
-            Button {
+            StyledButton {
+                variant: "primary"
                 text: root.newButtonText
-                highlighted: true
                 visible: AppController.currentRole === "admin"
                 onClicked: root.createRequested()
             }
