@@ -33,6 +33,7 @@ AppDialog {
         if (!formFields) return
         for (var i = 0; i < formFields.length; i++) {
             if (formFields[i].key === key) {
+                formFields[i].comboModel = newModel
                 var repeaterItem = fieldRepeater.itemAt(i)
                 if (repeaterItem) {
                     repeaterItem.comboModel = newModel
@@ -50,6 +51,7 @@ AppDialog {
         if (!formFields) return
         for (var i = 0; i < formFields.length; i++) {
             if (formFields[i].key === key) {
+                formFields[i].visible = isVisible
                 var repeaterItem = fieldRepeater.itemAt(i)
                 if (repeaterItem) {
                     repeaterItem.visible = isVisible
@@ -132,8 +134,8 @@ AppDialog {
         else if (data.receiptId !== undefined && data.receiptId > 0) itemId = data.receiptId
         else itemId = -1
 
-        setFieldValues(data)
         open()
+        setFieldValues(data)
     }
 
     contentItem: ScrollView {

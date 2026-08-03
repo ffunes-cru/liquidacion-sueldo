@@ -164,7 +164,7 @@ ColumnLayout {
                                 simplePorcentaje: model.simplePorcentaje,
                                 simpleBaseVariable: model.simpleBaseVariable,
                                 simpleMontoFijo: model.simpleMontoFijo,
-                                visibleRecibo: model.visibleRecibo
+                                visibleRecibo: (model.visibleRecibo !== undefined) ? model.visibleRecibo : model.visible_recibo
                             }
                             root.editRequested(cellData)
                         }

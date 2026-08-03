@@ -247,23 +247,23 @@ QString ExportService::exportDataXlsx(const QString &path)
         row++;
     }
 
-    // 10. Valores de Empleados (employee_field_values)
-    xlsx.addSheet("Valores de Empleados");
-    xlsx.selectSheet("Valores de Empleados");
+    // 11. Funciones Personalizadas
+    xlsx.addSheet("Funciones Personalizadas");
+    xlsx.selectSheet("Funciones Personalizadas");
     xlsx.write(1, 1, "id");
-    xlsx.write(1, 2, "empleado_id");
-    xlsx.write(1, 3, "field_id");
-    xlsx.write(1, 4, "quincena");
-    xlsx.write(1, 5, "value");
-    auto efVals = m_db->listAllEmployeeFieldValues();
+    xlsx.write(1, 2, "name");
+    xlsx.write(1, 3, "params");
+    xlsx.write(1, 4, "description");
+    xlsx.write(1, 5, "body");
+    auto cFuncs = m_db->listCustomFunctions();
     row = 2;
-    for (const auto &ev : efVals) {
-        auto m = ev.toMap();
+    for (const auto &fn : cFuncs) {
+        auto m = fn.toMap();
         xlsx.write(row, 1, m["id"].toInt());
-        xlsx.write(row, 2, m["empleado_id"].toInt());
-        xlsx.write(row, 3, m["field_id"].toInt());
-        xlsx.write(row, 4, m["quincena"].toString());
-        xlsx.write(row, 5, m["value"].toString());
+        xlsx.write(row, 2, m["name"].toString());
+        xlsx.write(row, 3, m["params"].toString());
+        xlsx.write(row, 4, m["description"].toString());
+        xlsx.write(row, 5, m["body"].toString());
         row++;
     }
 
@@ -422,8 +422,22 @@ bool ExportService::importDataXlsx(const QString &path)
         }
     }
 
+    // Import Funciones Personalizadas
+    if (xlsx.selectSheet("Funciones Personalizadas")) {
+        for (int r = 2; r <= xlsx.dimension().lastRow(); r++) {
+            int funcId = xlsx.read(r, 1).toInt();
+            QString name = xlsx.read(r, 2).toString();
+            QString params = xlsx.read(r, 3).toString();
+            QString desc = xlsx.read(r, 4).toString();
+            QString body = xlsx.read(r, 5).toString();
+            if (!name.isEmpty()) {
+                m_db->saveCustomFunction(funcId, name, params, body, desc);
+            }
+        }
+    }
+
     m_db->commit();
-    qInfo() << "[ExportService] Importación Excel completada.";
+    qInfo() << "[ExportService] Importación Excel completada con éxito.";
     return true;
 }
 
@@ -553,16 +567,57 @@ QString ExportService::exportDataCsv(const QString &directoryPath)
         }
     }
 
+    // Funciones Personalizadas
+    {
+        QFile f(dir + "/funciones_personalizadas.csv");
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+            writeCsvLine(ts, {"id", "name", "params", "description", "body"});
+            for (const auto &fn : m_db->listCustomFunctions()) {
+                auto m = fn.toMap();
+                writeCsvLine(ts, {m["id"].toString(), m["name"].toString(), m["params"].toString(), m["description"].toString(), m["body"].toString()});
+            }
+        }
+    }
+
     qInfo() << "[ExportService] Exportación CSV completada en:" << dir;
     return dir;
 }
 
 bool ExportService::importDataCsv(const QString &directoryPath)
 {
-    // TODO: implement CSV import if needed
-    Q_UNUSED(directoryPath)
-    qInfo() << "[ExportService] Importación CSV no implementada aún.";
-    return false;
+    QString dir = ensureCsvDir(directoryPath);
+    qInfo() << "[ExportService] Importando datos desde CSV en:" << dir;
+
+    m_db->transaction();
+
+    // Import Funciones Personalizadas CSV
+    {
+        QFile f(dir + "/funciones_personalizadas.csv");
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+            QString header = ts.readLine(); // Header
+            while (!ts.atEnd()) {
+                QString line = ts.readLine();
+                if (line.trimmed().isEmpty()) continue;
+                QStringList parts = line.split(",");
+                if (parts.size() >= 5) {
+                    int funcId = parts[0].trimmed().toInt();
+                    QString name = parts[1].trimmed().remove('"');
+                    QString params = parts[2].trimmed().remove('"');
+                    QString desc = parts[3].trimmed().remove('"');
+                    QString body = parts[4].trimmed().remove('"');
+                    if (!name.isEmpty()) {
+                        m_db->saveCustomFunction(funcId, name, params, body, desc);
+                    }
+                }
+            }
+        }
+    }
+
+    m_db->commit();
+    qInfo() << "[ExportService] Importación CSV completada en:" << dir;
+    return true;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -650,6 +705,10 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
     QVariantList conceptos = liquidationResult.value("conceptos").toList();
     for (const auto &concepto : conceptos) {
         auto c = concepto.toMap();
+        QVariant visVal = c.value("visible_recibo");
+        bool isVisibleInReceipt = visVal.isValid() ? (visVal.toInt() != 0 && visVal.toBool()) : true;
+        if (!isVisibleInReceipt) continue;
+
         QString desc = c["descripcion"].toString();
         QString seccion = c["seccion"].toString().toUpper();
         QString tipoCalc = c["tipo_calculo"].toString();

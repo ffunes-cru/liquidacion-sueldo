@@ -311,9 +311,14 @@ Item {
                                         var d = (modelData["descripcion"] || "").toUpperCase();
                                         return c.indexOf("TOT_") === 0 || c.indexOf("TOTAL_") === 0 || c.indexOf("NETO") === 0 || d.indexOf("TOTAL") !== -1 || d.indexOf("NETO") !== -1;
                                     }
+                                    property bool isVisibleInReceipt: {
+                                        var v = modelData["visible_recibo"];
+                                        return v === undefined || v === null || v === true || v === 1 || v === "1" || v === "true";
+                                    }
 
-                                    Layout.fillWidth: true
-                                    height: isSep ? 32 : (isTotal ? 40 : 36)
+                                    visible: isVisibleInReceipt
+                                    Layout.fillWidth: isVisibleInReceipt
+                                    height: isVisibleInReceipt ? (isSep ? 32 : (isTotal ? 40 : 36)) : 0
                                     color: isSep ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.15)
                                                  : (isTotal ? "#1E293B" : (index % 2 === 0 ? Qt.alpha("#ffffff", 0.02) : "transparent"))
                                     radius: 4

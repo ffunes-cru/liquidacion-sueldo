@@ -220,37 +220,49 @@ MasterDetailView {
                     }
 
                     Label {
-                        text: "<b>Ejemplo de Función: Suma de variable quincenal</b>"
+                        text: "<b>Funciones Personalizadas Registradas en el Sistema:</b>"
                         font.pixelSize: 13
                         color: Theme.textColor
                     }
 
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: colExample.implicitHeight + 20
-                        color: Qt.rgba(0, 0, 0, 0.25)
-                        border.color: Theme.borderColor
-                        radius: 6
+                    Repeater {
+                        model: AppController.customFunctionModel
 
-                        ColumnLayout {
-                            id: colExample
-                            anchors.fill: parent
-                            anchors.margins: 10
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: colFunc.implicitHeight + 16
+                            color: Qt.rgba(0, 0, 0, 0.25)
+                            border.color: Theme.borderColor
+                            radius: 6
 
-                            Text {
-                                Layout.fillWidth: true
-                                text: `// Nombre: sum_QQ | Parámetros: variable_code
-var ret = 0;
-if (env && env.quincenas) {
-    for (var i = 0; i < env.quincenas.length; i++) {
-        ret += Number(env.quincenas[i][variable_code]) || 0;
-    }
-}
-return ret;`
-                                color: Theme.successColor
-                                font.pixelSize: 12
-                                font.family: "Monospace"
-                                wrapMode: Text.WordWrap
+                            ColumnLayout {
+                                id: colFunc
+                                anchors.fill: parent
+                                anchors.margins: 10
+                                spacing: 4
+
+                                Label {
+                                    text: "⚡ <b>" + (model.funcName || model.name) + "</b>(" + (model.funcParams || model.params || "") + ")"
+                                    color: Theme.accentColor
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
+                                Label {
+                                    visible: (model.funcDescription || model.description || "") !== ""
+                                    text: model.funcDescription || model.description || ""
+                                    color: Theme.subtextColor
+                                    font.pixelSize: 11
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: model.funcBody || model.body || ""
+                                    color: Theme.successColor
+                                    font.pixelSize: 11
+                                    font.family: "Monospace"
+                                    wrapMode: Text.WordWrap
+                                }
                             }
                         }
                     }

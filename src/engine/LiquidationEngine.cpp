@@ -5,6 +5,7 @@
 
 #include <QDate>
 #include <QDebug>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
@@ -218,7 +219,6 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
   }
   contexto["valor_hora"] = valorHora;
   contexto["jornal"] = valorHora;
-  contexto["basico"] = valorHora;
 
   // Get schema and cells
   QString esquema = employee.value("esquema_codigo", "MENSUAL").toString();
@@ -278,7 +278,18 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
     contexto["M_obj"] = quincenaComputed["M"];
   }
 
-  // Load historical receipt snapshots for H_* evaluation
+  // Map current cells by ID to support alias lookup if renamed
+  QMap<int, QString> cellIdToCurrentCode;
+  for (const QVariant &c : cells) {
+    QVariantMap cm = c.toMap();
+    int cId = cm.value("id", 0).toInt();
+    QString code = cm.value("codigo_variable", "").toString();
+    if (cId > 0 && !code.isEmpty()) {
+      cellIdToCurrentCode[cId] = code;
+    }
+  }
+
+  // Load historical receipt snapshots for custom functions evaluation
   QVariantList historyList;
   QVariantList receipts = m_db->listReceiptsByEmployee(employeeId);
   for (const QVariant &r : receipts) {
@@ -286,44 +297,50 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
     QString jsonStr = rec["datos_json"].toString();
     QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8());
     if (doc.isObject()) {
-      QVariantMap histItem = doc.object().toVariantMap();
-      // Also inject the month/year metadata
+      QJsonObject obj = doc.object();
+      QVariantMap histItem = obj.toVariantMap();
+
+      // Reverse lookup: map concept amounts by cell_id to current schema code
+      if (obj.contains("conceptos") && obj["conceptos"].isArray()) {
+        QJsonArray concArr = obj["conceptos"].toArray();
+        for (const QJsonValue &cv : concArr) {
+          if (cv.isObject()) {
+            QJsonObject cObj = cv.toObject();
+            int cId = cObj["cell_id"].toInt();
+            double monto = cObj["monto"].toDouble();
+            QString origCode = cObj["codigo"].toString();
+            if (!origCode.isEmpty()) {
+              histItem[origCode] = monto;
+            }
+            if (cId > 0) {
+              histItem["cell_" + QString::number(cId)] = monto;
+              if (cellIdToCurrentCode.contains(cId)) {
+                histItem[cellIdToCurrentCode[cId]] = monto;
+              }
+            }
+          }
+        }
+      }
+
+      // Inject month/year metadata
       histItem["_mes"] = rec["mes"];
       histItem["_anio"] = rec["anio"];
       histItem["_periodo"] = rec["periodo"];
+      histItem["mes"] = rec["mes"];
+      histItem["anio"] = rec["anio"];
+      histItem["periodo"] = rec["periodo"];
       historyList.append(histItem);
     }
   }
   contexto["_history"] = historyList;
   qDebug() << "[LiquidationEngine] Loaded" << historyList.size()
-           << "historical receipts for H_* functions";
+           << "historical receipt snapshots for env.historial";
 
   // ═══════════════════════════════════════════════════════════════
-  // STEP 4: Setup aggregation functions, env object, custom functions and
-  // evaluate cells
+  // STEP 4: Setup env object, custom functions and evaluate cells
   // ═══════════════════════════════════════════════════════════════
-  QuincenaAggregator aggregator;
-  aggregator.setQuincenaData(quincenaComputed);
-
   FormulaEngine engine;
   engine.setContext(contexto);
-
-  if (esJornal) {
-    QSet<QString> allVarNames;
-    for (const auto &qData : quincenaComputed) {
-      for (auto vi = qData.begin(); vi != qData.end(); ++vi) {
-        allVarNames.insert(vi.key());
-      }
-    }
-
-    for (const QString &varName : allVarNames) {
-      engine.setVariable("Q_sum_" + varName, aggregator.sumarQ(varName));
-      engine.setVariable("Q_avg_" + varName, aggregator.promedioQ(varName));
-      engine.setVariable("Q_max_" + varName, aggregator.maxQ(varName));
-      engine.setVariable("Q_min_" + varName, aggregator.minQ(varName));
-    }
-    engine.setVariable("_cant_q", aggregator.cantQ());
-  }
 
   // Build the 'env' object for custom user functions
   QVariantMap envObj = baseEnvObj;
@@ -511,6 +528,7 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
 
     // Build result row
     QVariantMap fila = {
+        {"cell_id", cell.value("id", 0)},
         {"codigo", codigoVar},
         {"codigo_variable", codigoVar},
         {"descripcion", cell["descripcion"]},
@@ -614,7 +632,6 @@ QVariantMap LiquidationEngine::buildQuincenaContext(
   double vh = baseContext.value("valor_hora", 0.0).toDouble();
   ctx["valor_hora"] = vh;
   ctx["jornal"] = vh;
-  if (!ctx.contains("basico")) ctx["basico"] = vh;
 
   // Inject employee values for this quincena
   QVariantList fieldValues =
@@ -748,24 +765,70 @@ int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
   QString esquema = emp.value("esquema_codigo", "MENSUAL").toString();
   QVariantMap ctx = result.value("contexto_final").toMap();
 
-  // Filter to serializable values only
-  QJsonObject jsonObj;
+  QJsonObject rootObj;
+
+  // 1. Meta
+  QJsonObject metaObj;
+  metaObj["empleado_id"] = emp["id"].toInt();
+  metaObj["esquema_codigo"] = esquema;
+  metaObj["mes"] = mes;
+  metaObj["anio"] = anio;
+  metaObj["periodo"] = periodo;
+  metaObj["fecha_calculo"] = ctx.value("fecha_calculo").toString();
+  rootObj["meta"] = metaObj;
+
+  // 2. Totales
+  QJsonObject totalesObj;
+  totalesObj["total_remunerativo"] = result.value("total_remunerativo").toDouble();
+  totalesObj["total_no_remunerativo"] = result.value("total_no_remunerativo").toDouble();
+  totalesObj["total_descuentos"] = result.value("total_descuentos").toDouble();
+  totalesObj["neto_a_cobrar"] = result.value("neto_a_cobrar").toDouble();
+  rootObj["totales"] = totalesObj;
+
+  // 3. Variables planas de insumos
+  QJsonObject varsObj;
   for (auto it = ctx.begin(); it != ctx.end(); ++it) {
     const QVariant &v = it.value();
     if (v.typeId() == QMetaType::Double || v.typeId() == QMetaType::Float) {
-      jsonObj[it.key()] = v.toDouble();
-    } else if (v.typeId() == QMetaType::Int ||
-               v.typeId() == QMetaType::LongLong) {
-      jsonObj[it.key()] = v.toInt();
+      varsObj[it.key()] = v.toDouble();
+      rootObj[it.key()] = v.toDouble();
+    } else if (v.typeId() == QMetaType::Int || v.typeId() == QMetaType::LongLong) {
+      varsObj[it.key()] = v.toInt();
+      rootObj[it.key()] = v.toInt();
     } else if (v.typeId() == QMetaType::Bool) {
-      jsonObj[it.key()] = v.toBool();
+      varsObj[it.key()] = v.toBool();
+      rootObj[it.key()] = v.toBool();
     } else if (v.typeId() == QMetaType::QString) {
-      jsonObj[it.key()] = v.toString();
+      varsObj[it.key()] = v.toString();
+      rootObj[it.key()] = v.toString();
     }
-    // Skip non-serializable types (QVariantMaps for namespaces, etc.)
   }
+  rootObj["variables"] = varsObj;
 
-  QString datosJson = QJsonDocument(jsonObj).toJson(QJsonDocument::Compact);
-  return m_db->saveReceipt(emp["id"].toInt(), esquema, mes, anio, periodo,
-                           datosJson);
+  // 4. Conceptos con cell_id permanente (Overwrites input variables with final concept amounts)
+  QJsonArray conceptosArr;
+  QVariantList concList = result.value("conceptos").toList();
+  for (const QVariant &c : concList) {
+    QVariantMap cm = c.toMap();
+    QJsonObject cObj;
+    cObj["cell_id"] = cm.value("cell_id", cm.value("id", 0)).toInt();
+    cObj["codigo"] = cm.value("codigo", cm.value("codigo_variable", "")).toString();
+    cObj["descripcion"] = cm.value("descripcion", "").toString();
+    cObj["seccion"] = cm.value("seccion", "").toString();
+    cObj["monto"] = cm.value("monto", 0.0).toDouble();
+    cObj["base"] = cm.value("base", 0.0).toDouble();
+    cObj["unidad"] = cm.value("unidad", 0.0).toDouble();
+    cObj["tipo_calculo"] = cm.value("tipo_calculo", "").toString();
+    conceptosArr.append(cObj);
+
+    // Concept amount ALWAYS overwrites input variable of same name
+    QString code = cObj["codigo"].toString();
+    if (!code.isEmpty()) {
+      rootObj[code] = cObj["monto"].toDouble();
+    }
+  }
+  rootObj["conceptos"] = conceptosArr;
+
+  QString datosJson = QJsonDocument(rootObj).toJson(QJsonDocument::Compact);
+  return m_db->saveReceipt(emp["id"].toInt(), esquema, mes, anio, periodo, datosJson);
 }

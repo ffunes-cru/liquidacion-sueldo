@@ -87,44 +87,29 @@ RowLayout {
         StyledComboBox {
             model: root.comboModel
             textRole: (model && model.length > 0 && typeof model[0] === "object" && model[0].text !== undefined) ? "text" : ""
-            currentIndex: root.comboCurrentIndex
 
-            Connections {
-                target: loader
-                function onFieldValueChanged() {
-                    if (!root.comboModel || root.comboModel.length === 0) return;
-                    for (var i = 0; i < root.comboModel.length; i++) {
-                        var item = root.comboModel[i];
-                        var valToMatch = "";
-                        if (typeof item === "object") {
-                            valToMatch = (item.id !== undefined) ? item.id.toString() : ((item.value !== undefined) ? item.value.toString() : (item.text !== undefined ? item.text.toString() : ""));
-                        } else {
-                            valToMatch = item.toString();
-                        }
-                        if (valToMatch === loader.fieldValue.toString()) {
-                            root.comboCurrentIndex = i;
-                            break;
-                        }
+            Component.onCompleted: syncValue()
+            onModelChanged: syncValue()
+
+            function syncValue() {
+                if (!model || model.length === 0) return;
+                var targetVal = loader.fieldValue ? loader.fieldValue.toString() : "";
+                for (var i = 0; i < model.length; i++) {
+                    var item = model[i];
+                    var val = (typeof item === "object") ? (item.id !== undefined ? item.id.toString() : (item.value !== undefined ? item.value.toString() : item.text.toString())) : item.toString();
+                    if (val === targetVal) {
+                        currentIndex = i;
+                        return;
                     }
                 }
+                if (currentIndex < 0) currentIndex = 0;
             }
 
-            onCurrentIndexChanged: {
-                root.comboCurrentIndex = currentIndex
-                if (model && model[currentIndex] !== undefined) {
-                    if (typeof model[currentIndex] === "object" && model[currentIndex].id !== undefined) {
-                        loader.fieldValue = model[currentIndex].id.toString()
-                    } else if (typeof model[currentIndex] === "object" && model[currentIndex].value !== undefined) {
-                        loader.fieldValue = model[currentIndex].value.toString()
-                    } else {
-                        loader.fieldValue = currentText
-                    }
-                }
-            }
-            onCurrentTextChanged: {
-                if (!model || model.length === 0 || typeof model[0] !== "object") {
-                    loader.fieldValue = currentText
-                }
+            onActivated: function(idx) {
+                if (!model || idx < 0 || idx >= model.length) return;
+                var item = model[idx];
+                var val = (typeof item === "object") ? (item.id !== undefined ? item.id.toString() : (item.value !== undefined ? item.value.toString() : item.text.toString())) : item.toString();
+                loader.fieldValue = val;
             }
         }
     }

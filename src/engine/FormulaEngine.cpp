@@ -47,139 +47,20 @@ void FormulaEngine::setupBuiltinFunctions() {
   m_engine->evaluate(R"(
         function int_(x) { return Math.trunc(x); }
 
-        var g = (typeof globalThis !== 'undefined' ? globalThis : this);
+void FormulaEngine::setupBuiltinFunctions() {
+  if (!m_engine) return;
 
-        function Q1(v) {
-            var obj = g._Q1_obj || g.Q1_obj;
-            if (obj && typeof obj[v] !== 'undefined') return Number(obj[v]) || 0;
-            if (obj && typeof obj['Q1_' + v] !== 'undefined') return Number(obj['Q1_' + v]) || 0;
-            if (typeof g['Q1_' + v] !== 'undefined') return Number(g['Q1_' + v]) || 0;
-            return 0;
+  m_engine->evaluate(R"(
+        function round(val, dec) {
+            var d = dec || 0;
+            var factor = Math.pow(10, d);
+            return Math.round(val * factor) / factor;
         }
-
-        function Q2(v) {
-            var obj = g._Q2_obj || g.Q2_obj;
-            if (obj && typeof obj[v] !== 'undefined') return Number(obj[v]) || 0;
-            if (obj && typeof obj['Q2_' + v] !== 'undefined') return Number(obj['Q2_' + v]) || 0;
-            if (typeof g['Q2_' + v] !== 'undefined') return Number(g['Q2_' + v]) || 0;
-            return 0;
-        }
-
-        function Q_sum(v) {
-            var total = 0, count = 0;
-            var obj1 = g._Q1_obj || g.Q1_obj;
-            if (obj1 && typeof obj1[v] !== 'undefined') { total += Number(obj1[v]) || 0; count++; }
-            var obj2 = g._Q2_obj || g.Q2_obj;
-            if (obj2 && typeof obj2[v] !== 'undefined') { total += Number(obj2[v]) || 0; count++; }
-
-            for (var k in g) {
-                if (k !== '_Q1_obj' && k !== '_Q2_obj' && k !== 'Q1_obj' && k !== 'Q2_obj' && k.match(/^_?Q\d+_obj$/)) {
-                    var obj = g[k];
-                    if (obj && typeof obj[v] !== 'undefined') { total += Number(obj[v]) || 0; count++; }
-                }
-            }
-            if (count === 0 && typeof g[v] !== 'undefined') return Number(g[v]) || 0;
-            return total;
-        }
-
-        function Q_sum_(v) { return Q_sum(v); }
-        function sumar_q(v) { return Q_sum(v); }
-
-        function Q_avg(v) {
-            var total = 0, count = 0;
-            var obj1 = g._Q1_obj || g.Q1_obj;
-            if (obj1 && typeof obj1[v] !== 'undefined') { total += Number(obj1[v]) || 0; count++; }
-            var obj2 = g._Q2_obj || g.Q2_obj;
-            if (obj2 && typeof obj2[v] !== 'undefined') { total += Number(obj2[v]) || 0; count++; }
-
-            for (var k in g) {
-                if (k !== '_Q1_obj' && k !== '_Q2_obj' && k !== 'Q1_obj' && k !== 'Q2_obj' && k.match(/^_?Q\d+_obj$/)) {
-                    var obj = g[k];
-                    if (obj && typeof obj[v] !== 'undefined') { total += Number(obj[v]) || 0; count++; }
-                }
-            }
-            return count > 0 ? total / count : (typeof g[v] !== 'undefined' ? Number(g[v]) || 0 : 0);
-        }
-
-        function Q_avg_(v) { return Q_avg(v); }
-        function promedio_q(v) { return Q_avg(v); }
-
-        function Q_max(v) {
-            var maxVal = -Infinity, count = 0;
-            var obj1 = g._Q1_obj || g.Q1_obj;
-            if (obj1 && typeof obj1[v] !== 'undefined') { maxVal = Math.max(maxVal, Number(obj1[v]) || 0); count++; }
-            var obj2 = g._Q2_obj || g.Q2_obj;
-            if (obj2 && typeof obj2[v] !== 'undefined') { maxVal = Math.max(maxVal, Number(obj2[v]) || 0); count++; }
-
-            for (var k in g) {
-                if (k !== '_Q1_obj' && k !== '_Q2_obj' && k !== 'Q1_obj' && k !== 'Q2_obj' && k.match(/^_?Q\d+_obj$/)) {
-                    var obj = g[k];
-                    if (obj && typeof obj[v] !== 'undefined') { maxVal = Math.max(maxVal, Number(obj[v]) || 0); count++; }
-                }
-            }
-            return count > 0 ? maxVal : (typeof g[v] !== 'undefined' ? Number(g[v]) || 0 : 0);
-        }
-
-        function Q_max_(v) { return Q_max(v); }
-        function max_q(v) { return Q_max(v); }
-
-        function Q_min(v) {
-            var minVal = Infinity, count = 0;
-            var obj1 = g._Q1_obj || g.Q1_obj;
-            if (obj1 && typeof obj1[v] !== 'undefined') { minVal = Math.min(minVal, Number(obj1[v]) || 0); count++; }
-            var obj2 = g._Q2_obj || g.Q2_obj;
-            if (obj2 && typeof obj2[v] !== 'undefined') { minVal = Math.min(minVal, Number(obj2[v]) || 0); count++; }
-
-            for (var k in g) {
-                if (k !== '_Q1_obj' && k !== '_Q2_obj' && k !== 'Q1_obj' && k !== 'Q2_obj' && k.match(/^_?Q\d+_obj$/)) {
-                    var obj = g[k];
-                    if (obj && typeof obj[v] !== 'undefined') { minVal = Math.min(minVal, Number(obj[v]) || 0); count++; }
-                }
-            }
-            return count > 0 ? minVal : (typeof g[v] !== 'undefined' ? Number(g[v]) || 0 : 0);
-        }
-
-        function Q_min_(v) { return Q_min(v); }
-        function min_q(v) { return Q_min(v); }
-
-        function H_list(v, limit) {
-            if (typeof _history === 'undefined' || !Array.isArray(_history)) return [];
-            var n = limit || _history.length;
-            var res = [];
-            for (var i = 0; i < Math.min(n, _history.length); i++) {
-                var item = _history[i];
-                if (item && typeof item[v] !== 'undefined') res.push(Number(item[v]) || 0);
-            }
-            return res;
-        }
-
-        function H_sum(v, limit) {
-            var arr = H_list(v, limit), s = 0;
-            for (var i = 0; i < arr.length; i++) s += arr[i];
-            return s;
-        }
-
-        function H_max(v, limit) {
-            var arr = H_list(v, limit);
-            if (arr.length === 0) return 0;
-            var m = -Infinity;
-            for (var i = 0; i < arr.length; i++) if (arr[i] > m) m = arr[i];
-            return m;
-        }
-
-        function H_avg(v, limit) {
-            var arr = H_list(v, limit);
-            if (arr.length === 0) return 0;
-            var s = 0;
-            for (var i = 0; i < arr.length; i++) s += arr[i];
-            return s / arr.length;
-        }
-
-        function H_val(v, offset) {
-            var arr = H_list(v, (offset || 1) + 1);
-            var idx = (offset || 1) - 1;
-            return (idx >= 0 && idx < arr.length) ? arr[idx] : 0;
-        }
+        function abs(val) { return Math.abs(val); }
+        function min(a, b) { return Math.min(a, b); }
+        function max(a, b) { return Math.max(a, b); }
+        function floor(val) { return Math.floor(val); }
+        function ceil(val) { return Math.ceil(val); }
     )");
 }
 
@@ -375,14 +256,10 @@ QVariant FormulaEngine::evaluate(const QString &formula, QString *error) {
   static const QSet<QString> jsKeywords = {
       "if",     "else",      "true",     "false",    "True",    "False",
       "null",   "undefined", "return",   "function", "var",     "let",
-      "const",  "round",     "abs",      "min",      "max",     "int_",
-      "Q1",     "Q2",        "Q_sum",    "Q_sum_",   "Q_avg",   "Q_avg_",
-      "Q_max",  "Q_max_",    "Q_min",    "Q_min_",   "sumar_q", "promedio_q",
-      "max_q",  "min_q",     "cant_q",   "H_list",   "H_sum",   "H_max",
-      "H_avg",  "H_val",     "Math",     "Number",   "Array",   "Object",
-      "String", "_history",  "env",      "typeof",   "for",     "while",
-      "do",     "break",     "continue", "new",      "this",    "in",
-      "of",     "length",    "push",     "pop",      "forEach", "map",
+      "const",  "round",     "abs",      "min",      "max",     "floor",   "ceil",
+      "Math",   "Number",    "Array",    "Object",   "String",  "env",     "typeof",
+      "for",    "while",     "do",       "break",    "continue","new",     "this",
+      "in",     "of",        "length",   "push",     "pop",     "forEach", "map",
       "filter", "reduce",    "indexOf",  "isArray"};
 
   // Build a set of character positions that are inside quoted strings
@@ -402,11 +279,9 @@ QVariant FormulaEngine::evaluate(const QString &formula, QString *error) {
   QRegularExpressionMatchIterator it = identRegex.globalMatch(expr);
   while (it.hasNext()) {
     QRegularExpressionMatch match = it.next();
-    // Skip identifiers that are followed by '(' (they are function calls)
-    int endPos = match.capturedEnd(0);
-    int p = endPos;
-    while (p < expr.length() && expr[p].isSpace()) p++;
-    if (p < expr.length() && expr[p] == '(')
+    int pos = match.capturedStart(0);
+    // Skip identifiers inside quoted strings
+    if (quotedPositions.contains(pos))
       continue;
 
     QString varName = match.captured(0);

@@ -224,28 +224,21 @@ AppController::getAvailableFormulaVariables(const QString &esquemaCodigo) {
   addVar("max(a, b)", "Retorna el máximo entre expresiones", "Función Motor");
   addVar("abs(val)", "Retorna el valor absoluto", "Función Motor");
 
-  // Quincena functions
-  addVar("Q1(\"var\")", "Valor de una variable en la Quincena 1",
-         "Agregación Quincenal");
-  addVar("Q2(\"var\")", "Valor de una variable en la Quincena 2",
-         "Agregación Quincenal");
-  addVar("Q_sum(\"var\")", "Suma de una variable en las quincenas del mes",
-         "Agregación Quincenal");
-  addVar("Q_avg(\"var\")", "Promedio de una variable en las quincenas del mes",
-         "Agregación Quincenal");
-  addVar("Q_max(\"var\")",
-         "Valor máximo de una variable en las quincenas del mes",
-         "Agregación Quincenal");
+  // Custom User Functions from DB
+  QVariantList customFuncs = m_db->listCustomFunctions();
+  for (const QVariant &f : customFuncs) {
+    QVariantMap fm = f.toMap();
+    QString fnName = fm["name"].toString();
+    QString params = fm["params"].toString();
+    QString desc = fm["description"].toString();
+    addVar(fnName + "(" + params + ")", desc, "Función Personalizada");
+  }
 
-  // Historical functions
-  addVar("H_sum(\"var\", meses)", "Sumatoria de los últimos N meses recibidos",
-         "Histórico Mensual");
-  addVar("H_max(\"var\", meses)",
-         "Valor máximo de los últimos N meses (para SAC)", "Histórico Mensual");
-  addVar("H_avg(\"var\", meses)", "Promedio de los últimos N meses",
-         "Histórico Mensual");
-  addVar("H_val(\"var\", offset)",
-         "Valor de una variable N meses atrás (offset)", "Histórico Mensual");
+  // Environment Object
+  addVar("env.quincenas", "Arreglo de quincenas del mes [ { code: 'Q1', ... } ]", "Entorno JS");
+  addVar("env.historial", "Arreglo de recibos históricos procesados", "Entorno JS");
+  addVar("env.empleado", "Objeto empleado (legajo, nombre, antigüedad, etc.)", "Entorno JS");
+  addVar("env.globals", "Diccionario de constantes globales de la empresa", "Entorno JS");
 
   // Local concept execution variables
   addVar("unidad", "Valor de la columna Unidad/Cantidad del concepto actual",

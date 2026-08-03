@@ -76,7 +76,8 @@ Item {
         conceptDialog.simplePorcentaje = (cellData.simplePorcentaje !== undefined ? cellData.simplePorcentaje : (cellData.simple_porcentaje !== undefined ? cellData.simple_porcentaje : 0.0)).toString()
         conceptDialog.simpleBaseVariable = cellData.simpleBaseVariable || cellData.simple_base_variable || ""
         conceptDialog.simpleMontoFijo = (cellData.simpleMontoFijo !== undefined ? cellData.simpleMontoFijo : (cellData.simple_monto_fijo !== undefined ? cellData.simple_monto_fijo : 0.0)).toString()
-        conceptDialog.visibleRecibo = cellData.visibleRecibo !== undefined ? cellData.visibleRecibo : true
+        var vis = (cellData.visibleRecibo !== undefined) ? cellData.visibleRecibo : cellData.visible_recibo;
+        conceptDialog.visibleRecibo = (vis === true || vis === 1 || vis === "1" || vis === "true");
         conceptDialog.open()
     }
 

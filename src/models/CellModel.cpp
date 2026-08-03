@@ -32,7 +32,7 @@ QVariant CellModel::data(const QModelIndex &index, int role) const
     case SimplePorcentajeRole:   return c["simple_porcentaje"];
     case SimpleBaseVariableRole: return c["simple_base_variable"];
     case SimpleMontoFijoRole:    return c["simple_monto_fijo"];
-    case VisibleReciboRole:      return c["visible_recibo"];
+    case VisibleReciboRole:      return c["visible_recibo"].toBool();
     case ColorHexRole:           return c["color_hex"];
     default:                     return {};
     }

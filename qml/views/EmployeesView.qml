@@ -99,16 +99,20 @@ MasterDetailView {
             onClicked: root.selectEmployeeAtRow(index)
 
             onEditRequested: function(data) {
+                var t = (data.tipoLiquidacion || "mensual").toString().toLowerCase()
                 employeeDialog.openEdit({
                     employeeId: data.employeeId,
                     legajo: data.legajo,
                     nombre: data.nombre,
-                    tipoLiq: data.tipoLiquidacion,
+                    tipoLiq: t,
                     esquema: data.esquema,
                     categoriaId: data.categoriaId,
                     fechaIngreso: data.fechaIngreso,
                     cuil: data.cuil
                 })
+                employeeDialog.setComboModel("categoriaId", root.getCategoriesCombo())
+                employeeDialog.setComboModel("esquema", root.getSchemasCombo(t))
+                employeeDialog.setFieldVisible("categoriaId", t === "jornal")
             }
             onDeleteRequested: function(id) {
                 AppController.employeeModel.removeEmployee(id)

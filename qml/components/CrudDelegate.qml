@@ -31,7 +31,7 @@ Rectangle {
     signal duplicateRequested(var itemData)
 
     // ── Visual ──────────────────────────────────────────────────
-    width: ListView.view ? ListView.view.width : parent.width
+    width: ListView.view ? (ListView.view.width - 12) : parent.width
     height: 56
     radius: 6
     color: mouseArea.containsMouse ? Theme.hoverBg : Theme.cardBg
