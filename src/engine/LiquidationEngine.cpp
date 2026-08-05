@@ -388,9 +388,6 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
   // ═══════════════════════════════════════════════════════════════
   QVariantMap resultadosPorSeccion;
   QVariantList allConceptosList;
-  double totalRemunerativo = 0.0;
-  double totalNoRemunerativo = 0.0;
-  double totalDescuentos = 0.0;
 
   QVariantList quincenasArray = envObj["quincenas"].toList();
 
@@ -429,10 +426,6 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
       double baseVal = 0.0;
       if (!baseVar.isEmpty()) {
         baseVal = engine.getVariable(baseVar).toDouble();
-        if (baseVal == 0.0 &&
-            (baseVar == "bruto" || baseVar == "total_remunerativo")) {
-          baseVal = totalRemunerativo;
-        }
       }
       unidad = pct;
       base = baseVal;
@@ -449,10 +442,6 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
       double baseVal = 0.0;
       if (!baseVar.isEmpty()) {
         baseVal = engine.getVariable(baseVar).toDouble();
-        if (baseVal == 0.0 &&
-            (baseVar == "bruto" || baseVar == "total_remunerativo")) {
-          baseVal = totalRemunerativo;
-        }
       }
 
       if (pct != 0.0 && baseVal != 0.0) {
@@ -547,34 +536,7 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
     resultadosPorSeccion[seccion] = seccionList;
 
     allConceptosList.append(fila);
-
-    // Classify and accumulate totals
-    QString secUpper = seccion.trimmed().toUpper();
-    if (secUpper == "REMUNERATIVO" || secUpper == "COMPOSICION" ||
-        secUpper == "HABERES") {
-      totalRemunerativo += monto;
-      // Inject running totals progressively so subsequent formulas can
-      // reference them
-      engine.setVariable("bruto", totalRemunerativo);
-      engine.setVariable("total_remunerativo", totalRemunerativo);
-    } else if (secUpper == "NO_REMUNERATIVO") {
-      totalNoRemunerativo += monto;
-      engine.setVariable("total_no_remunerativo", totalNoRemunerativo);
-    } else if (secUpper == "DESCUENTO" || secUpper == "RECIBO" ||
-               secUpper == "RETENCION" || secUpper == "RETENCIONES") {
-      totalDescuentos += monto;
-      engine.setVariable("total_descuentos", totalDescuentos);
-    }
   }
-
-  double netoACobrar =
-      (totalRemunerativo + totalNoRemunerativo) - totalDescuentos;
-
-  contexto["total_remunerativo"] = totalRemunerativo;
-  contexto["total_no_remunerativo"] = totalNoRemunerativo;
-  contexto["total_descuentos"] = totalDescuentos;
-  contexto["neto_a_cobrar"] = netoACobrar;
-  contexto["neto"] = netoACobrar;
 
   // ═══════════════════════════════════════════════════════════════
   // STEP 6: Evaluate chart cells
@@ -602,6 +564,11 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
         {"valor", valor},
     });
   }
+
+  double totalRemunerativo = contexto.value("total_remunerativo", 0.0).toDouble();
+  double totalNoRemunerativo = contexto.value("total_no_remunerativo", 0.0).toDouble();
+  double totalDescuentos = contexto.value("total_descuentos", 0.0).toDouble();
+  double netoACobrar = contexto.value("neto", contexto.value("neto_a_cobrar", 0.0)).toDouble();
 
   return {
       {"empleado", employee},
@@ -724,34 +691,7 @@ QVariantMap LiquidationEngine::buildQuincenaContext(
 
     tmpEngine.setVariable(codigo, monto);
     ctx[codigo] = monto;
-
-    // Accumulate quincena totals
-    if (seccion.contains("REMUNERATIVO") &&
-        !seccion.contains("NO_REMUNERATIVO") &&
-        !seccion.contains("NO REMUNERATIVO")) {
-      qBruto += monto;
-      tmpEngine.setVariable("bruto", qBruto);
-      tmpEngine.setVariable("total_remunerativo", qBruto);
-      ctx["bruto"] = qBruto;
-      ctx["total_remunerativo"] = qBruto;
-    } else if (seccion.contains("NO_REMUNERATIVO") ||
-               seccion.contains("NO REMUNERATIVO")) {
-      qNoRemun += monto;
-      tmpEngine.setVariable("total_no_remunerativo", qNoRemun);
-      ctx["total_no_remunerativo"] = qNoRemun;
-    } else if (seccion.contains("DESCUENTO") || seccion.contains("DEDUCCION") ||
-               seccion.contains("RETENCION")) {
-      qDesc += monto;
-      tmpEngine.setVariable("total_descuentos", qDesc);
-      ctx["total_descuentos"] = qDesc;
-    }
   }
-
-  ctx["bruto"] = qBruto;
-  ctx["total_remunerativo"] = qBruto;
-  ctx["total_no_remunerativo"] = qNoRemun;
-  ctx["total_descuentos"] = qDesc;
-  ctx["neto"] = qBruto + qNoRemun - qDesc;
 
   qDebug() << "[DEBUG buildQuincenaContext] Fin quincena" << quincenaCode << "basico:" << ctx.value("basico") << "keys:" << ctx.keys();
 

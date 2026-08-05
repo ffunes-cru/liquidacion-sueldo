@@ -959,9 +959,9 @@ QVariantList DatabaseManager::listAllCells() const
     QVariantList result;
     QSqlQuery q(m_db);
     q.exec(R"(
-        SELECT c.*, s.titulo AS seccion_titulo
+        SELECT c.*, COALESCE(s.titulo, c.seccion_codigo) AS seccion_titulo
         FROM celdas_calculo c
-        JOIN secciones s ON s.codigo = c.seccion_codigo
+        LEFT JOIN secciones s ON s.codigo = c.seccion_codigo
         ORDER BY c.esquema_codigo, c.orden
     )");
     while (q.next()) {

@@ -23,17 +23,31 @@ Item {
     // ── Signals ─────────────────────────────────────────────────
     signal masterItemSelected(var itemData, int index)
 
-    RowLayout {
+    SplitView {
         anchors.fill: parent
-        anchors.margins: 15
-        spacing: 15
+        anchors.margins: 12
+        orientation: Qt.Horizontal
+
+        handle: Rectangle {
+            implicitWidth: 8
+            color: "transparent"
+            Rectangle {
+                anchors.centerIn: parent
+                width: 4
+                height: 36
+                radius: 2
+                color: SplitHandle.hovered || SplitHandle.pressed ? Theme.accentColor : Qt.rgba(255, 255, 255, 0.15)
+            }
+        }
 
         // ═══════════════════════════════════════════════════════
         // MASTER PANEL (Left)
         // ═══════════════════════════════════════════════════════
         Rectangle {
-            Layout.fillHeight: true
-            Layout.preferredWidth: root.masterWidth
+            SplitView.preferredWidth: root.masterWidth
+            SplitView.minimumWidth: 260
+            SplitView.maximumWidth: 600
+            SplitView.fillHeight: true
             color: Theme.panelBg
             radius: 8
             border.color: Theme.borderColor
@@ -93,16 +107,18 @@ Item {
         // DETAIL PANEL (Right)
         // ═══════════════════════════════════════════════════════
         Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            SplitView.fillWidth: true
+            SplitView.minimumWidth: 300
+            SplitView.fillHeight: true
             color: Theme.panelBg
             radius: 8
             border.color: Theme.borderColor
 
-            Item {
+            ColumnLayout {
                 id: detailContentContainer
                 anchors.fill: parent
-                anchors.margins: 20
+                anchors.margins: 16
+                spacing: 12
             }
         }
     }
