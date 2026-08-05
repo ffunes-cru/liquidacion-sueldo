@@ -57,9 +57,9 @@ AppDialog {
             }
         }
 
-        if (root.tipoCalculo === "porcentaje" || root.tipoCalculo === "simple") {
+        if (root.tipoCalculo === "porcentaje" || root.tipoCalculo === "percentage" || root.tipoCalculo === "simple") {
             cbTipoCalculo.currentIndex = 1
-        } else if (root.tipoCalculo === "fijo") {
+        } else if (root.tipoCalculo === "fijo" || root.tipoCalculo === "fixed") {
             cbTipoCalculo.currentIndex = 2
         } else {
             cbTipoCalculo.currentIndex = 0

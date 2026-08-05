@@ -64,20 +64,19 @@ RowLayout {
 
     Component {
         id: dateComponent
-        RowLayout {
-            spacing: 6
-            StyledTextField {
-                Layout.fillWidth: true
-                placeholderText: root.placeholder !== "" ? root.placeholder : "AAAA-MM-DD"
-                text: loader.fieldValue
-                readOnly: root.readOnly
-                inputMethodHints: Qt.ImhDate
-                onTextChanged: loader.fieldValue = text
+        StyledDatePicker {
+            Layout.fillWidth: true
+            readOnly: root.readOnly
+            Component.onCompleted: {
+                if (loader.fieldValue && loader.fieldValue !== "") {
+                    var parsed = Date.fromLocaleString(Qt.locale(), loader.fieldValue, "yyyy-MM-dd")
+                    if (!isNaN(parsed.getTime())) {
+                        selectedDate = parsed
+                    }
+                }
             }
-            StyledButton {
-                variant: "secondary"
-                text: "📅 Hoy"
-                onClicked: loader.fieldValue = Qt.formatDate(new Date(), "yyyy-MM-dd")
+            onDateSelected: function(newDate) {
+                loader.fieldValue = formattedDate
             }
         }
     }

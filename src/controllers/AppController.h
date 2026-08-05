@@ -133,6 +133,11 @@ public:
   // Validation
   Q_INVOKABLE QString validateVariableCode(const QString &code);
 
+  // Native File Dialog Helpers
+  Q_INVOKABLE QString selectSaveFile(const QString &title, const QString &defaultName, const QString &filter);
+  Q_INVOKABLE QString selectOpenFile(const QString &title, const QString &defaultDir, const QString &filter);
+  Q_INVOKABLE QString selectFolder(const QString &title, const QString &defaultDir);
+
   // ── Export / Import ─────────────────────────────────────────
   Q_INVOKABLE QString exportDataXlsx(const QString &path);
   Q_INVOKABLE bool importDataXlsx(const QString &path);

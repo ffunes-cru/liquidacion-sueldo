@@ -634,7 +634,7 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
 
     QPdfWriter writer(filePath);
     writer.setPageSize(QPageSize::A4);
-    writer.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout::Millimeter);
+    writer.setPageMargins(QMarginsF(8, 8, 8, 8), QPageLayout::Millimeter);
     writer.setResolution(300);
 
     QPainter painter(&writer);
@@ -648,58 +648,81 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
 
     // ── Helper lambdas ──────────────────────────────────────────
     auto drawLine = [&](int y1) {
-        painter.setPen(QPen(Qt::gray, 2));
+        painter.setPen(QPen(QColor(148, 163, 184), 1.5));
         painter.drawLine(0, y1, pageW, y1);
+        painter.setPen(QPen(Qt::black, 1));
     };
 
-    QFont titleFont("Helvetica", 14, QFont::Bold);
-    QFont headerFont("Helvetica", 10, QFont::Bold);
-    QFont normalFont("Helvetica", 9);
-    QFont smallFont("Helvetica", 8);
+    auto fmtNum = [](double val, int maxDecimals = 4) -> QString {
+        QString s = QString::number(val, 'f', maxDecimals);
+        if (s.contains('.')) {
+            while (s.endsWith('0')) s.chop(1);
+            if (s.endsWith('.')) s.chop(1);
+        }
+        return s.replace('.', ',');
+    };
+
+    auto fmtMoney = [](double val, int maxDecimals = 4) -> QString {
+        QString s = QString::number(val, 'f', maxDecimals);
+        if (s.contains('.')) {
+            while (s.endsWith('0') && s.length() - s.indexOf('.') > 3) s.chop(1);
+        }
+        return s.replace('.', ',');
+    };
+
+    QFont titleFont("Helvetica", 13, QFont::Bold);
+    QFont headerFont("Helvetica", 9.5, QFont::Bold);
+    QFont normalFont("Helvetica", 8.5);
+    QFont smallFont("Helvetica", 7.5);
 
     // ── Company Header ──────────────────────────────────────────
     painter.setFont(titleFont);
+    painter.setPen(QPen(Qt::black));
     QString razonSocial = companyData.value("razon_social", "EMPRESA").toString();
-    painter.drawText(QRect(0, y, pageW, 120), Qt::AlignLeft | Qt::AlignVCenter, razonSocial);
-    y += 130;
+    painter.drawText(QRect(0, y, pageW, 70), Qt::AlignLeft | Qt::AlignVCenter, razonSocial);
+    y += 75;
 
     painter.setFont(smallFont);
-    painter.drawText(QRect(0, y, pageW / 2, 60), Qt::AlignLeft,
+    painter.setPen(QPen(Qt::black));
+    painter.drawText(QRect(0, y, pageW / 2, 40), Qt::AlignLeft,
                      "CUIT: " + companyData.value("cuit", "").toString());
-    painter.drawText(QRect(pageW / 2, y, pageW / 2, 60), Qt::AlignRight,
+    painter.drawText(QRect(pageW / 2, y, pageW / 2, 40), Qt::AlignRight,
                      "Dirección: " + companyData.value("direccion", "").toString());
-    y += 70;
+    y += 45;
     drawLine(y);
-    y += 20;
+    y += 12;
 
     // ── Employee Data ───────────────────────────────────────────
     painter.setFont(headerFont);
-    painter.drawText(QRect(0, y, pageW, 80), Qt::AlignLeft, "RECIBO DE SUELDO");
-    y += 90;
+    painter.setPen(QPen(Qt::black));
+    painter.drawText(QRect(0, y, pageW, 50), Qt::AlignLeft, "RECIBO DE SUELDO");
+    y += 55;
 
     painter.setFont(normalFont);
+    painter.setPen(QPen(Qt::black));
     QString empName = employeeData.value("nombre_completo", "Empleado").toString();
     QString empLegajo = employeeData.value("legajo", "").toString();
-    painter.drawText(QRect(0, y, pageW / 2, 60), Qt::AlignLeft, "Empleado: " + empName);
-    painter.drawText(QRect(pageW / 2, y, pageW / 2, 60), Qt::AlignRight, "Legajo: " + empLegajo);
-    y += 70;
+    painter.drawText(QRect(0, y, pageW / 2, 40), Qt::AlignLeft, "Empleado: " + empName);
+    painter.drawText(QRect(pageW / 2, y, pageW / 2, 40), Qt::AlignRight, "Legajo: " + empLegajo);
+    y += 45;
     drawLine(y);
-    y += 20;
+    y += 12;
 
     // ── Concept Lines ───────────────────────────────────────────
     painter.setFont(headerFont);
+    painter.setPen(QPen(Qt::black));
     int colDesc = 0;
     int colUnit = pageW * 0.55;
     int colBase = pageW * 0.67;
     int colMonto = pageW * 0.81;
 
-    painter.drawText(QRect(colDesc, y, colUnit - colDesc, 60), Qt::AlignLeft, "Concepto");
-    painter.drawText(QRect(colUnit, y, colBase - colUnit, 60), Qt::AlignRight, "Unidad");
-    painter.drawText(QRect(colBase, y, colMonto - colBase, 60), Qt::AlignRight, "Base");
-    painter.drawText(QRect(colMonto, y, pageW - colMonto, 60), Qt::AlignRight, "Monto ($)");
-    y += 70;
+    painter.drawText(QRect(colDesc, y, colUnit - colDesc, 40), Qt::AlignLeft, "Concepto");
+    painter.drawText(QRect(colUnit, y, colBase - colUnit, 40), Qt::AlignRight, "Unidad");
+    painter.drawText(QRect(colBase, y, colMonto - colBase, 40), Qt::AlignRight, "Base");
+    painter.drawText(QRect(colMonto, y, pageW - colMonto, 40), Qt::AlignRight, "Monto ($)");
+    y += 45;
     drawLine(y);
-    y += 10;
+    y += 8;
 
     painter.setFont(normalFont);
     QVariantList conceptos = liquidationResult.value("conceptos").toList();
@@ -721,52 +744,64 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
         bool isTotal = (!isSeparator && (codigo.startsWith("TOT_") || codigo.startsWith("TOTAL_") || codigo.startsWith("NETO") || desc.toUpper().contains("TOTAL") || desc.toUpper().contains("NETO")));
 
         if (isSeparator) {
-            y += 6;
-            QRect sepRect(0, y, pageW, 58);
+            y += 4;
+            QRect sepRect(0, y, pageW, 36);
             painter.fillRect(sepRect, QColor(234, 242, 253));
-            painter.setPen(QPen(QColor(59, 130, 246), 1.5));
+            painter.setPen(QPen(QColor(59, 130, 246), 1));
             painter.drawRect(sepRect);
 
-            QFont sepFont("Helvetica", 9, QFont::Bold);
+            QFont sepFont("Helvetica", 8.5, QFont::Bold);
             painter.setFont(sepFont);
             painter.setPen(QPen(QColor(15, 23, 42)));
-            painter.drawText(QRect(12, y, pageW - 24, 58), Qt::AlignLeft | Qt::AlignVCenter, "■  " + desc.toUpper());
+            painter.drawText(QRect(8, y, pageW - 16, 36), Qt::AlignLeft | Qt::AlignVCenter, "■  " + desc.toUpper());
 
             painter.setFont(normalFont);
             painter.setPen(QPen(Qt::black));
-            y += 65;
+            y += 42;
         } else {
             if (isTotal) {
-                y += 4;
-                QRect totalRect(0, y, pageW, 58);
+                y += 2;
+                QRect totalRect(0, y, pageW, 36);
                 painter.fillRect(totalRect, QColor(234, 242, 253));
-                painter.setPen(QPen(QColor(59, 130, 246), 1.5));
+                painter.setPen(QPen(QColor(59, 130, 246), 1));
                 painter.drawRect(totalRect);
 
-                QFont boldFont("Helvetica", 9, QFont::Bold);
+                QFont boldFont("Helvetica", 8.5, QFont::Bold);
                 painter.setFont(boldFont);
                 painter.setPen(QPen(QColor(15, 23, 42)));
+            } else {
+                painter.setPen(QPen(Qt::black));
             }
 
-            painter.drawText(QRect(colDesc + (isTotal ? 8 : 0), y, colUnit - colDesc - 10, 50), Qt::AlignLeft, desc);
+            painter.drawText(QRect(colDesc + (isTotal ? 6 : 0), y, colUnit - colDesc - 10, 32), Qt::AlignLeft | Qt::AlignVCenter, desc);
 
-            if (unidad != 0)
-                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, 50), Qt::AlignRight,
-                                 fmtNum(unidad, 2));
-            if (base > 0)
-                painter.drawText(QRect(colBase, y, colMonto - colBase - 10, 50), Qt::AlignRight,
-                                 fmtMoney(base));
+            QString tc = c["tipo_calculo"].toString().toLower();
+            double sPct = c["simple_porcentaje"].toDouble();
+            QString sBaseVar = c["simple_base_variable"].toString();
+            bool isPct = (tc == "porcentaje" || tc == "percentage" || tc == "simple" || sPct > 0);
+
+            if (isPct && unidad > 0) {
+                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, 32), Qt::AlignRight | Qt::AlignVCenter, "% " + fmtNum(unidad, 2));
+            } else if (isPct && sPct > 0) {
+                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, 32), Qt::AlignRight | Qt::AlignVCenter, "% " + fmtNum(sPct, 2));
+            } else if (unidad != 0) {
+                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, 32), Qt::AlignRight | Qt::AlignVCenter, fmtNum(unidad, 4));
+            }
+
+            if (!isSeparator && !isTotal && base > 0) {
+                painter.drawText(QRect(colBase, y, colMonto - colBase - 10, 32), Qt::AlignRight | Qt::AlignVCenter, fmtMoney(base, 2));
+            }
 
             if (monto != 0) {
-                painter.drawText(QRect(colMonto - (isTotal ? 8 : 0), y, pageW - colMonto, 50), Qt::AlignRight,
-                                 fmtMoney(monto));
+                painter.drawText(QRect(colMonto - (isTotal ? 6 : 0), y, pageW - colMonto, 32), Qt::AlignRight | Qt::AlignVCenter,
+                                 fmtMoney(monto, 4));
             }
 
             if (isTotal) {
                 painter.setFont(normalFont);
                 painter.setPen(QPen(Qt::black));
             }
-            y += isTotal ? 65 : 55;
+            y += isTotal ? 42 : 34;
         }
     }
 
@@ -804,85 +839,100 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
         }
 
         if (!chartSlices.isEmpty()) {
-            int reqHeight = qRound(pageW * 0.42);
-            if (y > writer.height() - reqHeight) {
-                writer.newPage();
-                y = 50;
-            }
-
-            y += 20;
+            y += 15;
             // Title Header Bar
-            int headerH = qMax(36, qRound(pageW * 0.035));
+            int headerH = 26;
             QRect chartHeaderRect(0, y, pageW, headerH);
             painter.fillRect(chartHeaderRect, QColor(241, 245, 249));
-            painter.setPen(QPen(QColor(203, 213, 225), 1.5));
+            painter.setPen(QPen(QColor(203, 213, 225), 1));
+            painter.setBrush(Qt::NoBrush);
             painter.drawRect(chartHeaderRect);
 
-            int titleFontSize = qMax(11, qRound(pageW * 0.015));
-            QFont titleFont("Helvetica", titleFontSize, QFont::Bold);
+            QFont titleFont("Helvetica", 9, QFont::Bold);
             painter.setFont(titleFont);
             painter.setPen(QPen(QColor(15, 23, 42)));
-            painter.drawText(chartHeaderRect.adjusted(16, 0, -16, 0), Qt::AlignLeft | Qt::AlignVCenter, "📊 DISTRIBUCIÓN Y ANÁLISIS DEL RECIBO");
-            y += headerH + 20;
+            painter.setBrush(Qt::NoBrush);
+            painter.drawText(chartHeaderRect.adjusted(12, 0, -12, 0), Qt::AlignLeft | Qt::AlignVCenter, "DISTRIBUCION Y ANALISIS DEL RECIBO");
+            y += headerH + 18;
 
             double sumVal = 0;
             for (const auto &sl : chartSlices) sumVal += sl.value;
             double baseTotal = (refTotal > 0) ? refTotal : (sumVal > 0 ? sumVal : 1.0);
 
-            int pieDiameter = qRound(pageW * 0.36);
-            int pieX = qRound(pageW * 0.03);
+            int pieDiameter = qRound(pageW * 0.18);
+            int pieX = qRound(pageW * 0.04);
             int pieY = y;
 
             // Draw pie slices vectorially
-            int startAngle = 90 * 16; // 12 o'clock in 1/16th degrees
+            int startAngle = 90 * 16;
             for (const auto &sl : chartSlices) {
                 int spanAngle = -qRound((sl.value / baseTotal) * 360.0 * 16.0);
                 painter.setBrush(QBrush(sl.color));
-                painter.setPen(QPen(Qt::white, 2.0));
+                painter.setPen(QPen(Qt::white, 1.5));
                 painter.drawPie(pieX, pieY, pieDiameter, pieDiameter, startAngle, spanAngle);
                 startAngle += spanAngle;
             }
 
             // Draw center donut circle for modern flat visual
-            int innerD = qRound(pieDiameter * 0.40);
+            int innerD = qRound(pieDiameter * 0.45);
             int innerX = pieX + (pieDiameter - innerD) / 2;
             int innerY = pieY + (pieDiameter - innerD) / 2;
             painter.setBrush(QBrush(Qt::white));
-            painter.setPen(QPen(QColor(226, 232, 240), 1.5));
+            painter.setPen(QPen(QColor(226, 232, 240), 1));
             painter.drawEllipse(innerX, innerY, innerD, innerD);
 
             // Draw legend column to the right
-            int legendX = pieX + pieDiameter + qRound(pageW * 0.04);
-            int legendY = pieY + qRound(pieDiameter * 0.04);
-            int legendW = pageW - legendX - 10;
+            int legendX = pieX + pieDiameter + qRound(pageW * 0.06);
+            int legendY = pieY;
+            int legendW = pageW - legendX - 5;
 
-            int legendFontSize = qMax(10, qRound(pageW * 0.013));
-            QFont legendFont("Helvetica", legendFontSize, QFont::Bold);
+            QFont legendFont("Helvetica", 8, QFont::Bold);
             painter.setFont(legendFont);
 
-            int boxSize = qMax(16, qRound(pageW * 0.020));
-            int lineH = qMax(28, qRound(pageW * 0.035));
+            int boxSize = 11;
+            int lineH = 24;
 
             for (const auto &sl : chartSlices) {
                 // Color box
                 QRect boxRect(legendX, legendY + (lineH - boxSize) / 2, boxSize, boxSize);
                 painter.fillRect(boxRect, sl.color);
-                painter.setPen(QPen(QColor(148, 163, 184), 1.5));
+                painter.setPen(QPen(QColor(148, 163, 184), 1));
+                painter.setBrush(Qt::NoBrush);
                 painter.drawRect(boxRect);
 
-                // Label & percentage
-                painter.setPen(QPen(QColor(15, 23, 42)));
+                // Label & percentage formatted nicely with spanish monetary style
+                painter.setPen(QPen(Qt::black));
+                painter.setBrush(Qt::NoBrush);
                 double pct = (sl.value / baseTotal) * 100.0;
-                QString lineText = QString("%1:  %2  (%3%)")
+                QString lineText = QString("%1:  $ %2  (%3%)")
                                    .arg(sl.label)
-                                   .arg(fmtMoney(sl.value))
+                                   .arg(fmtMoney(sl.value, 2))
                                    .arg(QString::number(pct, 'f', 1));
-                painter.drawText(QRect(legendX + boxSize + 14, legendY, legendW - boxSize - 14, lineH), Qt::AlignLeft | Qt::AlignVCenter, lineText);
-                legendY += lineH + qRound(pageW * 0.008);
+                painter.drawText(QRect(legendX + boxSize + 12, legendY, legendW - boxSize - 12, lineH), Qt::AlignLeft | Qt::AlignVCenter, lineText);
+                legendY += lineH + 4;
             }
 
-            y = std::max(pieY + pieDiameter + 40, legendY + 20);
+            y = std::max(pieY + pieDiameter + 15, legendY + 10);
         }
+
+    // ── Signatures Block (Empleador y Trabajador) ─────────────────
+    y += 20;
+    int sigWidth = qRound(pageW * 0.38);
+    int sigLeftX = qRound(pageW * 0.05);
+    int sigRightX = pageW - sigLeftX - sigWidth;
+    int sigLineY = y + 35;
+
+    painter.setPen(QPen(QColor(100, 116, 139), 1.5));
+    painter.drawLine(sigLeftX, sigLineY, sigLeftX + sigWidth, sigLineY);
+    painter.drawLine(sigRightX, sigLineY, sigRightX + sigWidth, sigLineY);
+
+    QFont sigFont("Helvetica", 8.5, QFont::Bold);
+    painter.setFont(sigFont);
+    painter.setPen(QPen(QColor(15, 23, 42)));
+    painter.setBrush(Qt::NoBrush);
+
+    painter.drawText(QRect(sigLeftX, sigLineY + 6, sigWidth, 24), Qt::AlignCenter, "Firma del Empleador");
+    painter.drawText(QRect(sigRightX, sigLineY + 6, sigWidth, 24), Qt::AlignCenter, "Firma del Trabajador");
 
     painter.end();
 

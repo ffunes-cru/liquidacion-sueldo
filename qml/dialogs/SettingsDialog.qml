@@ -68,8 +68,11 @@ AppDialog {
             variant: "secondary"
             text: "📤 Exportar Datos a Excel (.xlsx)"
             onClicked: {
-                var path = AppController.exportDataXlsx("")
-                root.statusMsg = path !== "" ? "Exportado a: " + path : "Error al exportar"
+                var savePath = AppController.selectSaveFile("Exportar Datos a Excel", "liquidacion_datos.xlsx", "Archivos Excel (*.xlsx)")
+                if (savePath !== "") {
+                    var path = AppController.exportDataXlsx(savePath)
+                    root.statusMsg = path !== "" ? "Exportado exitosamente a: " + path : "Error al exportar a Excel."
+                }
             }
         }
 
@@ -78,8 +81,11 @@ AppDialog {
             variant: "secondary"
             text: "📥 Importar Datos desde Excel (.xlsx)"
             onClicked: {
-                var ok = AppController.importDataXlsx("")
-                root.statusMsg = ok ? "Importación exitosa. Reinicie la app para ver los cambios." : "Error al importar"
+                var openPath = AppController.selectOpenFile("Importar Datos desde Excel", "", "Archivos Excel (*.xlsx)")
+                if (openPath !== "") {
+                    var ok = AppController.importDataXlsx(openPath)
+                    root.statusMsg = ok ? "Importación exitosa. Los datos han sido cargados." : "Error al importar desde Excel."
+                }
             }
         }
 
@@ -88,8 +94,11 @@ AppDialog {
             variant: "secondary"
             text: "📤 Exportar Datos a CSV"
             onClicked: {
-                var path = AppController.exportDataCsv("")
-                root.statusMsg = path !== "" ? "Exportado a: " + path : "Error al exportar CSV"
+                var folder = AppController.selectFolder("Seleccionar Carpeta para Exportar CSV", "")
+                if (folder !== "") {
+                    var path = AppController.exportDataCsv(folder)
+                    root.statusMsg = path !== "" ? "Exportado exitosamente en la carpeta: " + path : "Error al exportar CSV."
+                }
             }
         }
 
@@ -98,8 +107,11 @@ AppDialog {
             variant: "secondary"
             text: "💾 Crear Copia de Seguridad de BD (Backup)"
             onClicked: {
-                var bp = AppController.createBackup()
-                root.statusMsg = bp !== "" ? "Backup creado: " + bp : "Error al crear backup"
+                var savePath = AppController.selectSaveFile("Guardar Copia de Seguridad (Backup)", "backup_liquidacion.db", "Base de Datos SQLite (*.db *.sqlite)")
+                if (savePath !== "") {
+                    var bp = AppController.createBackup(savePath)
+                    root.statusMsg = bp !== "" ? "Backup creado exitosamente en: " + bp : "Error al crear backup."
+                }
             }
         }
 

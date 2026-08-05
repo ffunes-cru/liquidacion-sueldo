@@ -16,8 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <QApplication>
 #include <QDebug>
-#include <QGuiApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -28,7 +28,7 @@
 
 int main(int argc, char *argv[]) {
   QQuickStyle::setStyle("Basic");
-  QGuiApplication app(argc, argv);
+  QApplication app(argc, argv);
   app.setOrganizationName("Antigravity");
   app.setApplicationName("LiquidacionSueldosQML");
 

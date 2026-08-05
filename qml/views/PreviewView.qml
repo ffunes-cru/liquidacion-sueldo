@@ -36,8 +36,9 @@ Item {
         confirmButtonVariant: "primary"
         onConfirmed: {
             if (root.liquidationResult) {
-                var periodoStr = "Mes " + sbMes.value + "/" + sbAnio.value + " (" + cbQuincena.currentText + ")"
-                var recId = AppController.persistLiquidation(root.liquidationResult, sbMes.value, sbAnio.value, periodoStr)
+                var qText = ((root.employeeData && (root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal") ? (" (" + cbQuincena.currentText + ")") : "")
+                var periodoStr = "Mes " + dpFechaCalculo.selectedMonth + "/" + dpFechaCalculo.selectedYear + qText
+                var recId = AppController.persistLiquidation(root.liquidationResult, dpFechaCalculo.selectedMonth, dpFechaCalculo.selectedYear, periodoStr)
                 root.statusMsg = recId > 0 ? "Recibo histórico guardado con ID #" + recId : "Error al guardar en el historial."
                 if (recId > 0) AppController.receiptHistoryModel.refresh()
             }
@@ -77,43 +78,16 @@ Item {
                 }
                 StyledComboBox {
                     id: cbQuincena
-                    Layout.preferredWidth: 90
+                    Layout.preferredWidth: 110
                     model: ["Q1", "Q2"]
                     visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
                 }
 
-                // Fecha Cálculo
+                // Fecha Cálculo (Única)
                 Label { text: "Fecha:"; color: Theme.textColor; font.pixelSize: 13 }
-                StyledTextField {
-                    id: txtFechaCalculo
-                    text: Qt.formatDate(new Date(), "yyyy-MM-dd")
-                    Layout.preferredWidth: 110
-                    onTextChanged: {
-                        var parts = text.split("-")
-                        if (parts.length === 3) {
-                            var y = parseInt(parts[0])
-                            var m = parseInt(parts[1])
-                            if (m >= 1 && m <= 12) sbMes.value = m
-                            if (y >= 2000 && y <= 2100) sbAnio.value = y
-                        }
-                    }
-                }
-
-                // Mes/Año Histórico
-                Label { text: "Mes:"; color: Theme.textColor; font.pixelSize: 13 }
-                StyledSpinBox {
-                    id: sbMes
-                    from: 1; to: 12
-                    value: (new Date()).getMonth() + 1
-                    Layout.preferredWidth: 90
-                }
-
-                Label { text: "Año:"; color: Theme.textColor; font.pixelSize: 13 }
-                StyledSpinBox {
-                    id: sbAnio
-                    from: 2020; to: 2030
-                    value: (new Date()).getFullYear()
-                    Layout.preferredWidth: 100
+                StyledDatePicker {
+                    id: dpFechaCalculo
+                    Layout.preferredWidth: 145
                 }
 
                 Item { Layout.fillWidth: true }
@@ -127,7 +101,7 @@ Item {
                         var empId = root.selectedEmployeeId
                         if (empId > 0) {
                             root.companyData = AppController.getCompany()
-                            var res = AppController.processLiquidation(empId, cbQuincena.currentText, txtFechaCalculo.text)
+                            var res = AppController.processLiquidation(empId, cbQuincena.currentText, dpFechaCalculo.formattedDate)
                             root.liquidationResult = res
                             if (res && res.errores && res.errores.length > 0) {
                                 root.statusMsg = "⚠️ Se detectaron " + res.errores.length + " error(es) en la liquidación."
@@ -154,8 +128,13 @@ Item {
                     onClicked: {
                         var empId = root.selectedEmployeeId
                         if (empId > 0 && root.liquidationResult) {
-                            var pdfPath = AppController.exportReceiptPdf(empId, root.liquidationResult, "")
-                            root.statusMsg = pdfPath !== "" ? "Recibo PDF generado: " + pdfPath : "Error al generar PDF."
+                            var legajo = (root.employeeData ? (root.employeeData.legajo || empId) : empId)
+                            var defaultName = "recibo_legajo_" + legajo + "_" + dpFechaCalculo.selectedMonth + "_" + dpFechaCalculo.selectedYear + ".pdf"
+                            var savePath = AppController.selectSaveFile("Guardar Recibo de Sueldo PDF", defaultName, "Archivos PDF (*.pdf)")
+                            if (savePath !== "") {
+                                var pdfPath = AppController.exportReceiptPdf(empId, root.liquidationResult, savePath)
+                                root.statusMsg = pdfPath !== "" ? "Recibo PDF guardado exitosamente en: " + pdfPath : "Error al generar PDF."
+                            }
                         }
                     }
                 }
@@ -226,7 +205,7 @@ Item {
                                         font.bold: true; font.pixelSize: 14; color: Theme.accentColor
                                     }
                                     Label {
-                                        text: "Fecha: " + txtFechaCalculo.text
+                                        text: "Fecha: " + dpFechaCalculo.displayDate
                                         font.pixelSize: 11; color: Theme.subtextColor
                                     }
                                 }
@@ -339,21 +318,35 @@ Item {
                                             }
                                             Label {
                                                 visible: !isSep
-                                                text: root.formatNumber(modelData["unidad"], 2)
+                                                text: {
+                                                    var tc = (modelData["tipo_calculo"] || "").toLowerCase();
+                                                    var isPct = (tc === "porcentaje" || tc === "percentage" || tc === "simple" || (Number(modelData["simple_porcentaje"]) > 0));
+                                                    var uVal = Number(modelData["unidad"]);
+                                                    var sPct = Number(modelData["simple_porcentaje"]);
+                                                    if (isPct && uVal > 0) return "% " + root.formatNumber(uVal, 2);
+                                                    if (isPct && sPct > 0) return "% " + root.formatNumber(sPct, 2);
+                                                    if (uVal !== 0 && !isNaN(uVal)) return root.formatNumber(uVal, 4);
+                                                    return "-";
+                                                }
                                                 color: Theme.subtextColor; font.family: "Monospace"; font.pixelSize: 12
-                                                Layout.preferredWidth: 80; horizontalAlignment: Text.AlignRight
+                                                Layout.preferredWidth: 90; horizontalAlignment: Text.AlignRight
                                             }
                                             Label {
                                                 visible: !isSep
-                                                text: root.formatMoney(modelData["base"])
+                                                text: {
+                                                    if (isTotal) return "";
+                                                    var bVal = Number(modelData["base"]);
+                                                    if (bVal > 0) return root.formatMoney(bVal, 2);
+                                                    return "-";
+                                                }
                                                 color: Theme.subtextColor; font.family: "Monospace"; font.pixelSize: 12
-                                                Layout.preferredWidth: 110; horizontalAlignment: Text.AlignRight
+                                                Layout.preferredWidth: 120; horizontalAlignment: Text.AlignRight
                                             }
                                             Label {
                                                 visible: !isSep
-                                                text: root.formatMoney(modelData["monto"])
+                                                text: root.formatMoney(modelData["monto"], 4)
                                                 color: isTotal ? Theme.accentColor : Theme.textColor; font.bold: true; font.family: "Monospace"; font.pixelSize: isTotal ? 14 : 13
-                                                Layout.preferredWidth: 130; horizontalAlignment: Text.AlignRight
+                                                Layout.preferredWidth: 140; horizontalAlignment: Text.AlignRight
                                             }
                                         }
                                     }
@@ -374,19 +367,27 @@ Item {
         }
     }
 
-    function formatNumber(val, decimals) {
+    function formatNumber(val, maxDecimals) {
         if (val === undefined || val === null || isNaN(val)) return "-";
         var num = Number(val);
         if (num === 0) return "-";
-        var dec = (decimals !== undefined) ? decimals : 2;
-        var parts = num.toFixed(dec).split(".");
-        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-        return parts.join(",");
+        var maxDec = (maxDecimals !== undefined) ? maxDecimals : 4;
+        var str = num.toFixed(maxDec);
+        if (str.indexOf(".") !== -1) {
+            str = str.replace(/\.?0+$/, "");
+            if (str.indexOf(".") !== -1) {
+                var p = str.split(".");
+                p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+                if (p[1].length < 2) p[1] = (p[1] + "00").substring(0, 2);
+                return p.join(",");
+            }
+        }
+        return str.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
     }
 
-    function formatMoney(val) {
+    function formatMoney(val, maxDecimals) {
         if (val === undefined || val === null || isNaN(val) || Number(val) === 0) return "-";
-        return "$ " + formatNumber(val, 2);
+        return "$ " + formatNumber(val, maxDecimals !== undefined ? maxDecimals : 4);
     }
 
     function refreshQuincenasCombo(empId) {

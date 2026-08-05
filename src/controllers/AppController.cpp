@@ -11,6 +11,7 @@
 #include "models/SchemaModel.h"
 #include "services/ExportService.h"
 #include <QDebug>
+#include <QFileDialog>
 
 AppController::AppController(DatabaseManager *db, QObject *parent)
     : QObject(parent), m_db(db) {
@@ -280,6 +281,12 @@ AppController::getAvailableFormulaVariables(const QString &esquemaCodigo) {
   addVar("antiguedad_anios", "Años de antigüedad del empleado",
          "Variable Local");
 
+  // Calculation date variables
+  addVar("FECHA_CALCULO", "Fecha de cálculo de la liquidación (YYYY-MM-DD)", "Fecha Cálculo");
+  addVar("MES_CALCULO", "Número de mes de la fecha de cálculo (1-12)", "Fecha Cálculo");
+  addVar("ANIO_CALCULO", "Año de la fecha de cálculo (ej. 2026)", "Fecha Cálculo");
+  addVar("DIA_CALCULO", "Día del mes de la fecha de cálculo (1-31)", "Fecha Cálculo");
+
   // Totales y acumuladores
   addVar("total_remunerativo",
          "Suma acumulada de conceptos remunerativos previos", "Acumulador");
@@ -343,4 +350,16 @@ QString AppController::exportReceiptPdf(int employeeId,
   QVariantMap compData = m_db->getCompany();
   return m_exportService->exportReceiptPdf(liquidationResult, compData, empData,
                                            path);
+}
+
+QString AppController::selectSaveFile(const QString &title, const QString &defaultName, const QString &filter) {
+    return QFileDialog::getSaveFileName(nullptr, title, defaultName, filter);
+}
+
+QString AppController::selectOpenFile(const QString &title, const QString &defaultDir, const QString &filter) {
+    return QFileDialog::getOpenFileName(nullptr, title, defaultDir, filter);
+}
+
+QString AppController::selectFolder(const QString &title, const QString &defaultDir) {
+    return QFileDialog::getExistingDirectory(nullptr, title, defaultDir);
 }

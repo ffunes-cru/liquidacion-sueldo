@@ -11,7 +11,22 @@ TextField {
     horizontalAlignment: Text.AlignRight
     inputMethodHints: Qt.ImhFormattedNumbersOnly
 
-    text: Number(value).toFixed(2) + " %"
+    text: formatVal(value, "% ")
+
+    function formatVal(val, suffix) {
+        if (val === undefined || val === null || isNaN(val)) return "0.00" + (suffix || "");
+        var num = Number(val);
+        var str = num.toFixed(4);
+        if (str.indexOf(".") !== -1) {
+            str = str.replace(/\.?0+$/, "");
+            if (str.indexOf(".") !== -1) {
+                var p = str.split(".");
+                if (p[1].length < 2) p[1] = (p[1] + "00").substring(0, 2);
+                str = p.join(".");
+            }
+        }
+        return str + (suffix || "");
+    }
 
     background: Rectangle {
         color: Theme.inputBg
@@ -25,6 +40,7 @@ TextField {
         bottom: 0.0
         top: 100.0
         notation: DoubleValidator.StandardNotation
+        decimals: 6
     }
 
     onEditingFinished: {
@@ -32,9 +48,9 @@ TextField {
         var val = parseFloat(rawText)
         if (!isNaN(val)) {
             value = val
-            text = Number(val).toFixed(2) + " %"
+            text = formatVal(val, " %")
         } else {
-            text = Number(value).toFixed(2) + " %"
+            text = formatVal(value, " %")
         }
     }
 }

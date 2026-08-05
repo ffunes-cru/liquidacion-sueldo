@@ -205,10 +205,16 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
   contexto["nombre"] = employee["nombre_completo"];
   contexto["cuil"] = employee["cuil"];
   contexto["fecha_calculo"] = fechaCalc;
+  contexto["FECHA_CALCULO"] = fechaCalc;
 
   QDate fDate = QDate::fromString(fechaCalc, "yyyy-MM-dd");
-  contexto["mes"] = fDate.isValid() ? fDate.month() : QDate::currentDate().month();
-  contexto["anio"] = fDate.isValid() ? fDate.year() : QDate::currentDate().year();
+  if (!fDate.isValid()) fDate = QDate::currentDate();
+  contexto["mes"] = fDate.month();
+  contexto["MES_CALCULO"] = fDate.month();
+  contexto["anio"] = fDate.year();
+  contexto["ANIO_CALCULO"] = fDate.year();
+  contexto["dia"] = fDate.day();
+  contexto["DIA_CALCULO"] = fDate.day();
 
   // Inject valor_hora, jornal, basico from category
   int catId = employee.value("categoria_jornal_id").toInt();
@@ -526,6 +532,9 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
         {"monto", monto},
         {"seccion", seccion},
         {"tipo_calculo", tipoCalc},
+        {"simple_porcentaje", cell.value("simple_porcentaje", 0.0)},
+        {"simple_base_variable", cell.value("simple_base_variable", "")},
+        {"simple_monto_fijo", cell.value("simple_monto_fijo", 0.0)},
         {"visible_recibo", cell.value("visible_recibo", 1)},
         {"en_grafico", cell.value("en_grafico", 0)},
         {"es_grafico_total", cell.value("es_grafico_total", 0)}

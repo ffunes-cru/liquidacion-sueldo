@@ -42,10 +42,10 @@ Item {
         AppController.cellModel.refresh()
     }
 
-    function openNewConceptDialog(secCode) {
+    function openNewConceptDialog(secCode, afterIndex) {
         conceptDialog.cellId = -1
         conceptDialog.esquemaCodigo = currentEsquema
-        conceptDialog.seccionCodigo = "COMPOSICION"
+        conceptDialog.seccionCodigo = secCode || "COMPOSICION"
         conceptDialog.tipoCalculo = "formula"
         conceptDialog.codigoVariable = ""
         conceptDialog.descripcion = ""
@@ -53,7 +53,21 @@ Item {
         conceptDialog.formulaMonto = ""
         conceptDialog.formulaUnidad = ""
         conceptDialog.formulaBase = ""
-        conceptDialog.orden = (AppController.cellModel.count + 1) * 10
+
+        var count = AppController.cellModel.count
+        if (afterIndex !== undefined && afterIndex >= 0 && afterIndex < count) {
+            var currOrd = AppController.cellModel.get(afterIndex).orden
+            if (afterIndex + 1 < count) {
+                var nextOrd = AppController.cellModel.get(afterIndex + 1).orden
+                var midOrd = Math.floor((currOrd + nextOrd) / 2)
+                conceptDialog.orden = (midOrd > currOrd) ? midOrd : (currOrd + 5)
+            } else {
+                conceptDialog.orden = currOrd + 10
+            }
+        } else {
+            conceptDialog.orden = (count + 1) * 10
+        }
+
         conceptDialog.simplePorcentaje = "0.0"
         conceptDialog.simpleBaseVariable = ""
         conceptDialog.simpleMontoFijo = "0.0"
@@ -249,23 +263,24 @@ Item {
                             Loader {
                                 width: paystubListView.width
                                 property int itemIndex: index
-                                property int itemId: model.cellId || model.id
-                                property string itemSeccionCodigo: model.seccionCodigo || ""
-                                property string itemCodigoVariable: model.codigoVariable || ""
-                                property string itemDescripcion: model.descripcion || ""
-                                property int itemOrden: model.orden || 10
-                                property string itemTipoCalculo: model.tipoCalculo || "formula"
-                                property double itemSimplePorcentaje: model.simplePorcentaje || 0
-                                property double itemSimpleMontoFijo: model.simpleMontoFijo || 0
-                                property string itemFormulaUnidad: model.formulaUnidad || ""
-                                property string itemFormulaBase: model.formulaBase || ""
-                                property string itemFormulaMonto: model.formulaMonto || ""
-                                property string itemColorHex: model.colorHex || ""
+                                property int itemId: model.cellId !== undefined ? model.cellId : model.id
+                                property string itemSeccionCodigo: model.seccionCodigo !== undefined ? model.seccionCodigo : ""
+                                property string itemCodigoVariable: model.codigoVariable !== undefined ? model.codigoVariable : ""
+                                property string itemDescripcion: model.descripcion !== undefined ? model.descripcion : ""
+                                property int itemOrden: model.orden !== undefined ? model.orden : 10
+                                property string itemTipoCalculo: model.tipoCalculo !== undefined ? model.tipoCalculo : "formula"
+                                property double itemSimplePorcentaje: model.simplePorcentaje !== undefined ? model.simplePorcentaje : 0
+                                property string itemSimpleBaseVariable: model.simpleBaseVariable !== undefined ? model.simpleBaseVariable : ""
+                                property double itemSimpleMontoFijo: model.simpleMontoFijo !== undefined ? model.simpleMontoFijo : 0
+                                property string itemFormulaUnidad: model.formulaUnidad !== undefined ? model.formulaUnidad : ""
+                                property string itemFormulaBase: model.formulaBase !== undefined ? model.formulaBase : ""
+                                property string itemFormulaMonto: model.formulaMonto !== undefined ? model.formulaMonto : ""
+                                property string itemColorHex: model.colorHex !== undefined ? model.colorHex : ""
                                 property bool itemVisibleRecibo: model.visibleRecibo !== undefined ? model.visibleRecibo : true
                                 property bool itemEnGrafico: model.enGrafico !== undefined ? model.enGrafico : false
                                 property bool itemEsGraficoTotal: model.esGraficoTotal !== undefined ? model.esGraficoTotal : false
 
-                                sourceComponent: model.tipoCalculo === "separator" ? separatorComponent : conceptComponent
+                                sourceComponent: (itemTipoCalculo === "separator" || itemCodigoVariable.indexOf("SEP_") === 0) ? separatorComponent : conceptComponent
                             }
                         }
                     }
@@ -280,7 +295,7 @@ Item {
 
         Item {
             width: parent.width
-            height: 42
+            height: 50
             opacity: (root.isDragging && root.draggedRowIndex === itemIndex) ? 0.35 : 1.0
 
             property color cardAccentColor: itemColorHex !== "" ? Qt.color(itemColorHex) : Theme.accentColor
@@ -380,7 +395,7 @@ Item {
                         MouseArea {
                             id: btnAddConceptArea
                             anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: root.openNewConceptDialog(itemSeccionCodigo || "REMUNERATIVO")
+                            onClicked: root.openNewConceptDialog(itemSeccionCodigo || "COMPOSICION", itemIndex)
                         }
                     }
 
@@ -432,6 +447,48 @@ Item {
 
             property bool isTotalItem: (itemCodigoVariable.indexOf("total_") === 0) || (itemDescripcion.toUpperCase().indexOf("TOTAL") !== -1)
             property string secUpper: (itemSeccionCodigo || "").toUpperCase()
+
+            property string calcType: {
+                var rawType = (parent && typeof parent.itemTipoCalculo !== "undefined" && parent.itemTipoCalculo !== null) ? parent.itemTipoCalculo : (typeof tipoCalculo !== "undefined" ? tipoCalculo : "formula");
+                rawType = (rawType || "").toLowerCase();
+
+                if (rawType === "porcentaje" || rawType === "percentage" || rawType === "simple") return "percentage";
+                if (rawType === "fijo" || rawType === "fixed") return "fixed";
+
+                var pVal = (parent && typeof parent.itemSimplePorcentaje !== "undefined") ? parent.itemSimplePorcentaje : (typeof simplePorcentaje !== "undefined" ? simplePorcentaje : 0);
+                if (pVal && Number(pVal) > 0) return "percentage";
+
+                var fVal = (parent && typeof parent.itemSimpleMontoFijo !== "undefined") ? parent.itemSimpleMontoFijo : (typeof simpleMontoFijo !== "undefined" ? simpleMontoFijo : 0);
+                if (fVal && Number(fVal) > 0) return "fixed";
+
+                return "formula";
+            }
+
+            property var percVal: {
+                var p = (parent && typeof parent.itemSimplePorcentaje !== "undefined") ? parent.itemSimplePorcentaje : (typeof simplePorcentaje !== "undefined" ? simplePorcentaje : 0);
+                return Number(p) || 0;
+            }
+
+            property string percBase: {
+                var b = (parent && typeof parent.itemSimpleBaseVariable !== "undefined") ? parent.itemSimpleBaseVariable : (typeof simpleBaseVariable !== "undefined" ? simpleBaseVariable : "");
+                return b || "";
+            }
+
+            property var fixedVal: {
+                var f = (parent && typeof parent.itemSimpleMontoFijo !== "undefined") ? parent.itemSimpleMontoFijo : (typeof simpleMontoFijo !== "undefined" ? simpleMontoFijo : 0);
+                return Number(f) || 0;
+            }
+
+            property string formUnit: {
+                var u = (parent && typeof parent.itemFormulaUnidad !== "undefined") ? parent.itemFormulaUnidad : (typeof formulaUnidad !== "undefined" ? formulaUnidad : "");
+                return u || "";
+            }
+
+            property string formBase: {
+                var b = (parent && typeof parent.itemFormulaBase !== "undefined") ? parent.itemFormulaBase : (typeof formulaBase !== "undefined" ? formulaBase : "");
+                return b || "";
+            }
+
             property color themeColor: {
                 if (itemColorHex !== "") return Qt.color(itemColorHex)
                 if (secUpper.indexOf("REMUNERATIVO") !== -1 && secUpper.indexOf("NO_REMUNERATIVO") === -1 && secUpper.indexOf("NO REMUNERATIVO") === -1)
@@ -565,15 +622,33 @@ Item {
                     }
 
                     Label {
-                        text: itemFormulaUnidad || "-"
-                        font.family: "Monospace"; font.pixelSize: 11; color: Theme.subtextColor
+                        text: {
+                            if (conceptItem.calcType === "percentage") {
+                                return "% " + conceptItem.percVal
+                            } else if (conceptItem.calcType === "fixed") {
+                                return "Fijo"
+                            } else {
+                                return conceptItem.formUnit !== "" ? conceptItem.formUnit : "-"
+                            }
+                        }
+                        font.family: "Monospace"; font.pixelSize: 11
+                        color: conceptItem.calcType === "percentage" ? "#00E5FF" : Theme.subtextColor
                         Layout.preferredWidth: 100
                         elide: Text.ElideRight
                     }
 
                     Label {
-                        text: itemFormulaBase || "-"
-                        font.family: "Monospace"; font.pixelSize: 11; color: Theme.subtextColor
+                        text: {
+                            if (conceptItem.calcType === "percentage") {
+                                return conceptItem.percBase !== "" ? conceptItem.percBase : "-"
+                            } else if (conceptItem.calcType === "fixed") {
+                                return "$ " + conceptItem.fixedVal
+                            } else {
+                                return conceptItem.formBase !== "" ? conceptItem.formBase : "-"
+                            }
+                        }
+                        font.family: "Monospace"; font.pixelSize: 11
+                        color: conceptItem.calcType === "fixed" ? "#10B981" : (conceptItem.calcType === "percentage" ? "#00E5FF" : Theme.subtextColor)
                         Layout.preferredWidth: 120
                         elide: Text.ElideRight
                     }

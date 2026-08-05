@@ -16,6 +16,7 @@ find_package(Qt6 REQUIRED COMPONENTS
     QuickControls2
     Sql
     Qml
+    Widgets
 )
 
 qt_standard_project_setup(REQUIRES 6.5)
@@ -98,6 +99,7 @@ set(QML_FILES
     qml/components/StyledTextArea.qml
     qml/components/StyledTabButton.qml
     qml/components/StyledSpinBox.qml
+    qml/components/StyledDatePicker.qml
     qml/components/PieChartCanvas.qml
     qml/components/BadgePill.qml
     qml/components/StatusBanner.qml
@@ -174,6 +176,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::QuickControls2
     Qt6::Sql
     Qt6::Qml
+    Qt6::Widgets
     QXlsx::QXlsx
 )
 
