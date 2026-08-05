@@ -695,16 +695,30 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
     // ── Employee Data ───────────────────────────────────────────
     painter.setFont(headerFont);
     painter.setPen(QPen(Qt::black));
-    painter.drawText(QRect(0, y, pageW, 50), Qt::AlignLeft, "RECIBO DE SUELDO");
-    y += 55;
+    painter.drawText(QRect(0, y, pageW / 2, 45), Qt::AlignLeft | Qt::AlignVCenter, "RECIBO DE SUELDO");
+
+    // Formatear Fecha de Pago (fecha de emisión del recibo)
+    QString fechaPago = liquidationResult.value("FECHA_PAGO").toString();
+    if (fechaPago.isEmpty()) {
+        QString fCalc = liquidationResult.value("FECHA_CALCULO").toString();
+        QDate d = QDate::fromString(fCalc, "yyyy-MM-dd");
+        if (d.isValid()) fechaPago = d.toString("dd/MM/yyyy");
+        else fechaPago = QDate::currentDate().toString("dd/MM/yyyy");
+    } else {
+        QDate d = QDate::fromString(fechaPago, "yyyy-MM-dd");
+        if (d.isValid()) fechaPago = d.toString("dd/MM/yyyy");
+    }
+
+    painter.drawText(QRect(pageW / 2, y, pageW / 2, 45), Qt::AlignRight | Qt::AlignVCenter, "Fecha de Pago: " + fechaPago);
+    y += 50;
 
     painter.setFont(normalFont);
     painter.setPen(QPen(Qt::black));
     QString empName = employeeData.value("nombre_completo", "Empleado").toString();
     QString empLegajo = employeeData.value("legajo", "").toString();
-    painter.drawText(QRect(0, y, pageW / 2, 40), Qt::AlignLeft, "Empleado: " + empName);
-    painter.drawText(QRect(pageW / 2, y, pageW / 2, 40), Qt::AlignRight, "Legajo: " + empLegajo);
-    y += 45;
+    painter.drawText(QRect(0, y, pageW / 2, 35), Qt::AlignLeft, "Empleado: " + empName);
+    painter.drawText(QRect(pageW / 2, y, pageW / 2, 35), Qt::AlignRight, "Legajo: " + empLegajo);
+    y += 40;
     drawLine(y);
     y += 12;
 
@@ -916,23 +930,25 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
         }
 
     // ── Signatures Block (Empleador y Trabajador) ─────────────────
-    y += 20;
-    int sigWidth = qRound(pageW * 0.38);
-    int sigLeftX = qRound(pageW * 0.05);
+    int pageH = writer.height();
+    int sigWidth = qRound(pageW * 0.36);
+    int sigLeftX = qRound(pageW * 0.06);
     int sigRightX = pageW - sigLeftX - sigWidth;
-    int sigLineY = y + 35;
 
-    painter.setPen(QPen(QColor(100, 116, 139), 1.5));
+    // Posicionar la firma asegurando que esté en la parte inferior de la página A4
+    int sigLineY = qMax(y + 50, pageH - 90);
+
+    painter.setPen(QPen(QColor(15, 23, 42), 1.5));
     painter.drawLine(sigLeftX, sigLineY, sigLeftX + sigWidth, sigLineY);
     painter.drawLine(sigRightX, sigLineY, sigRightX + sigWidth, sigLineY);
 
-    QFont sigFont("Helvetica", 8.5, QFont::Bold);
+    QFont sigFont("Helvetica", 9, QFont::Bold);
     painter.setFont(sigFont);
     painter.setPen(QPen(QColor(15, 23, 42)));
     painter.setBrush(Qt::NoBrush);
 
-    painter.drawText(QRect(sigLeftX, sigLineY + 6, sigWidth, 24), Qt::AlignCenter, "Firma del Empleador");
-    painter.drawText(QRect(sigRightX, sigLineY + 6, sigWidth, 24), Qt::AlignCenter, "Firma del Trabajador");
+    painter.drawText(QRect(sigLeftX, sigLineY + 8, sigWidth, 30), Qt::AlignCenter, "Firma del Empleador");
+    painter.drawText(QRect(sigRightX, sigLineY + 8, sigWidth, 30), Qt::AlignCenter, "Firma del Trabajador");
 
     painter.end();
 

@@ -87,7 +87,8 @@ MasterDetailView {
     // DETAIL CONTENT (Right Panel: Function Editor & Documentation)
     // ══════════════════════════════════════════════════════════════
     ColumnLayout {
-        anchors.fill: parent
+        Layout.fillWidth: true
+        Layout.fillHeight: true
         spacing: 15
 
         // Function Information Card & Code Viewer

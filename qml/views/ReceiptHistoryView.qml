@@ -97,7 +97,8 @@ MasterDetailView {
     // DETAIL CONTENT (Right Panel)
     // ══════════════════════════════════════════════════════════════
     ColumnLayout {
-        anchors.fill: parent
+        Layout.fillWidth: true
+        Layout.fillHeight: true
         spacing: 15
 
         // Title + Export button
