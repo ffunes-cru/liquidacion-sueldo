@@ -247,6 +247,69 @@ QString ExportService::exportDataXlsx(const QString &path)
         row++;
     }
 
+    // 10. Valores por Quincena (Valores Dinámicos Empleados: M para mensuales, Q1/Q2 para jornaleros)
+    xlsx.addSheet("Valores por Quincena");
+    xlsx.selectSheet("Valores por Quincena");
+
+    // Collect all unique field_codes from schema_fields to build dynamic column headers
+    auto sFieldsList = m_db->listAllSchemaFields();
+    QStringList dynamicHeaders;
+    for (const auto &sf : sFieldsList) {
+        QString fCode = sf.toMap()["field_code"].toString().trimmed();
+        if (!fCode.isEmpty() && !dynamicHeaders.contains(fCode)) {
+            dynamicHeaders.append(fCode);
+        }
+    }
+
+    xlsx.write(1, 1, "empleado_id");
+    xlsx.write(1, 2, "legajo");
+    xlsx.write(1, 3, "nombre_completo");
+    xlsx.write(1, 4, "esquema_codigo");
+    xlsx.write(1, 5, "quincena");
+    for (int i = 0; i < dynamicHeaders.size(); i++) {
+        xlsx.write(1, 6 + i, dynamicHeaders[i]);
+    }
+
+    row = 2;
+    for (const auto &e : emps) {
+        auto mEmp = e.toMap();
+        int empId = mEmp["id"].toInt();
+        QString legajo = mEmp["legajo"].toString();
+        QString nombre = mEmp["nombre_completo"].toString();
+        QString esquema = mEmp["esquema_codigo"].toString();
+        QString tipoLiq = mEmp["tipo_liquidacion"].toString();
+
+        QStringList periods;
+        if (tipoLiq == "jornal") {
+            periods = m_db->listEmployeeQuincenas(empId);
+            if (periods.isEmpty()) periods = {"Q1", "Q2"};
+        } else {
+            periods = {"M"};
+        }
+
+        for (const QString &periodCode : periods) {
+            QString dbQn = (periodCode == "M") ? "Q1" : periodCode;
+            auto fValues = m_db->getEmployeeFieldValues(empId, dbQn);
+            QMap<QString, QString> valMap;
+            for (const auto &fv : fValues) {
+                auto mVal = fv.toMap();
+                valMap[mVal["field_code"].toString()] = mVal["value"].toString();
+            }
+
+            xlsx.write(row, 1, empId);
+            xlsx.write(row, 2, legajo);
+            xlsx.write(row, 3, nombre);
+            xlsx.write(row, 4, esquema);
+            xlsx.write(row, 5, periodCode);
+
+            for (int i = 0; i < dynamicHeaders.size(); i++) {
+                QString fCode = dynamicHeaders[i];
+                xlsx.write(row, 6 + i, valMap.value(fCode, ""));
+            }
+            row++;
+        }
+    }
+
     // 11. Funciones Personalizadas
     xlsx.addSheet("Funciones Personalizadas");
     xlsx.selectSheet("Funciones Personalizadas");
@@ -409,7 +472,54 @@ bool ExportService::importDataXlsx(const QString &path)
         }
     }
 
-    // Import Valores de Empleados
+    // Import Valores por Quincena (dynamic pivot sheet with M, Q1, Q2)
+    if (xlsx.selectSheet("Valores por Quincena")) {
+        int lastCol = xlsx.dimension().lastColumn();
+        int lastRow = xlsx.dimension().lastRow();
+
+        QMap<int, QString> colToFieldCode;
+        for (int c = 6; c <= lastCol; c++) {
+            QString hName = xlsx.read(1, c).toString().trimmed();
+            if (!hName.isEmpty()) {
+                colToFieldCode[c] = hName;
+            }
+        }
+
+        for (int r = 2; r <= lastRow; r++) {
+            int empId = xlsx.read(r, 1).toInt();
+            QString legajo = xlsx.read(r, 2).toString().trimmed();
+            QString nombre = xlsx.read(r, 3).toString().trimmed();
+            QString qn = xlsx.read(r, 5).toString().trimmed();
+
+            QString dbQn = (qn.isEmpty() || qn == "M") ? "Q1" : qn;
+
+            // If empId is not found, try matching by legajo or nombre
+            if (empId <= 0 || m_db->getEmployee(empId).isEmpty()) {
+                for (const auto &eItem : m_db->listEmployees()) {
+                    auto mE = eItem.toMap();
+                    if ((!legajo.isEmpty() && mE["legajo"].toString().trimmed() == legajo) ||
+                        (!nombre.isEmpty() && mE["nombre_completo"].toString().trimmed() == nombre)) {
+                        empId = mE["id"].toInt();
+                        break;
+                    }
+                }
+            }
+
+            if (empId > 0) {
+                if (dbQn != "Q1") {
+                    m_db->addQuincena(empId, dbQn);
+                }
+                QVariantMap fieldVals;
+                for (auto it = colToFieldCode.begin(); it != colToFieldCode.end(); ++it) {
+                    QString val = xlsx.read(r, it.key()).toString();
+                    fieldVals[it.value()] = val;
+                }
+                m_db->setEmployeeFieldValues(empId, dbQn, fieldVals);
+            }
+        }
+    }
+
+    // Import Valores de Empleados (legacy ID-based format fallback)
     if (xlsx.selectSheet("Valores de Empleados")) {
         for (int r = 2; r <= xlsx.dimension().lastRow(); r++) {
             int empId = xlsx.read(r, 2).toInt();
@@ -553,7 +663,7 @@ QString ExportService::exportDataCsv(const QString &directoryPath)
         }
     }
 
-    // Employee Field Values
+    // Employee Field Values (raw DB dump)
     {
         QFile f(dir + "/employee_field_values.csv");
         if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -563,6 +673,60 @@ QString ExportService::exportDataCsv(const QString &directoryPath)
                 auto m = ev.toMap();
                 writeCsvLine(ts, {m["id"].toString(), m["empleado_id"].toString(), m["field_id"].toString(),
                                   m["quincena"].toString(), m["value"].toString()});
+            }
+        }
+    }
+
+    // Valores por Quincenas Empleados (Human-friendly dynamic CSV table)
+    {
+        QFile f(dir + "/valores_quincenas_empleados.csv");
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+
+            auto sFieldsList = m_db->listAllSchemaFields();
+            QStringList dynamicHeaders;
+            for (const auto &sf : sFieldsList) {
+                QString fCode = sf.toMap()["field_code"].toString().trimmed();
+                if (!fCode.isEmpty() && !dynamicHeaders.contains(fCode)) {
+                    dynamicHeaders.append(fCode);
+                }
+            }
+
+            QStringList headers = {"empleado_id", "legajo", "nombre_completo", "esquema_codigo", "quincena"};
+            headers.append(dynamicHeaders);
+            writeCsvLine(ts, headers);
+
+            for (const auto &e : m_db->listEmployees()) {
+                auto mEmp = e.toMap();
+                int empId = mEmp["id"].toInt();
+                QString legajo = mEmp["legajo"].toString();
+                QString nombre = mEmp["nombre_completo"].toString();
+                QString esquema = mEmp["esquema_codigo"].toString();
+                QString tipoLiq = mEmp["tipo_liquidacion"].toString();
+
+                QStringList periods;
+                if (tipoLiq == "jornal") {
+                    periods = m_db->listEmployeeQuincenas(empId);
+                    if (periods.isEmpty()) periods = {"Q1", "Q2"};
+                } else {
+                    periods = {"M"};
+                }
+
+                for (const QString &periodCode : periods) {
+                    QString dbQn = (periodCode == "M") ? "Q1" : periodCode;
+                    auto fValues = m_db->getEmployeeFieldValues(empId, dbQn);
+                    QMap<QString, QString> valMap;
+                    for (const auto &fv : fValues) {
+                        auto mVal = fv.toMap();
+                        valMap[mVal["field_code"].toString()] = mVal["value"].toString();
+                    }
+
+                    QStringList rowFields = {QString::number(empId), legajo, nombre, esquema, periodCode};
+                    for (const QString &fCode : dynamicHeaders) {
+                        rowFields.append(valMap.value(fCode, ""));
+                    }
+                    writeCsvLine(ts, rowFields);
+                }
             }
         }
     }
@@ -591,6 +755,155 @@ bool ExportService::importDataCsv(const QString &directoryPath)
 
     m_db->transaction();
 
+    // Helper to parse a CSV line split by comma respecting quotes
+    auto parseCsvLine = [](const QString &line) -> QStringList {
+        QStringList result;
+        QString cur;
+        bool inQuotes = false;
+        for (int i = 0; i < line.length(); i++) {
+            QChar c = line[i];
+            if (c == '"') {
+                inQuotes = !inQuotes;
+            } else if (c == ',' && !inQuotes) {
+                result.append(cur.trimmed());
+                cur.clear();
+            } else {
+                cur.append(c);
+            }
+        }
+        result.append(cur.trimmed());
+        return result;
+    };
+
+    // Import Schemas CSV
+    {
+        QFile f(dir + "/esquemas_calculo.csv");
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+            ts.readLine(); // skip header
+            while (!ts.atEnd()) {
+                QString line = ts.readLine();
+                if (line.trimmed().isEmpty()) continue;
+                QStringList parts = parseCsvLine(line);
+                if (parts.size() >= 2) {
+                    m_db->saveSchema("", parts[0], parts[1], "mensual");
+                }
+            }
+        }
+    }
+
+    // Import Categories CSV
+    {
+        QFile f(dir + "/categorias_jornal.csv");
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+            ts.readLine();
+            while (!ts.atEnd()) {
+                QString line = ts.readLine();
+                if (line.trimmed().isEmpty()) continue;
+                QStringList parts = parseCsvLine(line);
+                if (parts.size() >= 3) {
+                    m_db->saveCategory(parts[0].toInt(), parts[1], parts[2].toDouble());
+                }
+            }
+        }
+    }
+
+    // Import Schema Fields CSV
+    {
+        QFile f(dir + "/schema_fields.csv");
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+            ts.readLine();
+            while (!ts.atEnd()) {
+                QString line = ts.readLine();
+                if (line.trimmed().isEmpty()) continue;
+                QStringList parts = parseCsvLine(line);
+                if (parts.size() >= 7) {
+                    m_db->addSchemaField(parts[1], parts[2], parts[3], parts[4], parts[5], parts[6].toInt());
+                }
+            }
+        }
+    }
+
+    // Import Quincenas Empleado CSV
+    {
+        QFile f(dir + "/quincenas_empleado.csv");
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+            ts.readLine();
+            while (!ts.atEnd()) {
+                QString line = ts.readLine();
+                if (line.trimmed().isEmpty()) continue;
+                QStringList parts = parseCsvLine(line);
+                if (parts.size() >= 2) {
+                    int empId = parts[0].toInt();
+                    QString qn = parts[1];
+                    if (empId > 0 && !qn.isEmpty()) {
+                        m_db->addQuincena(empId, qn);
+                    }
+                }
+            }
+        }
+    }
+
+    // Import Valores por Quincenas Empleados CSV
+    {
+        QFile f(dir + "/valores_quincenas_empleados.csv");
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream ts(&f);
+            QString headerLine = ts.readLine();
+            QStringList headers = parseCsvLine(headerLine);
+
+            QMap<int, QString> colToFieldCode;
+            for (int i = 5; i < headers.size(); i++) {
+                QString fCode = headers[i].trimmed();
+                if (!fCode.isEmpty()) {
+                    colToFieldCode[i] = fCode;
+                }
+            }
+
+            while (!ts.atEnd()) {
+                QString line = ts.readLine();
+                if (line.trimmed().isEmpty()) continue;
+                QStringList parts = parseCsvLine(line);
+                if (parts.size() >= 5) {
+                    int empId = parts[0].toInt();
+                    QString legajo = parts[1];
+                    QString nombre = parts[2];
+                    QString qn = parts[4];
+
+                    QString dbQn = (qn.isEmpty() || qn == "M") ? "Q1" : qn;
+
+                    if (empId <= 0 || m_db->getEmployee(empId).isEmpty()) {
+                        for (const auto &eItem : m_db->listEmployees()) {
+                            auto mE = eItem.toMap();
+                            if ((!legajo.isEmpty() && mE["legajo"].toString().trimmed() == legajo) ||
+                                (!nombre.isEmpty() && mE["nombre_completo"].toString().trimmed() == nombre)) {
+                                empId = mE["id"].toInt();
+                                break;
+                            }
+                        }
+                    }
+
+                    if (empId > 0) {
+                        if (dbQn != "Q1") {
+                            m_db->addQuincena(empId, dbQn);
+                        }
+                        QVariantMap fieldVals;
+                        for (auto it = colToFieldCode.begin(); it != colToFieldCode.end(); ++it) {
+                            int idx = it.key();
+                            if (idx < parts.size()) {
+                                fieldVals[it.value()] = parts[idx];
+                            }
+                        }
+                        m_db->setEmployeeFieldValues(empId, dbQn, fieldVals);
+                    }
+                }
+            }
+        }
+    }
+
     // Import Funciones Personalizadas CSV
     {
         QFile f(dir + "/funciones_personalizadas.csv");
@@ -600,13 +913,13 @@ bool ExportService::importDataCsv(const QString &directoryPath)
             while (!ts.atEnd()) {
                 QString line = ts.readLine();
                 if (line.trimmed().isEmpty()) continue;
-                QStringList parts = line.split(",");
+                QStringList parts = parseCsvLine(line);
                 if (parts.size() >= 5) {
-                    int funcId = parts[0].trimmed().toInt();
-                    QString name = parts[1].trimmed().remove('"');
-                    QString params = parts[2].trimmed().remove('"');
-                    QString desc = parts[3].trimmed().remove('"');
-                    QString body = parts[4].trimmed().remove('"');
+                    int funcId = parts[0].toInt();
+                    QString name = parts[1];
+                    QString params = parts[2];
+                    QString desc = parts[3];
+                    QString body = parts[4];
                     if (!name.isEmpty()) {
                         m_db->saveCustomFunction(funcId, name, params, body, desc);
                     }

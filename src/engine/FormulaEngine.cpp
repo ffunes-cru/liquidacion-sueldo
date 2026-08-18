@@ -22,6 +22,9 @@ void FormulaEngine::setupBuiltinFunctions() {
         }
 
         function abs(x) { return Math.abs(x); }
+        function floor(x) { return Math.floor(x); }
+        function ceil(x) { return Math.ceil(x); }
+        function int_(x) { return Math.trunc(x); }
 
         // Python-compatible True/False
         var True = true;
@@ -40,27 +43,6 @@ void FormulaEngine::setupBuiltinFunctions() {
             if (args.length === 0) return 0;
             return Math.min.apply(null, args);
         }
-    )");
-
-  // int() and float() for Python compatibility
-  // int() and float() for Python compatibility
-  m_engine->evaluate(R"(
-        function int_(x) { return Math.trunc(x); }
-
-void FormulaEngine::setupBuiltinFunctions() {
-  if (!m_engine) return;
-
-  m_engine->evaluate(R"(
-        function round(val, dec) {
-            var d = dec || 0;
-            var factor = Math.pow(10, d);
-            return Math.round(val * factor) / factor;
-        }
-        function abs(val) { return Math.abs(val); }
-        function min(a, b) { return Math.min(a, b); }
-        function max(a, b) { return Math.max(a, b); }
-        function floor(val) { return Math.floor(val); }
-        function ceil(val) { return Math.ceil(val); }
     )");
 }
 
@@ -257,10 +239,14 @@ QVariant FormulaEngine::evaluate(const QString &formula, QString *error) {
       "if",     "else",      "true",     "false",    "True",    "False",
       "null",   "undefined", "return",   "function", "var",     "let",
       "const",  "round",     "abs",      "min",      "max",     "floor",   "ceil",
-      "Math",   "Number",    "Array",    "Object",   "String",  "env",     "typeof",
-      "for",    "while",     "do",       "break",    "continue","new",     "this",
-      "in",     "of",        "length",   "push",     "pop",     "forEach", "map",
-      "filter", "reduce",    "indexOf",  "isArray"};
+      "int_",   "Math",      "Number",   "Array",    "Object",  "String",  "env",
+      "typeof", "for",       "while",    "do",       "break",   "continue","new",
+      "this",   "in",        "of",       "length",   "push",    "pop",
+      "forEach","map",       "filter",   "reduce",   "indexOf", "isArray",
+      // Helper functions registered by LiquidationEngine
+      "Q_sum_", "Q_avg_",    "Q_max_",   "Q_min_",   "sumar_q", "promedio_q",
+      "max_q",  "min_q",     "cant_q",   "_cant_q",  "varName", "arguments",
+      "Q1",     "Q2",        "H_list",   "H_sum",    "H_max",   "H_avg",  "H_val"};
 
   // Build a set of character positions that are inside quoted strings
   QSet<int> quotedPositions;
@@ -287,6 +273,9 @@ QVariant FormulaEngine::evaluate(const QString &formula, QString *error) {
     QString varName = match.captured(0);
     if (!jsKeywords.contains(varName) && !global.hasProperty(varName)) {
       global.setProperty(varName, 0.0);
+      m_autoInitialized.insert(varName);
+      qWarning() << "[FormulaEngine] Variable no definida auto-inicializada a 0.0:"
+                 << varName << "en fórmula:" << formula;
     }
   }
 
@@ -327,12 +316,21 @@ bool FormulaEngine::evaluateCondition(const QString &condition,
 void FormulaEngine::reset() {
   m_context.clear();
   m_contextDirty = true;
+  m_autoInitialized.clear();
 
   if (m_engine) {
     delete m_engine;
   }
   m_engine = new QJSEngine(this);
   setupBuiltinFunctions();
+}
+
+QStringList FormulaEngine::autoInitializedVars() const {
+  return QStringList(m_autoInitialized.begin(), m_autoInitialized.end());
+}
+
+void FormulaEngine::clearAutoInitializedVars() {
+  m_autoInitialized.clear();
 }
 
 void FormulaEngine::registerCustomFunctions(const QVariantList &functions) {

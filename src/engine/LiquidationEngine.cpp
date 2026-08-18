@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <functional>
 
 LiquidationEngine::LiquidationEngine(DatabaseManager *db, QObject *parent)
     : QObject(parent), m_db(db) {}
@@ -361,8 +362,6 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
     }
     envObj["quincenas"] = quincenasArray;
 
-    qDebug() << "[DEBUG env.quincenas] Total quincenas en envObj:" << quincenasArray.size() << quincenasArray;
-
     // env.historial
     envObj["historial"] = historyList;
   }
@@ -574,6 +573,12 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
     });
   }
 
+  // Collect auto-initialized variable warnings
+  QStringList autoVars = engine.autoInitializedVars();
+  for (const QString &av : autoVars) {
+    errores.append(QString("[Advertencia] Variable '%1' no estaba definida y fue inicializada a 0.0 (posible error de tipeo)").arg(av));
+  }
+
   double totalRemunerativo = contexto.value("total_remunerativo", 0.0).toDouble();
   double totalNoRemunerativo = contexto.value("total_no_remunerativo", 0.0).toDouble();
   double totalDescuentos = contexto.value("total_descuentos", 0.0).toDouble();
@@ -660,14 +665,33 @@ QVariantMap LiquidationEngine::buildQuincenaContext(
     }
 
     double monto = 0.0;
-    if (tipoCalc == "porcentaje") {
+    if (tipoCalc == "separator") {
+      monto = 0.0;
+    } else if (tipoCalc == "porcentaje") {
       double pct = cell.value("simple_porcentaje", 0.0).toDouble();
       QString baseVar = cell.value("simple_base_variable", "").toString();
       double baseVal = tmpEngine.getVariable(baseVar).toDouble();
       monto = qRound((pct / 100.0) * baseVal * 100.0) / 100.0;
     } else if (tipoCalc == "fijo") {
       monto = cell.value("simple_monto_fijo", 0.0).toDouble();
+    } else if (tipoCalc == "simple") {
+      double pct = cell.value("simple_porcentaje", 0.0).toDouble();
+      QString baseVar = cell.value("simple_base_variable", "").toString().trimmed().toLower();
+      double montoFijo = cell.value("simple_monto_fijo", 0.0).toDouble();
+      double baseVal = 0.0;
+      if (!baseVar.isEmpty()) {
+        baseVal = tmpEngine.getVariable(baseVar).toDouble();
+      }
+      if (pct != 0.0 && baseVal != 0.0) {
+        monto = (baseVal * (pct / 100.0)) + montoFijo;
+      } else if (montoFijo != 0.0) {
+        monto = montoFijo;
+      } else if (pct != 0.0) {
+        monto = baseVal * (pct / 100.0);
+      }
+      monto = qRound(monto * 100.0) / 100.0;
     } else {
+      // Formula type
       QString fu = cell.value("formula_unidad", "").toString().trimmed();
       if (!fu.isEmpty()) {
         QVariant u = tmpEngine.evaluate(fu);
@@ -685,7 +709,6 @@ QVariantMap LiquidationEngine::buildQuincenaContext(
       }
 
       QString fm = cell.value("formula_monto", "").toString().trimmed();
-      qDebug() << "[DEBUG CELL EVAL]" << quincenaCode << "codigo:" << codigo << "tipoCalc:" << tipoCalc << "fm:" << fm << "fb:" << fb << "fu:" << fu;
       if (!fm.isEmpty()) {
         QVariant result = tmpEngine.evaluate(fm);
         monto = result.toDouble();
@@ -696,13 +719,10 @@ QVariantMap LiquidationEngine::buildQuincenaContext(
       }
     }
 
-    qDebug() << "[DEBUG CELL RESULT]" << quincenaCode << codigo << "monto:" << monto << "base:" << tmpEngine.getVariable("base") << "unidad:" << tmpEngine.getVariable("unidad");
-
     tmpEngine.setVariable(codigo, monto);
     ctx[codigo] = monto;
   }
 
-  qDebug() << "[DEBUG buildQuincenaContext] Fin quincena" << quincenaCode << "basico:" << ctx.value("basico") << "keys:" << ctx.keys();
 
   return ctx;
 }
@@ -737,22 +757,44 @@ int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
   rootObj["totales"] = totalesObj;
 
   // 3. Variables planas de insumos
+  // Helper lambda to convert QVariant to QJsonValue recursively
+  std::function<QJsonValue(const QVariant &)> variantToJson;
+  variantToJson = [&variantToJson](const QVariant &v) -> QJsonValue {
+    if (v.typeId() == QMetaType::Bool) {
+      return QJsonValue(v.toBool());
+    } else if (v.typeId() == QMetaType::Double || v.typeId() == QMetaType::Float) {
+      return QJsonValue(v.toDouble());
+    } else if (v.typeId() == QMetaType::Int || v.typeId() == QMetaType::LongLong) {
+      return QJsonValue(v.toInt());
+    } else if (v.typeId() == QMetaType::QString) {
+      return QJsonValue(v.toString());
+    } else if (v.canConvert<QVariantMap>()) {
+      QVariantMap map = v.toMap();
+      QJsonObject obj;
+      for (auto mi = map.begin(); mi != map.end(); ++mi) {
+        obj[mi.key()] = variantToJson(mi.value());
+      }
+      return QJsonValue(obj);
+    } else if (v.canConvert<QVariantList>()) {
+      QVariantList list = v.toList();
+      QJsonArray arr;
+      for (const QVariant &item : list) {
+        arr.append(variantToJson(item));
+      }
+      return QJsonValue(arr);
+    }
+    return QJsonValue(v.toString());
+  };
+
   QJsonObject varsObj;
   for (auto it = ctx.begin(); it != ctx.end(); ++it) {
     const QVariant &v = it.value();
-    if (v.typeId() == QMetaType::Double || v.typeId() == QMetaType::Float) {
-      varsObj[it.key()] = v.toDouble();
-      rootObj[it.key()] = v.toDouble();
-    } else if (v.typeId() == QMetaType::Int || v.typeId() == QMetaType::LongLong) {
-      varsObj[it.key()] = v.toInt();
-      rootObj[it.key()] = v.toInt();
-    } else if (v.typeId() == QMetaType::Bool) {
-      varsObj[it.key()] = v.toBool();
-      rootObj[it.key()] = v.toBool();
-    } else if (v.typeId() == QMetaType::QString) {
-      varsObj[it.key()] = v.toString();
-      rootObj[it.key()] = v.toString();
-    }
+    // Skip _history to avoid bloating the snapshot with all past receipts
+    if (it.key() == "_history")
+      continue;
+    QJsonValue jv = variantToJson(v);
+    varsObj[it.key()] = jv;
+    rootObj[it.key()] = jv;
   }
   rootObj["variables"] = varsObj;
 

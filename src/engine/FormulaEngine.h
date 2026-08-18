@@ -23,7 +23,9 @@
 #include <QJSValue>
 #include <QObject>
 #include <QRegularExpression>
+#include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -71,6 +73,13 @@ public:
   /// Clear all variables and reset the engine
   void reset();
 
+  /// Returns list of variable names that were auto-initialized to 0.0
+  /// during the last evaluate() call (potential typos)
+  QStringList autoInitializedVars() const;
+
+  /// Clear the auto-initialized tracking list
+  void clearAutoInitializedVars();
+
 private:
   void setupBuiltinFunctions();
   void syncContextToEngine();
@@ -78,6 +87,7 @@ private:
   QJSEngine *m_engine = nullptr;
   QVariantMap m_context;
   bool m_contextDirty = true;
+  QSet<QString> m_autoInitialized;
 };
 
 #endif // FORMULAENGINE_H

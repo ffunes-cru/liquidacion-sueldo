@@ -16,10 +16,35 @@ Rectangle {
     readonly property bool isBoolType: typeNormalized === "bool" || typeNormalized === "boolean"
     readonly property bool isNumType: typeNormalized === "number" || typeNormalized === "int" || typeNormalized === "float" || typeNormalized === "double" || typeNormalized === "num" || typeNormalized === "decimal"
 
-    function getSafeNumString(strVal) {
-        if (strVal === "true" || strVal === "false" || strVal === "True" || strVal === "False") return "0";
-        var parsed = parseFloat(strVal);
-        return isNaN(parsed) ? "0" : parsed.toString();
+    readonly property var arLocale: Qt.locale("es_AR")
+
+    function formatForDisplay(strVal) {
+        if (!strVal || strVal === "true" || strVal === "false" || strVal === "True" || strVal === "False") return "0";
+        var num = Number(strVal);
+        if (isNaN(num)) {
+            num = Number.fromLocaleString(arLocale, strVal.toString());
+        }
+        if (isNaN(num)) return strVal;
+        
+        // Determine precision (max 4, min 0)
+        var str = num.toString();
+        var decCount = 0;
+        if (str.indexOf('.') !== -1) {
+            decCount = Math.min(4, str.split('.')[1].length);
+        }
+        return num.toLocaleString(arLocale, 'f', decCount);
+    }
+
+    function parseForStorage(strVal) {
+        if (!strVal) return "0";
+        var cleaned = strVal.toString().trim();
+        // First try native locale parsing (1.234,56 -> 1234.56)
+        var num = Number.fromLocaleString(arLocale, cleaned);
+        if (isNaN(num)) {
+            // Fallback for standard dot decimal
+            num = parseFloat(cleaned.replace(",", "."));
+        }
+        return isNaN(num) ? "0" : num.toString();
     }
 
     implicitHeight: 44
@@ -69,19 +94,24 @@ Rectangle {
             }
         }
 
-        // 2. Numeric Input Control (No text allowed)
+        // 2. Numeric Input Control (Displays 1.234,56 using Qt native es_AR locale)
         StyledTextField {
             id: numField
             visible: root.isNumType
-            text: root.getSafeNumString(root.value)
+            text: root.formatForDisplay(root.value)
             Layout.preferredWidth: 170
             horizontalAlignment: Text.AlignRight
             inputMethodHints: Qt.ImhFormattedNumbersOnly
-            validator: DoubleValidator { bottom: 0; decimals: 4; notation: DoubleValidator.StandardNotation }
+            validator: DoubleValidator {
+                locale: "es_AR"
+                bottom: 0
+                decimals: 4
+                notation: DoubleValidator.StandardNotation
+            }
             onEditingFinished: {
-                var parsed = parseFloat(text || "0");
-                var safeVal = isNaN(parsed) ? "0" : parsed.toString();
+                var safeVal = root.parseForStorage(text);
                 root.valueSaved(safeVal);
+                text = root.formatForDisplay(safeVal);
             }
         }
 

@@ -23,9 +23,25 @@ DatabaseManager::DatabaseManager(const QString &dbPath, QObject *parent)
         m_dbPath = dbPath;
     }
 
+    // Single-instance database lock check (skip for in-memory DBs used in tests)
+    if (m_dbPath != ":memory:") {
+        m_lockFile = new QLockFile(m_dbPath + ".lock");
+        m_lockFile->setStaleLockTime(30000); // 30s stale lock threshold
+
+        if (!m_lockFile->tryLock(100)) {
+            m_isLockedByOtherInstance = true;
+            m_lockFile->getLockInfo(&m_lockingPid, nullptr, nullptr);
+            m_lockError = QString("La base de datos '%1' se encuentra en uso por otro proceso (PID: %2).")
+                              .arg(m_dbPath)
+                              .arg(m_lockingPid > 0 ? QString::number(m_lockingPid) : "desconocido");
+            qWarning() << "[DatabaseManager]" << m_lockError;
+            return;
+        }
+    }
+
     qDebug() << "[DatabaseManager] Abriendo base de datos SQLite en:" << m_dbPath;
 
-    m_db = QSqlDatabase::addDatabase("QSQLITE");
+    m_db = QSqlDatabase::addDatabase("QSQLITE", QString::number(reinterpret_cast<quintptr>(this)));
     m_db.setDatabaseName(m_dbPath);
 
     if (!m_db.open()) {
@@ -49,11 +65,34 @@ DatabaseManager::~DatabaseManager()
         qDebug() << "[DatabaseManager] Cerrando conexión de base de datos.";
         m_db.close();
     }
+
+    if (m_lockFile) {
+        if (m_lockFile->isLocked()) {
+            m_lockFile->unlock();
+        }
+        delete m_lockFile;
+        m_lockFile = nullptr;
+    }
 }
 
 bool DatabaseManager::isOpen() const
 {
     return m_db.isOpen();
+}
+
+bool DatabaseManager::isLockedByOtherInstance() const
+{
+    return m_isLockedByOtherInstance;
+}
+
+QString DatabaseManager::lockError() const
+{
+    return m_lockError;
+}
+
+qint64 DatabaseManager::lockingPid() const
+{
+    return m_lockingPid;
 }
 
 QString DatabaseManager::databasePath() const
@@ -570,12 +609,27 @@ int DatabaseManager::duplicateEmployee(int sourceId)
 
     if (newId <= 0) return -1;
 
+    // Copy quincenas list
+    QSqlQuery qQn(m_db);
+    qQn.prepare(R"(
+        INSERT OR IGNORE INTO quincenas_empleado (empleado_id, quincena)
+        SELECT ?, quincena
+        FROM quincenas_empleado
+        WHERE empleado_id = ?
+    )");
+    qQn.bindValue(0, newId);
+    qQn.bindValue(1, sourceId);
+    qQn.exec();
+
+    // Upsert field values
     QSqlQuery q(m_db);
     q.prepare(R"(
         INSERT INTO employee_field_values (empleado_id, field_id, quincena, value)
         SELECT ?, field_id, quincena, value
         FROM employee_field_values
         WHERE empleado_id = ?
+        ON CONFLICT(empleado_id, field_id, quincena)
+        DO UPDATE SET value = excluded.value
     )");
     q.bindValue(0, newId);
     q.bindValue(1, sourceId);

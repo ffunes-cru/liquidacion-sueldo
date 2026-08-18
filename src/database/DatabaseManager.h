@@ -7,6 +7,8 @@
 #include <QVariantList>
 #include <QString>
 
+#include <QLockFile>
+
 /**
  * @brief Manages the SQLite database for the payroll system.
  *
@@ -26,6 +28,9 @@ public:
     ~DatabaseManager();
 
     bool isOpen() const;
+    bool isLockedByOtherInstance() const;
+    QString lockError() const;
+    qint64 lockingPid() const;
     QString databasePath() const;
 
     // ── Schemas (esquemas_calculo) ──────────────────────────────────
@@ -152,6 +157,11 @@ private:
 
     QSqlDatabase m_db;
     QString m_dbPath;
+
+    QLockFile *m_lockFile = nullptr;
+    bool m_isLockedByOtherInstance = false;
+    QString m_lockError;
+    qint64 m_lockingPid = 0;
 };
 
 #endif // DATABASEMANAGER_H

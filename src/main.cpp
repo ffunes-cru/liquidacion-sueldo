@@ -23,6 +23,8 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 
+#include <QMessageBox>
+
 #include "controllers/AppController.h"
 #include "database/DatabaseManager.h"
 
@@ -33,8 +35,23 @@ int main(int argc, char *argv[]) {
   app.setApplicationName("LiquidacionSueldosQML");
 
   DatabaseManager dbManager;
+  if (dbManager.isLockedByOtherInstance()) {
+    QMessageBox::critical(
+        nullptr, "Aplicación ya en ejecución",
+        QString("La base de datos se encuentra bloqueada por otra instancia "
+                "del programa en ejecución (PID: %1).\n\n"
+                "No es posible abrir dos instancias al mismo tiempo para "
+                "evitar la corrupción de datos.")
+            .arg(dbManager.lockingPid() > 0
+                     ? QString::number(dbManager.lockingPid())
+                     : "desconocido"));
+    return 1;
+  }
+
   if (!dbManager.isOpen()) {
-    qCritical() << "No se pudo abrir la base de datos SQLite.";
+    QMessageBox::critical(
+        nullptr, "Error de Base de Datos",
+        "Fallo crítico: No se pudo abrir la base de datos SQLite.");
     return 1;
   }
 
