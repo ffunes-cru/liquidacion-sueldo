@@ -294,7 +294,11 @@ QVariant FormulaEngine::evaluate(const QString &formula, QString *error) {
     return result.toBool();
   }
   if (result.isNumber()) {
-    return result.toNumber();
+    double num = result.toNumber();
+    if (std::isnan(num) || std::isinf(num)) {
+      return 0.0;
+    }
+    return num;
   }
   if (result.isString()) {
     return result.toString();

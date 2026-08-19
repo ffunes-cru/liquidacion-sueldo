@@ -414,35 +414,41 @@ void TestFormulaEngine::testResetClearsState()
 // env object
 // ════════════════════════════════════════════════════════════════
 
+void TestFormulaEngine::testDivisionByZero()
+{
+    // Sanitize non-finite numbers to 0.0 to protect serialization and math
+    QVariant result = m_engine->evaluate("1 / 0");
+    QCOMPARE(result.toDouble(), 0.0);
+
+    QVariant nanResult = m_engine->evaluate("0 / 0");
+    QCOMPARE(nanResult.toDouble(), 0.0);
+}
+
 void TestFormulaEngine::testEnvObject()
 {
     QVariantMap envData;
     QVariantMap empleado;
     empleado["nombre"] = "Test";
     empleado["antiguedad_anios"] = 3;
+    
+    QVariantMap cat;
+    cat["nombre"] = "Oficial";
+    cat["valor_hora"] = 1500.50;
+    empleado["categoria"] = cat;
+
     envData["empleado"] = empleado;
     envData["mes"] = 8;
 
     m_engine->setEnvObject(envData);
     QCOMPARE(m_engine->evaluate("env.mes").toDouble(), 8.0);
     QCOMPARE(m_engine->evaluate("env.empleado.antiguedad_anios").toDouble(), 3.0);
+    QCOMPARE(m_engine->evaluate("env.empleado.categoria.valor_hora").toDouble(), 1500.50);
 }
-
-// ════════════════════════════════════════════════════════════════
-// Edge Cases
-// ════════════════════════════════════════════════════════════════
 
 void TestFormulaEngine::testEmptyFormula()
 {
     QCOMPARE(m_engine->evaluate("").toDouble(), 0.0);
     QCOMPARE(m_engine->evaluate("   ").toDouble(), 0.0);
-}
-
-void TestFormulaEngine::testDivisionByZero()
-{
-    QVariant result = m_engine->evaluate("1 / 0");
-    // JS returns Infinity, toDouble() gives inf
-    QVERIFY(qIsInf(result.toDouble()));
 }
 
 void TestFormulaEngine::testStringResult()

@@ -40,6 +40,7 @@ public:
     Q_INVOKABLE void refresh();
     Q_INVOKABLE bool removeReceipt(int id);
     Q_INVOKABLE QVariantMap getReceipt(int id) const;
+    Q_INVOKABLE QString formatJson(const QString &rawJson) const;
 
 signals:
     void employeeIdChanged();

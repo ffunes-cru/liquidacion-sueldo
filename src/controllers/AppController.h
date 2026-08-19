@@ -138,6 +138,9 @@ public:
   Q_INVOKABLE QString selectOpenFile(const QString &title, const QString &defaultDir, const QString &filter);
   Q_INVOKABLE QString selectFolder(const QString &title, const QString &defaultDir);
 
+  // JSON Utilities
+  Q_INVOKABLE QString formatJson(const QString &rawJson) const;
+
   // ── Export / Import ─────────────────────────────────────────
   Q_INVOKABLE QString exportDataXlsx(const QString &path);
   Q_INVOKABLE bool importDataXlsx(const QString &path);

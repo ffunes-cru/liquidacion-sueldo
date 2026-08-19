@@ -12,6 +12,7 @@
 #include "services/ExportService.h"
 #include <QDebug>
 #include <QFileDialog>
+#include <QJsonDocument>
 
 AppController::AppController(DatabaseManager *db, QObject *parent)
     : QObject(parent), m_db(db) {
@@ -362,4 +363,13 @@ QString AppController::selectOpenFile(const QString &title, const QString &defau
 
 QString AppController::selectFolder(const QString &title, const QString &defaultDir) {
     return QFileDialog::getExistingDirectory(nullptr, title, defaultDir);
+}
+
+QString AppController::formatJson(const QString &rawJson) const {
+    if (rawJson.trimmed().isEmpty())
+        return QString();
+    QJsonDocument doc = QJsonDocument::fromJson(rawJson.toUtf8());
+    if (doc.isNull())
+        return rawJson;
+    return QString::fromUtf8(doc.toJson(QJsonDocument::Indented));
 }

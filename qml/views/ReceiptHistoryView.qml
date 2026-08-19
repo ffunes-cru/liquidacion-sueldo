@@ -126,7 +126,10 @@ MasterDetailView {
                             var jsonStr = root.receiptDetails["datos_json"]
                             var parsedData = JSON.parse(jsonStr)
                             var empId = root.receiptDetails["empleado_id"] || cbFilterEmployee.currentValue
-                            var pdfPath = AppController.exportReceiptPdf(empId, parsedData, "")
+                            var legajo = root.receiptDetails["legajo"] || (parsedData["empleado"] ? parsedData["empleado"]["legajo"] : parsedData["legajo"]) || empId
+                            var defaultName = "recibo_legajo_" + legajo + "_" + root.receiptDetails["mes"] + "_" + root.receiptDetails["anio"] + ".pdf"
+                            var savePath = AppController.selectSaveFile("Guardar Recibo de Sueldo PDF", defaultName, "Archivos PDF (*.pdf)")
+                            var pdfPath = AppController.exportReceiptPdf(empId, parsedData, savePath)
                             if (pdfPath !== "") {
                                 root.statusMsg = "Recibo PDF exportado: " + pdfPath
                             }
@@ -204,7 +207,7 @@ MasterDetailView {
                 clip: true
 
                 TextArea {
-                    text: root.receiptDetails ? root.receiptDetails["datos_json"] : ""
+                    text: root.receiptDetails ? (root.receiptDetails["datos_json_formatted"] || root.receiptDetails["datos_json"]) : ""
                     color: Theme.successColor
                     font.family: "Monospace"
                     font.pixelSize: 12

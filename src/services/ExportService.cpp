@@ -988,19 +988,36 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
     QFont normalFont("Helvetica", 8.5);
     QFont smallFont("Helvetica", 7.5);
 
+    // Priorizar datos históricos de empresa y empleado encapsulados en el snapshot
+    QVariantMap effectiveCompany = companyData;
+    if (liquidationResult.contains("empresa") && liquidationResult.value("empresa").canConvert<QVariantMap>()) {
+        QVariantMap snapComp = liquidationResult.value("empresa").toMap();
+        if (!snapComp.isEmpty() && !snapComp.value("razon_social").toString().isEmpty()) {
+            effectiveCompany = snapComp;
+        }
+    }
+
+    QVariantMap effectiveEmployee = employeeData;
+    if (liquidationResult.contains("empleado") && liquidationResult.value("empleado").canConvert<QVariantMap>()) {
+        QVariantMap snapEmp = liquidationResult.value("empleado").toMap();
+        if (!snapEmp.isEmpty() && !snapEmp.value("nombre_completo").toString().isEmpty()) {
+            effectiveEmployee = snapEmp;
+        }
+    }
+
     // ── Company Header ──────────────────────────────────────────
     painter.setFont(titleFont);
     painter.setPen(QPen(Qt::black));
-    QString razonSocial = companyData.value("razon_social", "EMPRESA").toString();
+    QString razonSocial = effectiveCompany.value("razon_social", "EMPRESA").toString();
     painter.drawText(QRect(0, y, pageW, 70), Qt::AlignLeft | Qt::AlignVCenter, razonSocial);
     y += 75;
 
     painter.setFont(smallFont);
     painter.setPen(QPen(Qt::black));
     painter.drawText(QRect(0, y, pageW / 2, 40), Qt::AlignLeft,
-                     "CUIT: " + companyData.value("cuit", "").toString());
+                     "CUIT: " + effectiveCompany.value("cuit", "").toString());
     painter.drawText(QRect(pageW / 2, y, pageW / 2, 40), Qt::AlignRight,
-                     "Dirección: " + companyData.value("direccion", "").toString());
+                     "Dirección: " + effectiveCompany.value("direccion", "").toString());
     y += 45;
     drawLine(y);
     y += 12;
@@ -1027,8 +1044,8 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
 
     painter.setFont(normalFont);
     painter.setPen(QPen(Qt::black));
-    QString empName = employeeData.value("nombre_completo", "Empleado").toString();
-    QString empLegajo = employeeData.value("legajo", "").toString();
+    QString empName = effectiveEmployee.value("nombre_completo", "Empleado").toString();
+    QString empLegajo = effectiveEmployee.value("legajo", "").toString();
     painter.drawText(QRect(0, y, pageW / 2, 35), Qt::AlignLeft, "Empleado: " + empName);
     painter.drawText(QRect(pageW / 2, y, pageW / 2, 35), Qt::AlignRight, "Legajo: " + empLegajo);
     y += 40;
@@ -1147,18 +1164,50 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
             QColor(249, 226, 175), QColor(148, 226, 213)
         };
 
+        // Cache schema cell definitions in case historical snapshot omitted chart flags
+        QMap<int, QVariantMap> dbCellsById;
+        QMap<QString, QVariantMap> dbCellsByCode;
+        if (m_db) {
+            QString esqCode = effectiveEmployee.value("esquema_codigo", "MENSUAL").toString();
+            QVariantList schemaCells = m_db->listCellsBySchema(esqCode);
+            for (const auto &scVar : schemaCells) {
+                QVariantMap scMap = scVar.toMap();
+                int scId = scMap.value("id", 0).toInt();
+                QString scCode = scMap.value("codigo_variable").toString();
+                if (scId > 0) dbCellsById[scId] = scMap;
+                if (!scCode.isEmpty()) dbCellsByCode[scCode] = scMap;
+            }
+        }
+
         int colorIdx = 0;
         for (const auto &cVar : conceptos) {
             QVariantMap cMap = cVar.toMap();
+            int cId = cMap.value("cell_id", 0).toInt();
+            QString cCode = cMap.value("codigo", cMap.value("codigo_variable", "")).toString();
+
+            bool hasChartMetadata = cMap.contains("en_grafico");
             bool inChart = cMap.value("en_grafico").toBool() || cMap.value("en_grafico").toInt() == 1;
             bool isTotalRef = cMap.value("es_grafico_total").toBool() || cMap.value("es_grafico_total").toInt() == 1;
+            QString colHex = cMap.value("color_hex").toString();
+
+            if (!hasChartMetadata) {
+                QVariantMap fallbackCell;
+                if (cId > 0 && dbCellsById.contains(cId)) fallbackCell = dbCellsById[cId];
+                else if (!cCode.isEmpty() && dbCellsByCode.contains(cCode)) fallbackCell = dbCellsByCode[cCode];
+
+                if (!fallbackCell.isEmpty()) {
+                    inChart = fallbackCell.value("en_grafico").toInt() == 1;
+                    isTotalRef = fallbackCell.value("es_grafico_total").toInt() == 1;
+                    colHex = fallbackCell.value("color_hex").toString();
+                }
+            }
+
             double mVal = std::abs(cMap.value("monto").toDouble());
 
             if (isTotalRef && mVal > 0) {
                 refTotal = mVal;
             }
             if (inChart && mVal > 0) {
-                QString colHex = cMap.value("color_hex").toString();
                 QColor sColor = colHex.isEmpty() ? chartColors[colorIdx % chartColors.size()] : QColor(colHex);
                 colorIdx++;
                 chartSlices.append({cMap.value("descripcion").toString(), mVal, sColor});

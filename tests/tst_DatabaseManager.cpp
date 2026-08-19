@@ -26,6 +26,7 @@ private slots:
     // ── Employees ─────────────────────────────────────────────
     void testEmployeeCrud();
     void testDuplicateEmployee();
+    void testEmployeeSoftDeleteWithReceipts();
 
     // ── Schema Fields ─────────────────────────────────────────
     void testSchemaFieldCrud();
@@ -169,6 +170,37 @@ void TestDatabaseManager::testDuplicateEmployee()
     QVERIFY(!fVals.isEmpty());
     QCOMPARE(fVals.first().toMap()["value"].toString(), "85000");
 }
+
+void TestDatabaseManager::testEmployeeSoftDeleteWithReceipts()
+{
+    int empId = m_db->saveEmployee(0, "L900", "Empleado Con Recibos", "mensual", "MENSUAL", 0, "2020-01-01", "20-99999999-9");
+    QVERIFY(empId > 0);
+
+    int recId = m_db->saveReceipt(empId, "MENSUAL", 8, 2026, "M", "{\"totales\":{\"neto_a_cobrar\":200000}}");
+    QVERIFY(recId > 0);
+
+    // Intentar eliminar el empleado: debe realizar soft-delete (activo = 0)
+    QVERIFY(m_db->deleteEmployee(empId));
+
+    // El empleado no debe aparecer en la lista de empleados activos
+    auto activeEmployees = m_db->listEmployees();
+    for (const auto &e : activeEmployees) {
+        QVERIFY(e.toMap()["id"].toInt() != empId);
+    }
+
+    // El recibo histórico debe seguir existiendo intacto
+    auto rec = m_db->getReceipt(recId);
+    QVERIFY(!rec.isEmpty());
+    QCOMPARE(rec["empleado_id"].toInt(), empId);
+
+    // Eliminar el recibo
+    QVERIFY(m_db->deleteReceipt(recId));
+
+    // Ahora que no tiene recibos, deleteEmployee lo remueve físicamente
+    QVERIFY(m_db->deleteEmployee(empId));
+    QVERIFY(m_db->getEmployee(empId).isEmpty());
+}
+
 
 // ════════════════════════════════════════════════════════════════
 // Schema Fields & Sync
@@ -331,7 +363,14 @@ void TestDatabaseManager::testCustomFunctionsCrud()
 
     auto list = m_db->listCustomFunctions("MENSUAL");
     QVERIFY(!list.isEmpty());
-    QCOMPARE(list.first().toMap()["name"].toString(), "mi_funcion");
+    bool found = false;
+    for (const auto &f : list) {
+        if (f.toMap()["name"].toString() == "mi_funcion") {
+            found = true;
+            break;
+        }
+    }
+    QVERIFY(found);
 
     QVERIFY(m_db->deleteCustomFunction(funcId));
 }

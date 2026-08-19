@@ -150,7 +150,8 @@ void DatabaseManager::createTables()
             esquema_codigo      TEXT    REFERENCES esquemas_calculo(codigo) DEFAULT 'MENSUAL',
             categoria_jornal_id INTEGER REFERENCES categorias_jornal(id),
             fecha_ingreso       TEXT    DEFAULT '2020-01-01',
-            cuil                TEXT    DEFAULT ''
+            cuil                TEXT    DEFAULT '',
+            activo              INTEGER DEFAULT 1
         )
     )");
 
@@ -283,9 +284,54 @@ void DatabaseManager::createTables()
 void DatabaseManager::runMigrations()
 {
     QSqlQuery q(m_db);
+    q.exec("ALTER TABLE empleados ADD COLUMN activo INTEGER DEFAULT 1");
     q.exec("ALTER TABLE celdas_calculo ADD COLUMN color_hex TEXT DEFAULT ''");
     q.exec("ALTER TABLE celdas_calculo ADD COLUMN en_grafico INTEGER DEFAULT 0");
     q.exec("ALTER TABLE celdas_calculo ADD COLUMN es_grafico_total INTEGER DEFAULT 0");
+
+    // Sembrar funciones de historial estándar si no existen
+    auto seedFunc = [this](const QString &name, const QString &params, const QString &body, const QString &desc) {
+        QSqlQuery sf(m_db);
+        sf.prepare("INSERT OR IGNORE INTO custom_functions (name, params, body, description, esquema_codigo) VALUES (?, ?, ?, ?, '')");
+        sf.addBindValue(name);
+        sf.addBindValue(params);
+        sf.addBindValue(body);
+        sf.addBindValue(desc);
+        sf.exec();
+    };
+
+    seedFunc("mejor_sueldo", "varName, cantMeses",
+             "var maxVal = 0;\n"
+             "var list = (typeof env !== 'undefined' && env && env.historial) ? env.historial : [];\n"
+             "var limit = cantMeses || list.length;\n"
+             "for (var i = 0; i < Math.min(list.length, limit); i++) {\n"
+             "    var val = Number(list[i][varName]) || 0;\n"
+             "    if (val > maxVal) maxVal = val;\n"
+             "}\n"
+             "return maxVal;",
+             "Calcula el mejor valor histórico de una variable (ej. SAC / Aguinaldo) en los últimos N meses del historial.");
+
+    seedFunc("promedio_historial", "varName, cantMeses",
+             "var total = 0;\n"
+             "var count = 0;\n"
+             "var list = (typeof env !== 'undefined' && env && env.historial) ? env.historial : [];\n"
+             "var limit = cantMeses || list.length;\n"
+             "for (var i = 0; i < Math.min(list.length, limit); i++) {\n"
+             "    total += Number(list[i][varName]) || 0;\n"
+             "    count++;\n"
+             "}\n"
+             "return count > 0 ? (total / count) : 0;",
+             "Calcula el promedio de una variable histórica en los últimos N meses (ej. promedio de horas extras para vacaciones).");
+
+    seedFunc("sumar_historial", "varName, cantMeses",
+             "var total = 0;\n"
+             "var list = (typeof env !== 'undefined' && env && env.historial) ? env.historial : [];\n"
+             "var limit = cantMeses || list.length;\n"
+             "for (var i = 0; i < Math.min(list.length, limit); i++) {\n"
+             "    total += Number(list[i][varName]) || 0;\n"
+             "}\n"
+             "return total;",
+             "Suma acumulada de una variable en los últimos N meses del historial.");
 }
 
 QVariantList DatabaseManager::listSchemas() const
@@ -453,6 +499,7 @@ QVariantList DatabaseManager::listEmployees() const
         SELECT e.*, c.nombre AS categoria_nombre
         FROM empleados e
         LEFT JOIN categorias_jornal c ON c.id = e.categoria_jornal_id
+        WHERE e.activo = 1 OR e.activo IS NULL
         ORDER BY e.legajo
     )");
     while (q.next()) {
@@ -584,6 +631,21 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
 bool DatabaseManager::deleteEmployee(int id)
 {
     qInfo() << "[DatabaseManager] Eliminando registro de empleado ID:" << id;
+
+    // Si el empleado tiene recibos históricos asociados, realizamos un soft-delete
+    // para preservar la integridad referencial y jurídica de los recibos emitidos.
+    QSqlQuery check(m_db);
+    check.prepare("SELECT COUNT(*) FROM recibos WHERE empleado_id = ?");
+    check.addBindValue(id);
+    check.exec();
+    if (check.next() && check.value(0).toInt() > 0) {
+        qInfo() << "[DatabaseManager] Empleado ID" << id << "posee recibos históricos. Marcando como inactivo (soft-delete).";
+        QSqlQuery softDel(m_db);
+        softDel.prepare("UPDATE empleados SET activo = 0 WHERE id = ?");
+        softDel.addBindValue(id);
+        return softDel.exec();
+    }
+
     QSqlQuery q(m_db);
     q.prepare("DELETE FROM empleados WHERE id = ?");
     q.bindValue(0, id);
@@ -1400,7 +1462,12 @@ QVariantList DatabaseManager::listReceiptsByEmployee(int employeeId) const
 QVariantMap DatabaseManager::getReceipt(int id) const
 {
     QSqlQuery q(m_db);
-    q.prepare("SELECT * FROM recibos WHERE id = ?");
+    q.prepare(R"(
+        SELECT r.*, e.nombre_completo, e.legajo
+        FROM recibos r
+        LEFT JOIN empleados e ON e.id = r.empleado_id
+        WHERE r.id = ?
+    )");
     q.addBindValue(id);
     q.exec();
     if (q.next()) {
@@ -1413,6 +1480,8 @@ QVariantMap DatabaseManager::getReceipt(int id) const
             {"periodo", q.value("periodo")},
             {"datos_json", q.value("datos_json")},
             {"fecha_emision", q.value("fecha_emision")},
+            {"nombre_completo", q.value("nombre_completo")},
+            {"legajo", q.value("legajo")},
         };
     }
     return {};
@@ -1422,45 +1491,42 @@ int DatabaseManager::saveReceipt(int employeeId, const QString &esquemaCodigo,
                                   int mes, int anio, const QString &periodo,
                                   const QString &datosJson)
 {
-    qInfo() << "[DatabaseManager] Guardando recibo snapshot para empleado ID:" << employeeId << "Mes:" << mes << "Año:" << anio;
+    qInfo() << "[DatabaseManager] Guardando recibo snapshot para empleado ID:" << employeeId << "Mes:" << mes << "Año:" << anio << "Periodo:" << periodo;
     QString fecha = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
 
-    QSqlQuery check(m_db);
-    check.prepare(R"(
-        SELECT id FROM recibos
-        WHERE empleado_id=? AND esquema_codigo=? AND mes=? AND anio=? AND periodo=?
-    )");
-    check.addBindValue(employeeId);
-    check.addBindValue(esquemaCodigo);
-    check.addBindValue(mes);
-    check.addBindValue(anio);
-    check.addBindValue(periodo);
-    check.exec();
-
     QSqlQuery q(m_db);
-    if (check.next()) {
-        int existingId = check.value(0).toInt();
-        q.prepare("UPDATE recibos SET datos_json=?, fecha_emision=? WHERE id=?");
-        q.addBindValue(datosJson);
-        q.addBindValue(fecha);
-        q.addBindValue(existingId);
-        q.exec();
-        return existingId;
-    } else {
-        q.prepare(R"(
-            INSERT INTO recibos (empleado_id, esquema_codigo, mes, anio, periodo, datos_json, fecha_emision)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        )");
-        q.addBindValue(employeeId);
-        q.addBindValue(esquemaCodigo);
-        q.addBindValue(mes);
-        q.addBindValue(anio);
-        q.addBindValue(periodo);
-        q.addBindValue(datosJson);
-        q.addBindValue(fecha);
-        q.exec();
-        return q.lastInsertId().toInt();
+    q.prepare(R"(
+        INSERT INTO recibos (empleado_id, esquema_codigo, mes, anio, periodo, datos_json, fecha_emision)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(empleado_id, esquema_codigo, mes, anio, periodo)
+        DO UPDATE SET datos_json=excluded.datos_json, fecha_emision=excluded.fecha_emision
+        RETURNING id
+    )");
+    q.addBindValue(employeeId);
+    q.addBindValue(esquemaCodigo);
+    q.addBindValue(mes);
+    q.addBindValue(anio);
+    q.addBindValue(periodo);
+    q.addBindValue(datosJson);
+    q.addBindValue(fecha);
+
+    if (q.exec() && q.next()) {
+        return q.value(0).toInt();
     }
+
+    // Fallback if RETURNING clause is not supported on older SQLite engines
+    QSqlQuery fb(m_db);
+    fb.prepare("SELECT id FROM recibos WHERE empleado_id=? AND esquema_codigo=? AND mes=? AND anio=? AND periodo=?");
+    fb.addBindValue(employeeId);
+    fb.addBindValue(esquemaCodigo);
+    fb.addBindValue(mes);
+    fb.addBindValue(anio);
+    fb.addBindValue(periodo);
+    if (fb.exec() && fb.next()) {
+        return fb.value(0).toInt();
+    }
+
+    return -1;
 }
 
 bool DatabaseManager::deleteReceipt(int id)

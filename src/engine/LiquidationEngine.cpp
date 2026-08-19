@@ -536,7 +536,8 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
         {"simple_monto_fijo", cell.value("simple_monto_fijo", 0.0)},
         {"visible_recibo", cell.value("visible_recibo", 1)},
         {"en_grafico", cell.value("en_grafico", 0)},
-        {"es_grafico_total", cell.value("es_grafico_total", 0)}
+        {"es_grafico_total", cell.value("es_grafico_total", 0)},
+        {"color_hex", cell.value("color_hex", "")}
     };
 
     QVariantList seccionList = resultadosPorSeccion.value(seccion).toList();
@@ -616,9 +617,10 @@ QVariantMap LiquidationEngine::buildQuincenaContext(
   ctx["valor_hora"] = vh;
   ctx["jornal"] = vh;
 
-  // Inject employee values for this quincena
+  // Inject employee values for this quincena (if 'M', map to 'Q1' where monthly values are stored)
+  QString qnToFetch = (quincenaCode == "M" || quincenaCode.isEmpty()) ? "Q1" : quincenaCode;
   QVariantList fieldValues =
-      m_db->getEmployeeFieldValues(employeeId, quincenaCode);
+      m_db->getEmployeeFieldValues(employeeId, qnToFetch);
   for (const QVariant &fv : fieldValues) {
     QVariantMap f = fv.toMap();
     ctx[f["field_code"].toString()] = parseValue(f["value"].toString());
@@ -748,6 +750,28 @@ int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
   metaObj["fecha_calculo"] = ctx.value("fecha_calculo").toString();
   rootObj["meta"] = metaObj;
 
+  // 1.1 Snapshot de la Empresa al momento de emitir el recibo
+  QVariantMap comp = m_db->getCompany();
+  QJsonObject compObj;
+  compObj["razon_social"] = comp.value("razon_social").toString();
+  compObj["cuit"] = comp.value("cuit").toString();
+  compObj["direccion"] = comp.value("direccion").toString();
+  compObj["lugar_de_pago"] = comp.value("lugar_de_pago").toString();
+  rootObj["empresa"] = compObj;
+
+  // 1.2 Snapshot del Empleado al momento de emitir el recibo
+  QJsonObject empObj;
+  empObj["id"] = emp["id"].toInt();
+  empObj["legajo"] = emp["legajo"].toString();
+  empObj["nombre_completo"] = emp["nombre_completo"].toString();
+  empObj["cuil"] = emp["cuil"].toString();
+  empObj["tipo_liquidacion"] = emp["tipo_liquidacion"].toString();
+  empObj["esquema_codigo"] = esquema;
+  empObj["categoria_nombre"] = emp.value("categoria_nombre").toString();
+  empObj["fecha_ingreso"] = emp.value("fecha_ingreso").toString();
+  empObj["antiguedad_anios"] = ctx.value("antiguedad_anios", 0).toInt();
+  rootObj["empleado"] = empObj;
+
   // 2. Totales
   QJsonObject totalesObj;
   totalesObj["total_remunerativo"] = result.value("total_remunerativo").toDouble();
@@ -788,13 +812,13 @@ int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
 
   QJsonObject varsObj;
   for (auto it = ctx.begin(); it != ctx.end(); ++it) {
-    const QVariant &v = it.value();
-    // Skip _history to avoid bloating the snapshot with all past receipts
-    if (it.key() == "_history")
+    const QString &key = it.key();
+    // Skip internal calculation metadata and intermediate quincena evaluation contexts (*_obj)
+    if (key == "_history" || key.endsWith("_obj"))
       continue;
-    QJsonValue jv = variantToJson(v);
-    varsObj[it.key()] = jv;
-    rootObj[it.key()] = jv;
+    QJsonValue jv = variantToJson(it.value());
+    varsObj[key] = jv;
+    rootObj[key] = jv;
   }
   rootObj["variables"] = varsObj;
 
@@ -812,6 +836,10 @@ int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
     cObj["base"] = cm.value("base", 0.0).toDouble();
     cObj["unidad"] = cm.value("unidad", 0.0).toDouble();
     cObj["tipo_calculo"] = cm.value("tipo_calculo", "").toString();
+    cObj["visible_recibo"] = cm.value("visible_recibo", 1).toInt();
+    cObj["en_grafico"] = cm.value("en_grafico", 0).toInt();
+    cObj["es_grafico_total"] = cm.value("es_grafico_total", 0).toInt();
+    cObj["color_hex"] = cm.value("color_hex", "").toString();
     conceptosArr.append(cObj);
 
     // Concept amount ALWAYS overwrites input variable of same name

@@ -65,6 +65,12 @@ private slots:
     // ── Export Service ────────────────────────────────────────
     void testExportServiceDynamicValues();
 
+    // ── Historical Data & Namespaces ──────────────────────────
+    void testHistoricalAguinaldoCalculation();
+    void testHistoricalVacationsCalculation();
+    void testHistoricalConceptRenameResilience();
+    void testReceiptSnapshotSelfContained();
+
 private:
     DatabaseManager *m_db = nullptr;
     LiquidationEngine *m_engine = nullptr;
@@ -554,6 +560,161 @@ void TestLiquidationEngine::testExportServiceDynamicValues()
     // Clean up
     QFile::remove(tempXlsx);
 }
+
+// ════════════════════════════════════════════════════════════════
+// Historical Data & Namespaces Tests
+// ════════════════════════════════════════════════════════════════
+
+void TestLiquidationEngine::testHistoricalAguinaldoCalculation()
+{
+    setupBasicSchema();
+    m_db->addSchemaField("TEST", "basico", "Sueldo Básico", "number", "100000", 1);
+    
+    // Cell 1: Sueldo mensual
+    m_db->saveCell(0, "RECIBO", "sueldo_mensual", "Sueldo Mensual", "",
+                   "", "", "basico", 10, "TEST",
+                   "formula", 0.0, "", 0.0, true);
+
+    // Cell 2: SAC (Sueldo Anual Complementario) = mejor sueldo del semestre * 0.5
+    m_db->saveCell(0, "RECIBO", "sac", "S.A.C. 1er Semestre", "mes == 6",
+                   "", "", "mejor_sueldo('sueldo_mensual', 6) * 0.5", 20, "TEST",
+                   "formula", 0.0, "", 0.0, true);
+
+    int empId = createEmployee("mensual", "TEST", "2020-01-01");
+
+    // Simular y persistir 5 meses previos con sueldos variables:
+    // Mes 1: 100000, Mes 2: 110000, Mes 3: 150000 (PICO), Mes 4: 120000, Mes 5: 130000
+    QList<double> historicalBasics = {100000.0, 110000.0, 150000.0, 120000.0, 130000.0};
+    for (int i = 0; i < historicalBasics.size(); i++) {
+        int mNum = i + 1;
+        m_db->setEmployeeFieldValues(empId, "Q1", {{"basico", QString::number(historicalBasics[i])}});
+        QString fCalc = QString("2026-%1-28").arg(mNum, 2, 10, QChar('0'));
+        QVariantMap res = m_engine->processLiquidation(empId, "", fCalc);
+        m_engine->persistLiquidation(res, mNum, 2026, QString("Mes %1/2026").arg(mNum));
+    }
+
+    // Mes 6: Sueldo 140000 y cálculo de SAC
+    m_db->setEmployeeFieldValues(empId, "Q1", {{"basico", "140000"}});
+    QVariantMap resMes6 = m_engine->processLiquidation(empId, "", "2026-06-30");
+    QVariantMap ctx6 = resMes6["contexto_final"].toMap();
+
+    QCOMPARE(ctx6["sueldo_mensual"].toDouble(), 140000.0);
+    // El mejor sueldo del semestre fue 150.000 (Mes 3). SAC = 150000 * 0.5 = 75000
+    QCOMPARE(ctx6["sac"].toDouble(), 75000.0);
+}
+
+void TestLiquidationEngine::testHistoricalVacationsCalculation()
+{
+    setupBasicSchema();
+    m_db->addSchemaField("TEST", "horas_extras_monto", "Horas Extras", "number", "0", 1);
+
+    m_db->saveCell(0, "RECIBO", "he_monto", "Horas Extras Monto", "",
+                   "", "", "horas_extras_monto", 10, "TEST",
+                   "formula", 0.0, "", 0.0, true);
+
+    // Concepto de promedio de horas extras últimos 6 meses para plus vacacional
+    m_db->saveCell(0, "RECIBO", "promedio_he", "Promedio HE Semestre", "",
+                   "", "", "promedio_historial('he_monto', 6)", 20, "TEST",
+                   "formula", 0.0, "", 0.0, true);
+
+    int empId = createEmployee("mensual", "TEST", "2020-01-01");
+
+    // Persistir 3 meses previos con horas extras: 10000, 20000, 30000 (Promedio = 20000)
+    QList<double> prevHE = {10000.0, 20000.0, 30000.0};
+    for (int i = 0; i < prevHE.size(); i++) {
+        int mNum = i + 1;
+        m_db->setEmployeeFieldValues(empId, "Q1", {{"horas_extras_monto", QString::number(prevHE[i])}});
+        QString fCalc = QString("2026-%1-28").arg(mNum, 2, 10, QChar('0'));
+        QVariantMap res = m_engine->processLiquidation(empId, "", fCalc);
+        m_engine->persistLiquidation(res, mNum, 2026, QString("Mes %1/2026").arg(mNum));
+    }
+
+    // Mes 4: Cargar liquidación
+    m_db->setEmployeeFieldValues(empId, "Q1", {{"horas_extras_monto", "0"}});
+    QVariantMap resMes4 = m_engine->processLiquidation(empId, "", "2026-04-30");
+    QVariantMap ctx4 = resMes4["contexto_final"].toMap();
+
+    // Promedio de 3 meses previos: (10000 + 20000 + 30000) / 3 = 20000.0
+    QCOMPARE(ctx4["promedio_he"].toDouble(), 20000.0);
+}
+
+void TestLiquidationEngine::testHistoricalConceptRenameResilience()
+{
+    setupBasicSchema();
+    m_db->addSchemaField("TEST", "sueldo_input", "Sueldo", "number", "80000", 1);
+
+    // Celda creada inicialmente con código 'basico_v1'
+    int cellId = m_db->saveCell(0, "RECIBO", "basico_v1", "Básico Original", "",
+                                "", "", "sueldo_input", 10, "TEST",
+                                "formula", 0.0, "", 0.0, true);
+    QVERIFY(cellId > 0);
+
+    int empId = createEmployee("mensual", "TEST", "2020-01-01");
+    m_db->setEmployeeFieldValues(empId, "Q1", {{"sueldo_input", "80000"}});
+
+    // Persistir recibo de Mes 1 con celda código 'basico_v1'
+    QVariantMap resMes1 = m_engine->processLiquidation(empId, "", "2026-01-31");
+    m_engine->persistLiquidation(resMes1, 1, 2026, "Mes 1/2026");
+
+    // Renombrar la celda de 'basico_v1' a 'sueldo_base' manteniendo el mismo cellId
+    m_db->saveCell(cellId, "RECIBO", "sueldo_base", "Básico Renombrado", "",
+                   "", "", "sueldo_input", 10, "TEST",
+                   "formula", 0.0, "", 0.0, true);
+
+    // Crear concepto que consulte 'sueldo_base' en el historial
+    m_db->saveCell(0, "RECIBO", "mejor_sueldo_base", "Mejor Sueldo Base", "",
+                   "", "", "mejor_sueldo('sueldo_base', 3)", 20, "TEST",
+                   "formula", 0.0, "", 0.0, true);
+
+    // Liquidar Mes 2
+    m_db->setEmployeeFieldValues(empId, "Q1", {{"sueldo_input", "90000"}});
+    QVariantMap resMes2 = m_engine->processLiquidation(empId, "", "2026-02-28");
+    QVariantMap ctx2 = resMes2["contexto_final"].toMap();
+
+    // Comprobar que mediante cell_id mapping, el snapshot de Mes 1 expuso su monto como 'sueldo_base'
+    QCOMPARE(ctx2["mejor_sueldo_base"].toDouble(), 80000.0);
+}
+
+void TestLiquidationEngine::testReceiptSnapshotSelfContained()
+{
+    setupBasicSchema();
+    m_db->addSchemaField("TEST", "basico", "Sueldo", "number", "100000", 1);
+    m_db->saveCell(0, "RECIBO", "sueldo", "Sueldo", "",
+                   "", "", "basico", 10, "TEST",
+                   "formula", 0.0, "", 0.0, true);
+
+    m_db->saveCompany("Empresa Original S.A.", "Calle Falsa 123", "30-11111111-9", "CABA");
+    int empId = m_db->saveEmployee(0, "L001", "Juan Perez", "mensual", "TEST", 0, "2020-01-01", "20-12345678-9");
+    m_db->setEmployeeFieldValues(empId, "Q1", {{"basico", "100000"}});
+
+    // Persistir liquidación
+    QVariantMap res = m_engine->processLiquidation(empId, "", "2026-05-31");
+    int recId = m_engine->persistLiquidation(res, 5, 2026, "Mes 5/2026");
+    QVERIFY(recId > 0);
+
+    // Modificar datos de la empresa y del empleado en la base de datos
+    m_db->saveCompany("Nueva Empresa Modificada S.R.L.", "Av. Siempreviva 742", "30-99999999-0", "Cordoba");
+    m_db->saveEmployee(empId, "L999", "Juan Modificado", "mensual", "TEST", 0, "2020-01-01", "20-12345678-9");
+
+    // Recuperar el recibo persistido
+    QVariantMap rec = m_db->getReceipt(recId);
+    QJsonDocument doc = QJsonDocument::fromJson(rec["datos_json"].toString().toUtf8());
+    QVERIFY(doc.isObject());
+    QJsonObject root = doc.object();
+
+    // Verificar que el snapshot contiene la empresa original inalterada
+    QVERIFY(root.contains("empresa"));
+    QJsonObject empSnap = root["empresa"].toObject();
+    QCOMPARE(empSnap["razon_social"].toString(), "Empresa Original S.A.");
+    QCOMPARE(empSnap["cuit"].toString(), "30-11111111-9");
+
+    // Verificar que el snapshot contiene el empleado original inalterado
+    QVERIFY(root.contains("empleado"));
+    QJsonObject empDataSnap = root["empleado"].toObject();
+    QCOMPARE(empDataSnap["nombre_completo"].toString(), "Juan Perez");
+    QCOMPARE(empDataSnap["legajo"].toString(), "L001");
+}
+
 
 #include "tst_LiquidationEngine.moc"
 
