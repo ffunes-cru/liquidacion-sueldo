@@ -75,12 +75,76 @@ ApplicationWindow {
                     }
                 }
 
+                // Global Period Selector
+                Rectangle {
+                    implicitHeight: 38
+                    implicitWidth: periodRow.implicitWidth + 16
+                    radius: 8
+                    color: Theme.isDark ? Qt.rgba(1, 1, 1, 0.05) : Qt.rgba(0, 0, 0, 0.04)
+                    border.color: Theme.borderColor
+                    border.width: 1
+
+                    RowLayout {
+                        id: periodRow
+                        anchors.centerIn: parent
+                        spacing: 8
+
+                        Label {
+                            text: "📅 Período:"
+                            font.bold: true
+                            font.pixelSize: 12
+                            color: Theme.subtextColor
+                        }
+
+                        StyledComboBox {
+                            id: monthCombo
+                            implicitWidth: 120
+                            implicitHeight: 30
+                            model: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                                    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+                            currentIndex: AppController.selectedMonth - 1
+                            onActivated: AppController.selectedMonth = currentIndex + 1
+                        }
+
+                        StyledSpinBox {
+                            id: yearSpin
+                            implicitWidth: 88
+                            implicitHeight: 30
+                            from: 2020
+                            to: 2035
+                            value: AppController.selectedYear
+                            onValueModified: AppController.selectedYear = value
+                        }
+
+                        // Closed / Open Period Badge
+                        BadgePill {
+                            text: AppController.isCurrentPeriodClosed ? "🔒 Cerrado" : "🟢 Abierto"
+                            variant: AppController.isCurrentPeriodClosed ? "warning" : "success"
+                        }
+                    }
+                }
+
+                // Close / Reopen Month Action Buttons
+                StyledButton {
+                    text: "🔒 Cerrar Mes"
+                    variant: "primary"
+                    visible: !AppController.isCurrentPeriodClosed
+                    onClicked: closeMonthDialog.open()
+                }
+
+                StyledButton {
+                    text: "🔓 Reabrir Mes"
+                    variant: "secondary"
+                    visible: AppController.isCurrentPeriodClosed && AppController.currentRole === "admin"
+                    onClicked: reopenConfirmDialog.open()
+                }
+
+                Item { Layout.fillWidth: true }
+
                 // Role Selector Pill
                 RoleSelector {
                     Layout.alignment: Qt.AlignVCenter
                 }
-
-                Item { Layout.fillWidth: true }
 
                 // Settings Gear Button
                 StyledButton {
@@ -167,6 +231,19 @@ ApplicationWindow {
 
     CalculationErrorDialog {
         id: calcErrorDialog
+    }
+
+    CloseMonthDialog {
+        id: closeMonthDialog
+    }
+
+    ConfirmDialog {
+        id: reopenConfirmDialog
+        title: "Reabrir Período"
+        text: "¿Está seguro que desea reabrir el período " + AppController.selectedMonth + "/" + AppController.selectedYear + "? Esto eliminará el snapshot y permitirá editar nuevamente los valores de los empleados."
+        confirmText: "Reabrir Período"
+        variant: "warning"
+        onAccepted: AppController.reopenMonth(AppController.selectedYear, AppController.selectedMonth)
     }
 
     Connections {

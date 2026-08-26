@@ -37,8 +37,15 @@ Item {
         onConfirmed: {
             if (root.liquidationResult) {
                 var qText = ((root.employeeData && (root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal") ? (" (" + cbQuincena.currentText + ")") : "")
-                var periodoStr = "Mes " + dpFechaCalculo.selectedMonth + "/" + dpFechaCalculo.selectedYear + qText
-                var recId = AppController.persistLiquidation(root.liquidationResult, dpFechaCalculo.selectedMonth, dpFechaCalculo.selectedYear, periodoStr)
+                var periodoStr = "Mes " + AppController.selectedMonth + "/" + AppController.selectedYear + qText
+                var recId = AppController.persistLiquidation(
+                    root.liquidationResult,
+                    AppController.selectedMonth,
+                    AppController.selectedYear,
+                    periodoStr,
+                    dpFechaCalculo.selectedDateString,
+                    AppController.fechaPago
+                )
                 root.statusMsg = recId > 0 ? "Recibo histórico guardado con ID #" + recId : "Error al guardar en el historial."
                 if (recId > 0) AppController.receiptHistoryModel.refresh()
             }
@@ -81,13 +88,26 @@ Item {
                     Layout.preferredWidth: 110
                     model: ["Q1", "Q2"]
                     visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
+                    onCurrentTextChanged: {
+                        if (currentText === "Q1") {
+                            dpFechaCalculo.selectedDateString = AppController.fechaCierreQ1
+                        } else if (currentText === "Q2") {
+                            dpFechaCalculo.selectedDateString = AppController.fechaCierreQ2
+                        }
+                    }
                 }
 
-                // Fecha Cálculo (Única)
-                Label { text: "Fecha:"; color: Theme.textColor; font.pixelSize: 13 }
+                // Fecha Cierre / Cálculo
+                Label { text: "Fecha Cierre:"; color: Theme.textColor; font.pixelSize: 13 }
                 StyledDatePicker {
                     id: dpFechaCalculo
                     Layout.preferredWidth: 145
+                    selectedDateString: {
+                        if (root.employeeData && (root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal") {
+                            return cbQuincena.currentText === "Q2" ? AppController.fechaCierreQ2 : AppController.fechaCierreQ1
+                        }
+                        return AppController.fechaCierreMes
+                    }
                 }
 
                 Item { Layout.fillWidth: true }
@@ -101,7 +121,15 @@ Item {
                         var empId = root.selectedEmployeeId
                         if (empId > 0) {
                             root.companyData = AppController.getCompany()
-                            var res = AppController.processLiquidation(empId, cbQuincena.currentText, dpFechaCalculo.formattedDate)
+                            var isJornal = root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
+                            var qSel = isJornal ? cbQuincena.currentText : ""
+                            var res = AppController.processLiquidation(
+                                empId,
+                                qSel,
+                                dpFechaCalculo.selectedDateString,
+                                dpFechaCalculo.selectedDateString,
+                                AppController.fechaPago
+                            )
                             root.liquidationResult = res
                             if (res && res.errores && res.errores.length > 0) {
                                 root.statusMsg = "⚠️ Se detectaron " + res.errores.length + " error(es) en la liquidación."
@@ -129,7 +157,7 @@ Item {
                         var empId = root.selectedEmployeeId
                         if (empId > 0 && root.liquidationResult) {
                             var legajo = (root.employeeData ? (root.employeeData.legajo || empId) : empId)
-                            var defaultName = "recibo_legajo_" + legajo + "_" + dpFechaCalculo.selectedMonth + "_" + dpFechaCalculo.selectedYear + ".pdf"
+                            var defaultName = "recibo_legajo_" + legajo + "_" + AppController.selectedMonth + "_" + AppController.selectedYear + ".pdf"
                             var savePath = AppController.selectSaveFile("Guardar Recibo de Sueldo PDF", defaultName, "Archivos PDF (*.pdf)")
                             if (savePath !== "") {
                                 var pdfPath = AppController.exportReceiptPdf(empId, root.liquidationResult, savePath)
@@ -205,7 +233,7 @@ Item {
                                         font.bold: true; font.pixelSize: 14; color: Theme.accentColor
                                     }
                                     Label {
-                                        text: "Fecha: " + dpFechaCalculo.displayDate
+                                        text: "Fecha Cierre: " + dpFechaCalculo.selectedDateString + "   |   Fecha Pago: " + AppController.fechaPago
                                         font.pixelSize: 11; color: Theme.subtextColor
                                     }
                                 }
@@ -239,8 +267,36 @@ Item {
 
                                 Label { text: "Fecha Ingreso:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11 }
                                 Label {
-                                    text: root.employeeData ? (root.employeeData.fechaIngreso || root.employeeData.fecha_ingreso || "N/A") : "-"
+                                    text: {
+                                        var ing = root.employeeData ? (root.employeeData.fechaIngreso || root.employeeData.fecha_ingreso || "N/A") : "-"
+                                        var ant = root.liquidationResult ? root.liquidationResult.contexto_final.antiguedad_anios : ""
+                                        return ing + (ant !== "" && ant !== undefined ? (" (" + ant + " años antig.)") : "")
+                                    }
                                     color: Theme.textColor; font.pixelSize: 12
+                                }
+
+                                Label {
+                                    text: "Categoría:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11
+                                    visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
+                                }
+                                Label {
+                                    text: {
+                                        var cat = root.liquidationResult ? root.liquidationResult.categoria_nombre : (root.employeeData ? (root.employeeData.categoriaNombre || root.employeeData.categoria_nombre || "General") : "General")
+                                        var vh = root.liquidationResult ? root.liquidationResult.valor_hora : 0
+                                        return cat + (vh > 0 ? (" ($ " + vh + "/hs)") : "")
+                                    }
+                                    color: Theme.textColor; font.pixelSize: 12
+                                    visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
+                                }
+
+                                Label {
+                                    text: "Período Liquidado:"; font.bold: true; color: Theme.subtextColor; font.pixelSize: 11
+                                    visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
+                                }
+                                Label {
+                                    text: cbQuincena.currentText + " - Mes " + AppController.selectedMonth + "/" + AppController.selectedYear
+                                    color: Theme.accentColor; font.bold: true; font.pixelSize: 12
+                                    visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
                                 }
                             }
                         }

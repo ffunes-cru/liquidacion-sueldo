@@ -59,6 +59,22 @@ class AppController : public QObject {
   Q_PROPERTY(CustomFunctionModel *customFunctionModel READ customFunctionModel
                  CONSTANT)
 
+  // ── Global Period Selection ─────────────────────────────────
+  Q_PROPERTY(int selectedYear READ selectedYear WRITE setSelectedYear NOTIFY
+                 selectedYearChanged)
+  Q_PROPERTY(int selectedMonth READ selectedMonth WRITE setSelectedMonth NOTIFY
+                 selectedMonthChanged)
+  Q_PROPERTY(bool isCurrentPeriodClosed READ isCurrentPeriodClosed NOTIFY
+                 periodClosedChanged)
+  Q_PROPERTY(QString fechaCierreMes READ fechaCierreMes NOTIFY
+                 periodClosedChanged)
+  Q_PROPERTY(QString fechaCierreQ1 READ fechaCierreQ1 NOTIFY
+                 periodClosedChanged)
+  Q_PROPERTY(QString fechaCierreQ2 READ fechaCierreQ2 NOTIFY
+                 periodClosedChanged)
+  Q_PROPERTY(QString fechaPago READ fechaPago NOTIFY
+                 periodClosedChanged)
+
 public:
   explicit AppController(DatabaseManager *db, QObject *parent = nullptr);
   ~AppController();
@@ -86,11 +102,37 @@ public:
 
   Q_INVOKABLE QVariantMap processLiquidation(int employeeId,
                                              const QString &quincenaSel = "",
-                                             const QString &fechaCalculo = "");
+                                             const QString &fechaCalculo = "",
+                                             const QString &fechaCierre = "",
+                                             const QString &fechaPago = "");
   Q_INVOKABLE int persistLiquidation(const QVariantMap &result, int mes,
-                                     int anio, const QString &periodo);
+                                     int anio, const QString &periodo,
+                                     const QString &fechaCierre = "",
+                                     const QString &fechaPago = "");
   Q_INVOKABLE QString resetNewMonth();
   Q_INVOKABLE QString createBackup();
+
+  // ── Global Period ───────────────────────────────────────────
+  int selectedYear() const;
+  void setSelectedYear(int year);
+  int selectedMonth() const;
+  void setSelectedMonth(int month);
+  bool isCurrentPeriodClosed() const;
+  QString fechaCierreMes() const;
+  QString fechaCierreQ1() const;
+  QString fechaCierreQ2() const;
+  QString fechaPago() const;
+
+  Q_INVOKABLE bool closeMonth(int anio, int mes,
+                              const QString &fechaCierreMes,
+                              const QString &fechaCierreQ1,
+                              const QString &fechaCierreQ2,
+                              const QString &fechaPago);
+  Q_INVOKABLE bool reopenMonth(int anio, int mes);
+  Q_INVOKABLE QVariantMap getMonthSnapshot(int anio, int mes);
+  Q_INVOKABLE QVariantMap getMonthClosingData(int anio, int mes);
+  Q_INVOKABLE QVariantList listClosedMonths();
+  Q_INVOKABLE void refreshPeriodState();
 
   // Company CRUD shortcuts
   Q_INVOKABLE QVariantMap getCompany() const;
@@ -153,6 +195,9 @@ signals:
   void currentRoleChanged();
   void darkModeChanged();
   void calculationErrorOccurred(const QVariantList &errors);
+  void selectedYearChanged();
+  void selectedMonthChanged();
+  void periodClosedChanged();
 
 private:
   DatabaseManager *m_db;
@@ -170,6 +215,15 @@ private:
   ChartCellModel *m_chartCellModel;
   ReceiptHistoryModel *m_receiptHistoryModel;
   CustomFunctionModel *m_customFunctionModel;
+
+  // Global period state
+  int m_selectedYear;
+  int m_selectedMonth;
+  bool m_isCurrentPeriodClosed = false;
+  QString m_fechaCierreMes;
+  QString m_fechaCierreQ1;
+  QString m_fechaCierreQ2;
+  QString m_fechaPago;
 };
 
 #endif // APPCONTROLLER_H

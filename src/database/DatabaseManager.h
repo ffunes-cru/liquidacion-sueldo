@@ -146,6 +146,19 @@ public:
     QString createBackup();
     QString resetNewMonth();
 
+    // ── Closed Months (meses_cerrados) ──────────────────────────────
+    bool isMonthClosed(int anio, int mes) const;
+    bool closeMonth(int anio, int mes,
+                    const QString &fechaCierreMes,
+                    const QString &fechaCierreQ1,
+                    const QString &fechaCierreQ2,
+                    const QString &fechaPago);
+    QVariantMap getMonthSnapshot(int anio, int mes) const;
+    QVariantMap getMonthClosingData(int anio, int mes) const;
+    QVariantList listClosedMonths() const;
+    QVariantList getEmployeeFieldValuesForPeriod(int employeeId, const QString &quincena, int anio, int mes) const;
+    bool reopenMonth(int anio, int mes);
+
     // ── Transaction Helpers ─────────────────────────────────────────
     bool transaction() { return m_db.transaction(); }
     bool commit() { return m_db.commit(); }

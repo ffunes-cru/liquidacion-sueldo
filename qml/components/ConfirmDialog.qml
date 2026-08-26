@@ -12,9 +12,12 @@ AppDialog {
     standardButtons: Dialog.NoButton
 
     property string message: "¿Está seguro de realizar esta acción?"
+    property alias text: root.message
     property string iconText: "⚠️"
     property string confirmButtonText: "Sí, Eliminar"
+    property alias confirmText: root.confirmButtonText
     property string confirmButtonVariant: "danger"
+    property alias variant: root.confirmButtonVariant
 
     signal confirmed()
 
@@ -60,7 +63,7 @@ AppDialog {
                 text: root.confirmButtonText
                 onClicked: {
                     root.confirmed()
-                    root.close()
+                    root.accept()
                 }
             }
         }

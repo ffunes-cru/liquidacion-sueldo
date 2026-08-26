@@ -1022,33 +1022,73 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
     drawLine(y);
     y += 12;
 
-    // ── Employee Data ───────────────────────────────────────────
+    // ── Employee & Period Header ────────────────────────────────
     painter.setFont(headerFont);
     painter.setPen(QPen(Qt::black));
-    painter.drawText(QRect(0, y, pageW / 2, 45), Qt::AlignLeft | Qt::AlignVCenter, "RECIBO DE SUELDO");
+    painter.drawText(QRect(0, y, pageW / 2, 40), Qt::AlignLeft | Qt::AlignVCenter, "RECIBO DE SUELDO");
 
-    // Formatear Fecha de Pago (fecha de emisión del recibo)
-    QString fechaPago = liquidationResult.value("FECHA_PAGO").toString();
-    if (fechaPago.isEmpty()) {
-        QString fCalc = liquidationResult.value("FECHA_CALCULO").toString();
-        QDate d = QDate::fromString(fCalc, "yyyy-MM-dd");
-        if (d.isValid()) fechaPago = d.toString("dd/MM/yyyy");
-        else fechaPago = QDate::currentDate().toString("dd/MM/yyyy");
-    } else {
-        QDate d = QDate::fromString(fechaPago, "yyyy-MM-dd");
-        if (d.isValid()) fechaPago = d.toString("dd/MM/yyyy");
+    // Format Fecha de Cierre
+    QString rawCierre = liquidationResult.value("FECHA_CIERRE", liquidationResult.value("fecha_cierre")).toString();
+    if (rawCierre.isEmpty()) {
+        rawCierre = liquidationResult.value("FECHA_CALCULO", liquidationResult.value("fecha_calculo")).toString();
     }
+    QString fechaCierreStr = rawCierre;
+    QDate dCierre = QDate::fromString(rawCierre, "yyyy-MM-dd");
+    if (dCierre.isValid()) fechaCierreStr = dCierre.toString("dd/MM/yyyy");
 
-    painter.drawText(QRect(pageW / 2, y, pageW / 2, 45), Qt::AlignRight | Qt::AlignVCenter, "Fecha de Pago: " + fechaPago);
-    y += 50;
+    // Format Fecha de Pago
+    QString rawPago = liquidationResult.value("FECHA_PAGO", liquidationResult.value("fecha_pago")).toString();
+    if (rawPago.isEmpty()) {
+        rawPago = liquidationResult.value("FECHA_CALCULO", liquidationResult.value("fecha_calculo")).toString();
+    }
+    QString fechaPagoStr = rawPago;
+    QDate dPago = QDate::fromString(rawPago, "yyyy-MM-dd");
+    if (dPago.isValid()) fechaPagoStr = dPago.toString("dd/MM/yyyy");
+    else if (rawPago.isEmpty()) fechaPagoStr = QDate::currentDate().toString("dd/MM/yyyy");
+
+    painter.drawText(QRect(pageW / 2, y, pageW / 2, 40), Qt::AlignRight | Qt::AlignVCenter,
+                     "Fecha de Cierre: " + fechaCierreStr + "   |   Fecha de Pago: " + fechaPagoStr);
+    y += 45;
 
     painter.setFont(normalFont);
     painter.setPen(QPen(Qt::black));
     QString empName = effectiveEmployee.value("nombre_completo", "Empleado").toString();
     QString empLegajo = effectiveEmployee.value("legajo", "").toString();
-    painter.drawText(QRect(0, y, pageW / 2, 35), Qt::AlignLeft, "Empleado: " + empName);
-    painter.drawText(QRect(pageW / 2, y, pageW / 2, 35), Qt::AlignRight, "Legajo: " + empLegajo);
-    y += 40;
+    QString empCuil = effectiveEmployee.value("cuil", "").toString();
+    painter.drawText(QRect(0, y, pageW * 0.6, 32), Qt::AlignLeft, "Empleado: " + empName);
+    painter.drawText(QRect(pageW * 0.6, y, pageW * 0.4, 32), Qt::AlignRight,
+                     "Legajo: " + empLegajo + (!empCuil.isEmpty() ? ("   CUIL: " + empCuil) : ""));
+    y += 34;
+
+    QString tipoLiq = effectiveEmployee.value("tipo_liquidacion", "mensual").toString().toLower();
+    QString categoriaNombre = effectiveEmployee.value("categoria_nombre", liquidationResult.value("categoria_nombre")).toString();
+    double valorHora = liquidationResult.value("valor_hora", effectiveEmployee.value("valor_hora", 0.0)).toDouble();
+
+    QString fechaIngresoStr = effectiveEmployee.value("fecha_ingreso", "").toString();
+    QDate dIng = QDate::fromString(fechaIngresoStr, "yyyy-MM-dd");
+    if (dIng.isValid()) fechaIngresoStr = dIng.toString("dd/MM/yyyy");
+
+    int antiguedad = liquidationResult.value("antiguedad_anios",
+                        liquidationResult.value("contexto_final").toMap().value("antiguedad_anios", 0)).toInt();
+
+    QString tipoStr = (tipoLiq == "jornal") ? "Liquidación: Jornal" : "Liquidación: Mensual";
+    if (tipoLiq == "jornal" && !categoriaNombre.isEmpty()) {
+        tipoStr += "  |  Categoría: " + categoriaNombre;
+    }
+    painter.drawText(QRect(0, y, pageW * 0.6, 32), Qt::AlignLeft, tipoStr);
+
+    QString rightDetails;
+    if (tipoLiq == "jornal" && valorHora > 0) {
+        rightDetails += "Valor/Hora: $ " + fmtMoney(valorHora, 2) + "   ";
+    }
+    if (!fechaIngresoStr.isEmpty()) {
+        rightDetails += "Ingreso: " + fechaIngresoStr + " (" + QString::number(antiguedad) + " a.)";
+    }
+    if (!rightDetails.isEmpty()) {
+        painter.drawText(QRect(pageW * 0.4, y, pageW * 0.6, 32), Qt::AlignRight, rightDetails);
+    }
+    y += 36;
+
     drawLine(y);
     y += 12;
 

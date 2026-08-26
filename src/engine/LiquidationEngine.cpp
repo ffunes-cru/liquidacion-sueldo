@@ -55,7 +55,9 @@ static QVariant parseValue(const QString &val) {
 
 QVariantMap LiquidationEngine::processLiquidation(int employeeId,
                                                   const QString &quincenaSel,
-                                                  const QString &fechaCalculo) {
+                                                  const QString &fechaCalculo,
+                                                  const QString &fechaCierre,
+                                                  const QString &fechaPago) {
   QVariantMap employee = m_db->getEmployee(employeeId);
   if (employee.isEmpty()) {
     return {
@@ -74,9 +76,14 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
   // ═══════════════════════════════════════════════════════════════
   // STEP 0: Calculate seniority
   // ═══════════════════════════════════════════════════════════════
+  // The fecha_cierre (closing date) takes priority as the calculation date
+  // for seniority, then fechaCalculo, then today's date.
   QString fechaCalc = fechaCalculo.isEmpty()
                           ? QDate::currentDate().toString("yyyy-MM-dd")
                           : fechaCalculo;
+  if (!fechaCierre.isEmpty()) {
+    fechaCalc = fechaCierre;
+  }
   QString fechaIngreso =
       employee.value("fecha_ingreso", "2020-01-01").toString();
   int antiguedadAnios = calculateSeniorityYears(fechaIngreso, fechaCalc);
@@ -86,6 +93,10 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
   contexto["fecha_ingreso"] = fechaIngreso;
   contexto["fecha_calculo"] = fechaCalc;
   contexto["tipo_liquidacion"] = employee["tipo_liquidacion"];
+  contexto["fecha_cierre"] = fechaCierre.isEmpty() ? fechaCalc : fechaCierre;
+  contexto["FECHA_CIERRE"] = contexto["fecha_cierre"];
+  contexto["fecha_pago"] = fechaPago;
+  contexto["FECHA_PAGO"] = fechaPago;
 
   // ═══════════════════════════════════════════════════════════════
   // STEP 1: Inject global variables
@@ -220,12 +231,15 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
   // Inject valor_hora, jornal, basico from category
   int catId = employee.value("categoria_jornal_id").toInt();
   double valorHora = 0.0;
+  QString categoriaNombre;
   if (catId > 0) {
     QVariantMap cat = m_db->getCategory(catId);
     valorHora = cat.value("valor_hora", 0.0).toDouble();
+    categoriaNombre = cat.value("nombre").toString();
   }
   contexto["valor_hora"] = valorHora;
   contexto["jornal"] = valorHora;
+  contexto["categoria_nombre"] = categoriaNombre;
 
   // Get schema and cells
   QString esquema = employee.value("esquema_codigo", "MENSUAL").toString();
@@ -261,6 +275,8 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
     }
     baseEnvObj["empleado"] = empEnv;
     baseEnvObj["fecha_calculo"] = fechaCalc;
+    baseEnvObj["fecha_cierre"] = contexto["fecha_cierre"];
+    baseEnvObj["fecha_pago"] = fechaPago;
     QDate fechaDate = QDate::fromString(fechaCalc, "yyyy-MM-dd");
     baseEnvObj["mes"] = fechaDate.isValid() ? fechaDate.month() : QDate::currentDate().month();
     baseEnvObj["anio"] = fechaDate.isValid() ? fechaDate.year() : QDate::currentDate().year();
@@ -597,6 +613,12 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
       {"contexto_final", contexto},
       {"errores", QVariant::fromValue(errores)},
       {"quincena_sel", selectedQ},
+      {"fecha_cierre", contexto.value("fecha_cierre")},
+      {"FECHA_CIERRE", contexto.value("fecha_cierre")},
+      {"fecha_pago", fechaPago},
+      {"FECHA_PAGO", fechaPago},
+      {"categoria_nombre", categoriaNombre},
+      {"valor_hora", valorHora},
   };
 }
 
@@ -730,7 +752,9 @@ QVariantMap LiquidationEngine::buildQuincenaContext(
 }
 
 int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
-                                          int anio, const QString &periodo) {
+                                          int anio, const QString &periodo,
+                                          const QString &fechaCierre,
+                                          const QString &fechaPago) {
   QVariantMap emp = result.value("empleado").toMap();
   if (emp.isEmpty())
     return -1;
@@ -748,6 +772,8 @@ int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
   metaObj["anio"] = anio;
   metaObj["periodo"] = periodo;
   metaObj["fecha_calculo"] = ctx.value("fecha_calculo").toString();
+  metaObj["fecha_cierre"] = fechaCierre.isEmpty() ? ctx.value("fecha_cierre").toString() : fechaCierre;
+  metaObj["fecha_pago"] = fechaPago.isEmpty() ? ctx.value("fecha_pago").toString() : fechaPago;
   rootObj["meta"] = metaObj;
 
   // 1.1 Snapshot de la Empresa al momento de emitir el recibo
@@ -767,9 +793,10 @@ int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
   empObj["cuil"] = emp["cuil"].toString();
   empObj["tipo_liquidacion"] = emp["tipo_liquidacion"].toString();
   empObj["esquema_codigo"] = esquema;
-  empObj["categoria_nombre"] = emp.value("categoria_nombre").toString();
+  empObj["categoria_nombre"] = result.value("categoria_nombre", emp.value("categoria_nombre")).toString();
   empObj["fecha_ingreso"] = emp.value("fecha_ingreso").toString();
   empObj["antiguedad_anios"] = ctx.value("antiguedad_anios", 0).toInt();
+  empObj["valor_hora"] = result.value("valor_hora", 0.0).toDouble();
   rootObj["empleado"] = empObj;
 
   // 2. Totales

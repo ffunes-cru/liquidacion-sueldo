@@ -30,6 +30,12 @@ AppController::AppController(DatabaseManager *db, QObject *parent)
   m_chartCellModel = new ChartCellModel(m_db, this);
   m_receiptHistoryModel = new ReceiptHistoryModel(m_db, this);
   m_customFunctionModel = new CustomFunctionModel(m_db, this);
+
+  QDate today = QDate::currentDate();
+  m_selectedYear = today.year();
+  m_selectedMonth = today.month();
+  refreshPeriodState();
+
   qInfo()
       << "[AppController] Controlador y modelos inicializados correctamente.";
 }
@@ -106,12 +112,21 @@ CustomFunctionModel *AppController::customFunctionModel() const {
 
 QVariantMap AppController::processLiquidation(int employeeId,
                                               const QString &quincenaSel,
-                                              const QString &fechaCalculo) {
-  qInfo() << "[AppController] Ejecutando procesamiento de liquidación para "
-             "Empleado ID:"
-          << employeeId << "Quincena:" << quincenaSel;
+                                              const QString &fechaCalculo,
+                                              const QString &fechaCierre,
+                                              const QString &fechaPago) {
+  QString fc = fechaCierre;
+  if (fc.isEmpty()) {
+    if (quincenaSel == "Q1") fc = m_fechaCierreQ1;
+    else if (quincenaSel == "Q2") fc = m_fechaCierreQ2;
+    else fc = m_fechaCierreMes;
+  }
+  QString fp = fechaPago.isEmpty() ? m_fechaPago : fechaPago;
+
+  qInfo() << "[AppController] Ejecutando procesamiento de liquidación para Empleado ID:"
+          << employeeId << "Quincena:" << quincenaSel << "Fecha Cierre:" << fc << "Fecha Pago:" << fp;
   QVariantMap result =
-      m_engine->processLiquidation(employeeId, quincenaSel, fechaCalculo);
+      m_engine->processLiquidation(employeeId, quincenaSel, fechaCalculo, fc, fp);
   QVariantList errores = result.value("errores").toList();
   if (!errores.isEmpty()) {
     qWarning() << "[AppController] Se detectaron errores en la liquidación "
@@ -123,10 +138,110 @@ QVariantMap AppController::processLiquidation(int employeeId,
 }
 
 int AppController::persistLiquidation(const QVariantMap &result, int mes,
-                                      int anio, const QString &periodo) {
-  qInfo() << "[AppController] Persistiendo recibo histórico. Mes:" << mes
-          << "Año:" << anio << "Período:" << periodo;
-  return m_engine->persistLiquidation(result, mes, anio, periodo);
+                                      int anio, const QString &periodo,
+                                      const QString &fechaCierre,
+                                      const QString &fechaPago) {
+  int m = mes > 0 ? mes : m_selectedMonth;
+  int a = anio > 0 ? anio : m_selectedYear;
+  QString fc = fechaCierre;
+  if (fc.isEmpty()) {
+    if (periodo.contains("Q1", Qt::CaseInsensitive)) fc = m_fechaCierreQ1;
+    else if (periodo.contains("Q2", Qt::CaseInsensitive)) fc = m_fechaCierreQ2;
+    else fc = m_fechaCierreMes;
+  }
+  QString fp = fechaPago.isEmpty() ? m_fechaPago : fechaPago;
+
+  qInfo() << "[AppController] Persistiendo recibo histórico. Mes:" << m
+          << "Año:" << a << "Período:" << periodo << "Fecha Cierre:" << fc << "Fecha Pago:" << fp;
+  return m_engine->persistLiquidation(result, m, a, periodo, fc, fp);
+}
+
+int AppController::selectedYear() const { return m_selectedYear; }
+void AppController::setSelectedYear(int year) {
+  if (m_selectedYear == year) return;
+  m_selectedYear = year;
+  emit selectedYearChanged();
+  refreshPeriodState();
+}
+
+int AppController::selectedMonth() const { return m_selectedMonth; }
+void AppController::setSelectedMonth(int month) {
+  if (m_selectedMonth == month) return;
+  m_selectedMonth = month;
+  emit selectedMonthChanged();
+  refreshPeriodState();
+}
+
+bool AppController::isCurrentPeriodClosed() const { return m_isCurrentPeriodClosed; }
+QString AppController::fechaCierreMes() const { return m_fechaCierreMes; }
+QString AppController::fechaCierreQ1() const { return m_fechaCierreQ1; }
+QString AppController::fechaCierreQ2() const { return m_fechaCierreQ2; }
+QString AppController::fechaPago() const { return m_fechaPago; }
+
+bool AppController::closeMonth(int anio, int mes,
+                               const QString &fechaCierreMes,
+                               const QString &fechaCierreQ1,
+                               const QString &fechaCierreQ2,
+                               const QString &fechaPago) {
+  int y = anio > 0 ? anio : m_selectedYear;
+  int m = mes > 0 ? mes : m_selectedMonth;
+  bool ok = m_db->closeMonth(y, m, fechaCierreMes, fechaCierreQ1, fechaCierreQ2, fechaPago);
+  if (ok) {
+    refreshPeriodState();
+  }
+  return ok;
+}
+
+bool AppController::reopenMonth(int anio, int mes) {
+  int y = anio > 0 ? anio : m_selectedYear;
+  int m = mes > 0 ? mes : m_selectedMonth;
+  bool ok = m_db->reopenMonth(y, m);
+  if (ok) {
+    refreshPeriodState();
+  }
+  return ok;
+}
+
+QVariantMap AppController::getMonthSnapshot(int anio, int mes) {
+  int y = anio > 0 ? anio : m_selectedYear;
+  int m = mes > 0 ? mes : m_selectedMonth;
+  return m_db->getMonthSnapshot(y, m);
+}
+
+QVariantMap AppController::getMonthClosingData(int anio, int mes) {
+  int y = anio > 0 ? anio : m_selectedYear;
+  int m = mes > 0 ? mes : m_selectedMonth;
+  return m_db->getMonthClosingData(y, m);
+}
+
+QVariantList AppController::listClosedMonths() {
+  return m_db->listClosedMonths();
+}
+
+void AppController::refreshPeriodState() {
+  bool closed = m_db->isMonthClosed(m_selectedYear, m_selectedMonth);
+  m_isCurrentPeriodClosed = closed;
+
+  if (closed) {
+    QVariantMap closing = m_db->getMonthClosingData(m_selectedYear, m_selectedMonth);
+    m_fechaCierreMes = closing.value("fecha_cierre_mes").toString();
+    m_fechaCierreQ1 = closing.value("fecha_cierre_q1").toString();
+    m_fechaCierreQ2 = closing.value("fecha_cierre_q2").toString();
+    m_fechaPago = closing.value("fecha_pago").toString();
+  } else {
+    // Sensible defaults for the selected period
+    QDate q1Date(m_selectedYear, m_selectedMonth, 15);
+    QDate lastDayDate(m_selectedYear, m_selectedMonth, QDate(m_selectedYear, m_selectedMonth, 1).daysInMonth());
+    QDate nextMonthDate = lastDayDate.addDays(5);
+
+    m_fechaCierreQ1 = q1Date.toString("yyyy-MM-dd");
+    m_fechaCierreQ2 = lastDayDate.toString("yyyy-MM-dd");
+    m_fechaCierreMes = lastDayDate.toString("yyyy-MM-dd");
+    m_fechaPago = nextMonthDate.toString("yyyy-MM-dd");
+  }
+
+  m_employeeVarsModel->setPeriod(m_selectedYear, m_selectedMonth);
+  emit periodClosedChanged();
 }
 
 QString AppController::resetNewMonth() {
@@ -347,8 +462,14 @@ QString AppController::exportDataCsv(const QString &directoryPath) {
 QString AppController::exportReceiptPdf(int employeeId,
                                         const QVariantMap &liquidationResult,
                                         const QString &path) {
-  QVariantMap empData = m_db->getEmployee(employeeId);
+  QVariantMap empData = employeeId > 0 ? m_db->getEmployee(employeeId) : QVariantMap();
+  if (empData.isEmpty() && liquidationResult.contains("empleado")) {
+    empData = liquidationResult.value("empleado").toMap();
+  }
   QVariantMap compData = m_db->getCompany();
+  if (compData.isEmpty() && liquidationResult.contains("empresa")) {
+    compData = liquidationResult.value("empresa").toMap();
+  }
   return m_exportService->exportReceiptPdf(liquidationResult, compData, empData,
                                            path);
 }

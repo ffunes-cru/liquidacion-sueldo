@@ -78,8 +78,8 @@ MasterDetailView {
             secondaryText: "Legajo: " + (model.legajo || "-") + (model.cuil ? " | CUIL: " + model.cuil : "")
             badgeText: model.esquema || "MENSUAL"
             badgeColor: model.tipoLiquidacion === "jornal" ? Theme.warningColor : Theme.infoColor
-            showAdminActions: true
-            showDuplicate: true
+            showAdminActions: AppController.currentRole === "admin" && !AppController.isCurrentPeriodClosed
+            showDuplicate: AppController.currentRole === "admin" && !AppController.isCurrentPeriodClosed
             itemId: model.employeeId || model.id || AppController.employeeModel.idAtRow(index)
             itemData: ({
                 employeeId: model.employeeId || model.id || AppController.employeeModel.idAtRow(index),
@@ -99,26 +99,21 @@ MasterDetailView {
             onClicked: root.selectEmployeeAtRow(index)
 
             onEditRequested: function(data) {
-                var t = (data.tipoLiquidacion || "mensual").toString().toLowerCase()
-                employeeDialog.openEdit({
-                    employeeId: data.employeeId,
-                    legajo: data.legajo,
-                    nombre: data.nombre,
-                    tipoLiq: t,
-                    esquema: data.esquema,
-                    categoriaId: data.categoriaId,
-                    fechaIngreso: data.fechaIngreso,
-                    cuil: data.cuil
-                })
+                if (AppController.isCurrentPeriodClosed) return;
                 employeeDialog.setComboModel("categoriaId", root.getCategoriesCombo())
-                employeeDialog.setComboModel("esquema", root.getSchemasCombo(t))
-                employeeDialog.setFieldVisible("categoriaId", t === "jornal")
+                var tipo = (data.tipoLiquidacion || data.tipo_liquidacion || "mensual").toLowerCase()
+                employeeDialog.setComboModel("esquema", root.getSchemasCombo(tipo))
+                employeeDialog.setFieldVisible("categoriaId", tipo === "jornal")
+                employeeDialog.openEdit(data)
             }
-            onDeleteRequested: function(id) {
+            onDeleteRequested: function(data) {
+                if (AppController.isCurrentPeriodClosed) return;
+                var id = data.employeeId || data.id
                 confirmDeleteEmployeeDialog.targetId = id
                 confirmDeleteEmployeeDialog.open()
             }
             onDuplicateRequested: function(data) {
+                if (AppController.isCurrentPeriodClosed) return;
                 AppController.employeeModel.duplicateEmployee(data.employeeId)
             }
         }
@@ -139,7 +134,7 @@ MasterDetailView {
             Layout.fillWidth: true
             variant: "primary"
             text: "➕ Nuevo Empleado"
-            visible: AppController.currentRole === "admin"
+            visible: AppController.currentRole === "admin" && !AppController.isCurrentPeriodClosed
             onClicked: {
                 employeeDialog.setComboModel("categoriaId", root.getCategoriesCombo())
                 employeeDialog.setComboModel("esquema", root.getSchemasCombo("mensual"))
@@ -155,7 +150,15 @@ MasterDetailView {
     ColumnLayout {
         Layout.fillWidth: true
         Layout.fillHeight: true
-        spacing: 15
+        spacing: 12
+
+        // Status Banner for Closed Month
+        StatusBanner {
+            visible: AppController.isCurrentPeriodClosed
+            Layout.fillWidth: true
+            variant: "warning"
+            message: "🔒 Período " + AppController.selectedMonth + "/" + AppController.selectedYear + " Cerrado: Visualizando snapshot inmutable de empleados e insumos. Los datos se encuentran en modo solo lectura."
+        }
 
         // Employee Info Card
         SectionPanel {
@@ -223,7 +226,7 @@ MasterDetailView {
             StyledButton {
                 variant: "secondary"
                 text: "➕ Agregar Quincena"
-                visible: AppController.currentRole === "admin"
+                visible: AppController.currentRole === "admin" && !AppController.isCurrentPeriodClosed
                 onClicked: {
                     var nextQ = "Q" + (cbQuincenas.count + 1)
                     AppController.addQuincena(root.selectedEmployeeId, nextQ)
@@ -234,7 +237,7 @@ MasterDetailView {
             StyledButton {
                 variant: "danger"
                 text: "🗑️ Eliminar Quincena"
-                visible: AppController.currentRole === "admin" && cbQuincenas.count > 1 && cbQuincenas.currentText !== "Q1"
+                visible: AppController.currentRole === "admin" && !AppController.isCurrentPeriodClosed && cbQuincenas.count > 1 && cbQuincenas.currentText !== "Q1"
                 onClicked: confirmDeleteQuincenaDialog.open()
             }
         }
@@ -264,8 +267,11 @@ MasterDetailView {
                         fieldLabel: model.fieldLabel
                         fieldType: model.fieldType
                         value: model.value || model.defaultValue
+                        readOnly: AppController.isCurrentPeriodClosed
                         onValueSaved: function(newValue) {
-                            AppController.employeeVarsModel.setValue(index, newValue)
+                            if (!AppController.isCurrentPeriodClosed) {
+                                AppController.employeeVarsModel.setValue(index, newValue)
+                            }
                         }
                     }
                 }

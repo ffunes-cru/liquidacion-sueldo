@@ -61,14 +61,18 @@ public:
    *   - "quincena_sel": selected quincena
    */
   Q_INVOKABLE QVariantMap processLiquidation(int employeeId,
-                                             const QString &quincenaSel = "",
-                                             const QString &fechaCalculo = "");
+                                              const QString &quincenaSel = "",
+                                              const QString &fechaCalculo = "",
+                                              const QString &fechaCierre = "",
+                                              const QString &fechaPago = "");
 
   /**
    * @brief Persist the current liquidation result as a receipt snapshot.
    */
   Q_INVOKABLE int persistLiquidation(const QVariantMap &result, int mes,
-                                     int anio, const QString &periodo);
+                                      int anio, const QString &periodo,
+                                      const QString &fechaCierre = "",
+                                      const QString &fechaPago = "");
 
 private:
   int calculateSeniorityYears(const QString &fechaIngreso,

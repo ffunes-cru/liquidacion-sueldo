@@ -30,6 +30,7 @@ private slots:
     // ── EmployeeVarsModel ─────────────────────────────────────
     void testEmployeeVarsModelQuincenaSwitching();
     void testEmployeeVarsModelSetValue();
+    void testEmployeeVarsModelReadOnlyInClosedMonth();
 
     // ── CellModel ─────────────────────────────────────────────
     void testCellModelSchemaFilter();
@@ -38,6 +39,7 @@ private slots:
     void testAppControllerProperties();
     void testAppControllerFormulaVariablesHelper();
     void testAppControllerCompanyShortcuts();
+    void testGlobalPeriodSelection();
 
 private:
     DatabaseManager *m_db = nullptr;
@@ -221,6 +223,66 @@ void TestModelsAndController::testAppControllerCompanyShortcuts()
     QCOMPARE(company["cuit"].toString(), "30-99999999-7");
 }
 
+void TestModelsAndController::testEmployeeVarsModelReadOnlyInClosedMonth()
+{
+    m_db->saveSchema("", "MENSUAL", "Comercio Mensual", "mensual");
+    int fId = m_db->addSchemaField("MENSUAL", "adicional", "Adicional", "number", "0", 1);
+    int empId = m_db->saveEmployee(0, "RO1", "ReadOnly Emp", "mensual", "MENSUAL", 0, "2020-01-01", "");
+    m_db->setEmployeeFieldValue(empId, fId, "Q1", "1234");
+
+    // Close month 2026-08
+    m_db->closeMonth(2026, 8, "2026-08-31", "2026-08-15", "2026-08-31", "2026-09-05");
+
+    auto varsModel = m_controller->employeeVarsModel();
+    varsModel->setEmployeeId(empId);
+    varsModel->setPeriod(2026, 8);
+
+    QVERIFY(varsModel->isReadOnly());
+    QCOMPARE(varsModel->rowCount(), 1);
+    QCOMPARE(varsModel->data(varsModel->index(0, 0), EmployeeVarsModel::ValueRole).toString(), QString("1234"));
+
+    // Attempting to set value on closed month model must fail
+    bool setRes = varsModel->setValue(0, "9999");
+    QVERIFY(!setRes);
+    QCOMPARE(varsModel->data(varsModel->index(0, 0), EmployeeVarsModel::ValueRole).toString(), QString("1234"));
+
+    // Verify DB value was not modified
+    auto fVals = m_db->getEmployeeFieldValuesForPeriod(empId, "Q1", 2026, 8);
+    QCOMPARE(fVals.first().toMap()["value"].toString(), QString("1234"));
+}
+
+void TestModelsAndController::testGlobalPeriodSelection()
+{
+    m_controller->setSelectedYear(2027);
+    m_controller->setSelectedMonth(3);
+
+    QCOMPARE(m_controller->selectedYear(), 2027);
+    QCOMPARE(m_controller->selectedMonth(), 3);
+    QVERIFY(!m_controller->isCurrentPeriodClosed());
+
+    // Closing period via controller
+    bool closed = m_controller->closeMonth(2027, 3, "2027-03-31", "2027-03-15", "2027-03-31", "2027-04-05");
+    QVERIFY(closed);
+    QVERIFY(m_controller->isCurrentPeriodClosed());
+    QCOMPARE(m_controller->fechaCierreMes(), QString("2027-03-31"));
+    QCOMPARE(m_controller->fechaCierreQ1(), QString("2027-03-15"));
+    QCOMPARE(m_controller->fechaPago(), QString("2027-04-05"));
+
+    // Switch to another month (open)
+    m_controller->setSelectedMonth(4);
+    QVERIFY(!m_controller->isCurrentPeriodClosed());
+
+    // Switch back to closed month
+    m_controller->setSelectedMonth(3);
+    QVERIFY(m_controller->isCurrentPeriodClosed());
+
+    // Reopen
+    bool reopened = m_controller->reopenMonth(2027, 3);
+    QVERIFY(reopened);
+    QVERIFY(!m_controller->isCurrentPeriodClosed());
+}
+
 #include "tst_ModelsAndController.moc"
 
 QObject *createTestModelsAndController() { return new TestModelsAndController(); }
+

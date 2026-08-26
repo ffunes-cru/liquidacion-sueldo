@@ -10,6 +10,7 @@ Rectangle {
     property string fieldLabel: ""
     property string fieldType: "number"
     property string value: ""
+    property bool readOnly: false
     signal valueSaved(string newValue)
 
     readonly property string typeNormalized: (fieldType || "number").toString().toLowerCase().trim()
@@ -48,7 +49,7 @@ Rectangle {
     }
 
     implicitHeight: 44
-    color: Theme.panelBg
+    color: root.readOnly ? (Theme.isDark ? Qt.rgba(1, 1, 1, 0.02) : Qt.rgba(0, 0, 0, 0.02)) : Theme.panelBg
     radius: 6
     border.color: Theme.borderColor
 
@@ -68,7 +69,7 @@ Rectangle {
             text: root.fieldLabel + " (" + root.fieldCode + ")"
             font.pixelSize: 13
             font.bold: true
-            color: Theme.textColor
+            color: root.readOnly ? Theme.subtextColor : Theme.textColor
             Layout.preferredWidth: 200
             elide: Text.ElideRight
         }
@@ -87,9 +88,12 @@ Rectangle {
             }
 
             Switch {
+                enabled: !root.readOnly
                 checked: root.value.toString().toLowerCase() === "true" || root.value === "1"
                 onToggled: {
-                    root.valueSaved(checked ? "true" : "false")
+                    if (!root.readOnly) {
+                        root.valueSaved(checked ? "true" : "false")
+                    }
                 }
             }
         }
@@ -98,6 +102,7 @@ Rectangle {
         StyledTextField {
             id: numField
             visible: root.isNumType
+            readOnly: root.readOnly
             text: root.formatForDisplay(root.value)
             Layout.preferredWidth: 170
             horizontalAlignment: Text.AlignRight
@@ -109,19 +114,24 @@ Rectangle {
                 notation: DoubleValidator.StandardNotation
             }
             onEditingFinished: {
-                var safeVal = root.parseForStorage(text);
-                root.valueSaved(safeVal);
-                text = root.formatForDisplay(safeVal);
+                if (!root.readOnly) {
+                    var safeVal = root.parseForStorage(text);
+                    root.valueSaved(safeVal);
+                    text = root.formatForDisplay(safeVal);
+                }
             }
         }
 
         // 3. String / Fallback Text Control
         StyledTextField {
             visible: !root.isBoolType && !root.isNumType
+            readOnly: root.readOnly
             text: root.value
             Layout.preferredWidth: 170
             onEditingFinished: {
-                root.valueSaved(text)
+                if (!root.readOnly) {
+                    root.valueSaved(text)
+                }
             }
         }
     }

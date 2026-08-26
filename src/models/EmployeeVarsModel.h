@@ -15,6 +15,9 @@ class EmployeeVarsModel : public QAbstractListModel
     Q_OBJECT
     Q_PROPERTY(int employeeId READ employeeId WRITE setEmployeeId NOTIFY employeeIdChanged)
     Q_PROPERTY(QString quincena READ quincena WRITE setQuincena NOTIFY quincenaChanged)
+    Q_PROPERTY(int anio READ anio WRITE setAnio NOTIFY periodChanged)
+    Q_PROPERTY(int mes READ mes WRITE setMes NOTIFY periodChanged)
+    Q_PROPERTY(bool isReadOnly READ isReadOnly WRITE setIsReadOnly NOTIFY isReadOnlyChanged)
 
 public:
     enum Roles {
@@ -39,17 +42,31 @@ public:
     QString quincena() const;
     void setQuincena(const QString &q);
 
+    int anio() const;
+    void setAnio(int y);
+    int mes() const;
+    void setMes(int m);
+    void setPeriod(int y, int m);
+
+    bool isReadOnly() const;
+    void setIsReadOnly(bool ro);
+
     Q_INVOKABLE void refresh();
     Q_INVOKABLE bool setValue(int row, const QString &value);
 
 signals:
     void employeeIdChanged();
     void quincenaChanged();
+    void periodChanged();
+    void isReadOnlyChanged();
 
 private:
     DatabaseManager *m_db;
     int m_employeeId = -1;
     QString m_quincena = "Q1";
+    int m_anio = 0;
+    int m_mes = 0;
+    bool m_isReadOnly = false;
     QVariantList m_data;
 };
 

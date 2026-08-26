@@ -5,7 +5,14 @@ Rectangle {
     id: root
 
     property string text: ""
-    property color badgeColor: Theme.accentColor
+    property string variant: ""
+    property color badgeColor: {
+        if (variant === "warning") return Theme.warningColor
+        if (variant === "danger") return Theme.dangerColor
+        if (variant === "success") return Theme.successColor
+        if (variant === "info") return Theme.infoColor
+        return Theme.accentColor
+    }
     property bool circular: false
     property int fontSize: 12
     property bool bold: true

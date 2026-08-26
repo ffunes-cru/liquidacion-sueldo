@@ -42,8 +42,11 @@ private slots:
     // ── Global Variables ──────────────────────────────────────
     void testGlobalVariablesInjected();
 
-    // ── Seniority ─────────────────────────────────────────────
+    // ── Seniority & Closing Dates ────────────────────────────
     void testSeniorityCalculation();
+    void testSeniorityCalculatedFromClosingDate();
+    void testJornalCategoryInReceiptAndContext();
+    void testReceiptPersistenceWithClosingAndPaymentDates();
 
     // ── Jornal with Quincenas ─────────────────────────────────
     void testJornalWithTwoQuincenas();
@@ -715,7 +718,72 @@ void TestLiquidationEngine::testReceiptSnapshotSelfContained()
     QCOMPARE(empDataSnap["legajo"].toString(), "L001");
 }
 
+void TestLiquidationEngine::testSeniorityCalculatedFromClosingDate()
+{
+    m_db->saveSchema("", "SENIORITY_TEST", "Test Seniority", "mensual");
+    // Employee hired 2021-08-20
+    int empId = m_db->saveEmployee(0, "SEN01", "Seniority Emp", "mensual", "SENIORITY_TEST", 0, "2021-08-20", "");
+
+    // Closing date 2026-08-15 (Before anniversary -> 4 years)
+    QVariantMap resQ1 = m_engine->processLiquidation(empId, "", "2026-08-15", "2026-08-15", "2026-09-05");
+    int antQ1 = resQ1["contexto_final"].toMap()["antiguedad_anios"].toInt();
+    QCOMPARE(antQ1, 4);
+
+    // Closing date 2026-08-31 (After anniversary -> 5 years)
+    QVariantMap resQ2 = m_engine->processLiquidation(empId, "", "2026-08-31", "2026-08-31", "2026-09-05");
+    int antQ2 = resQ2["contexto_final"].toMap()["antiguedad_anios"].toInt();
+    QCOMPARE(antQ2, 5);
+}
+
+void TestLiquidationEngine::testJornalCategoryInReceiptAndContext()
+{
+    m_db->saveSchema("", "JORNAL_CAT", "Test Jornal Cat", "jornal");
+    int catId = m_db->saveCategory(0, "Oficial Especializado", 3500.0);
+    int empId = m_db->saveEmployee(0, "JCAT01", "Jornal Category Emp", "jornal", "JORNAL_CAT", catId, "2020-01-01", "");
+
+    m_db->saveCell(0, "RECIBO", "sueldo_basico", "Básico Jornal", "", "", "", "valor_hora * 100", 10, "JORNAL_CAT", "formula", 0, "", 0, true);
+
+    QVariantMap res = m_engine->processLiquidation(empId, "Q1", "2026-08-15", "2026-08-15", "2026-09-05");
+
+    // Category injected into context and result
+    QCOMPARE(res["categoria_nombre"].toString(), QString("Oficial Especializado"));
+    QCOMPARE(res["valor_hora"].toDouble(), 3500.0);
+
+    QVariantMap ctx = res["contexto_final"].toMap();
+    QCOMPARE(ctx["categoria_nombre"].toString(), QString("Oficial Especializado"));
+    QCOMPARE(ctx["valor_hora"].toDouble(), 3500.0);
+    QCOMPARE(ctx["sueldo_basico"].toDouble(), 350000.0); // 3500 * 100
+
+    // Persist and check snapshot
+    int recId = m_engine->persistLiquidation(res, 8, 2026, "Mes 8/2026 Q1", "2026-08-15", "2026-09-05");
+    QVERIFY(recId > 0);
+
+    QVariantMap rec = m_db->getReceipt(recId);
+    QJsonDocument doc = QJsonDocument::fromJson(rec["datos_json"].toString().toUtf8());
+    QVERIFY(doc.isObject());
+    QJsonObject empObj = doc.object()["empleado"].toObject();
+    QCOMPARE(empObj["categoria_nombre"].toString(), QString("Oficial Especializado"));
+    QCOMPARE(empObj["valor_hora"].toDouble(), 3500.0);
+}
+
+void TestLiquidationEngine::testReceiptPersistenceWithClosingAndPaymentDates()
+{
+    m_db->saveSchema("", "DATES_TEST", "Test Dates", "mensual");
+    int empId = m_db->saveEmployee(0, "D01", "Dates Emp", "mensual", "DATES_TEST", 0, "2020-01-01", "");
+
+    QVariantMap res = m_engine->processLiquidation(empId, "", "2026-08-31", "2026-08-31", "2026-09-05");
+    int recId = m_engine->persistLiquidation(res, 8, 2026, "Mes 8/2026", "2026-08-31", "2026-09-05");
+    QVERIFY(recId > 0);
+
+    QVariantMap rec = m_db->getReceipt(recId);
+    QJsonDocument doc = QJsonDocument::fromJson(rec["datos_json"].toString().toUtf8());
+    QVERIFY(doc.isObject());
+    QJsonObject metaObj = doc.object()["meta"].toObject();
+    QCOMPARE(metaObj["fecha_cierre"].toString(), QString("2026-08-31"));
+    QCOMPARE(metaObj["fecha_pago"].toString(), QString("2026-09-05"));
+}
 
 #include "tst_LiquidationEngine.moc"
 
 QObject *createTestLiquidationEngine() { return new TestLiquidationEngine(); }
+

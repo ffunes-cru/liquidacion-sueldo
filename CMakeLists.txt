@@ -133,6 +133,7 @@ set(QML_FILES
     qml/dialogs/EmployeeSelectorDialog.qml
     qml/dialogs/CalculationErrorDialog.qml
     qml/dialogs/AboutDialog.qml
+    qml/dialogs/CloseMonthDialog.qml
 )
 
 qt_add_executable(${PROJECT_NAME}

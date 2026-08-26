@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
@@ -277,6 +278,21 @@ void DatabaseManager::createTables()
             body            TEXT NOT NULL,
             description     TEXT DEFAULT '',
             esquema_codigo  TEXT DEFAULT ''
+        )
+    )");
+
+    q.exec(R"(
+        CREATE TABLE IF NOT EXISTS meses_cerrados (
+            anio             INTEGER NOT NULL,
+            mes              INTEGER NOT NULL,
+            cerrado          INTEGER NOT NULL DEFAULT 1,
+            fecha_cierre_mes TEXT NOT NULL,
+            fecha_cierre_q1  TEXT DEFAULT '',
+            fecha_cierre_q2  TEXT DEFAULT '',
+            fecha_pago       TEXT DEFAULT '',
+            snapshot_json    TEXT NOT NULL,
+            fecha_registro   TEXT NOT NULL,
+            PRIMARY KEY (anio, mes)
         )
     )");
 }
@@ -1633,3 +1649,243 @@ QString DatabaseManager::resetNewMonth()
 
     return backupPath;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Closed Months (meses_cerrados)
+// ═══════════════════════════════════════════════════════════════════
+
+bool DatabaseManager::isMonthClosed(int anio, int mes) const
+{
+    QSqlQuery q(m_db);
+    q.prepare("SELECT cerrado FROM meses_cerrados WHERE anio = ? AND mes = ?");
+    q.addBindValue(anio);
+    q.addBindValue(mes);
+    q.exec();
+    if (q.next()) {
+        return q.value(0).toInt() == 1;
+    }
+    return false;
+}
+
+bool DatabaseManager::closeMonth(int anio, int mes,
+                                  const QString &fechaCierreMes,
+                                  const QString &fechaCierreQ1,
+                                  const QString &fechaCierreQ2,
+                                  const QString &fechaPago)
+{
+    qInfo() << "[DatabaseManager] Cerrando mes" << mes << "/" << anio;
+
+    if (isMonthClosed(anio, mes)) {
+        qWarning() << "[DatabaseManager] El mes" << mes << "/" << anio << "ya se encuentra cerrado.";
+        return false;
+    }
+
+    // Build comprehensive snapshot JSON
+    QJsonObject snapshot;
+
+    // 1. Snapshot metadata
+    QJsonObject metaObj;
+    metaObj["anio"] = anio;
+    metaObj["mes"] = mes;
+    metaObj["fecha_cierre_mes"] = fechaCierreMes;
+    metaObj["fecha_cierre_q1"] = fechaCierreQ1;
+    metaObj["fecha_cierre_q2"] = fechaCierreQ2;
+    metaObj["fecha_pago"] = fechaPago;
+    metaObj["fecha_registro"] = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+    snapshot["meta"] = metaObj;
+
+    // 2. Snapshot all employees
+    QJsonArray empleadosArr;
+    QVariantList emps = listEmployees();
+    for (const QVariant &ev : emps) {
+        QVariantMap e = ev.toMap();
+        QJsonObject empObj;
+        empObj["id"] = e["id"].toInt();
+        empObj["legajo"] = e["legajo"].toString();
+        empObj["nombre_completo"] = e["nombre_completo"].toString();
+        empObj["tipo_liquidacion"] = e["tipo_liquidacion"].toString();
+        empObj["esquema_codigo"] = e["esquema_codigo"].toString();
+        empObj["categoria_jornal_id"] = e["categoria_jornal_id"].toInt();
+        empObj["fecha_ingreso"] = e["fecha_ingreso"].toString();
+        empObj["cuil"] = e["cuil"].toString();
+        empObj["categoria_nombre"] = e["categoria_nombre"].toString();
+
+        // Employee field values for all quincenas
+        QStringList quincenas = listEmployeeQuincenas(e["id"].toInt());
+        QJsonObject quincenasObj;
+        for (const QString &qn : quincenas) {
+            QVariantList fValues = getEmployeeFieldValues(e["id"].toInt(), qn);
+            QJsonArray fieldsArr;
+            for (const QVariant &fv : fValues) {
+                QVariantMap fm = fv.toMap();
+                QJsonObject fieldObj;
+                fieldObj["field_id"] = fm["field_id"].toInt();
+                fieldObj["field_code"] = fm["field_code"].toString();
+                fieldObj["field_label"] = fm["field_label"].toString();
+                fieldObj["field_type"] = fm["field_type"].toString();
+                fieldObj["value"] = fm["value"].toString();
+                fieldObj["default_value"] = fm["default_value"].toString();
+                fieldsArr.append(fieldObj);
+            }
+            quincenasObj[qn] = fieldsArr;
+        }
+        empObj["quincenas"] = QJsonArray::fromStringList(quincenas);
+        empObj["field_values"] = quincenasObj;
+
+        empleadosArr.append(empObj);
+    }
+    snapshot["empleados"] = empleadosArr;
+
+    // 3. Snapshot categories
+    QJsonArray catsArr;
+    QVariantList cats = listCategories();
+    for (const QVariant &cv : cats) {
+        QVariantMap c = cv.toMap();
+        QJsonObject catObj;
+        catObj["id"] = c["id"].toInt();
+        catObj["nombre"] = c["nombre"].toString();
+        catObj["valor_hora"] = c["valor_hora"].toDouble();
+        catsArr.append(catObj);
+    }
+    snapshot["categorias"] = catsArr;
+
+    // 4. Snapshot global variables
+    QJsonArray globalsArr;
+    QVariantList globals = listGlobalVariables();
+    for (const QVariant &gv : globals) {
+        QVariantMap g = gv.toMap();
+        QJsonObject gObj;
+        gObj["id"] = g["id"].toInt();
+        gObj["codigo"] = g["codigo"].toString();
+        gObj["valor"] = g["valor"].toString();
+        gObj["descripcion"] = g["descripcion"].toString();
+        globalsArr.append(gObj);
+    }
+    snapshot["variables_globales"] = globalsArr;
+
+    // 5. Snapshot company
+    QVariantMap comp = getCompany();
+    QJsonObject compObj;
+    compObj["razon_social"] = comp.value("razon_social").toString();
+    compObj["cuit"] = comp.value("cuit").toString();
+    compObj["direccion"] = comp.value("direccion").toString();
+    compObj["lugar_de_pago"] = comp.value("lugar_de_pago").toString();
+    snapshot["empresa"] = compObj;
+
+    QString snapshotJson = QJsonDocument(snapshot).toJson(QJsonDocument::Compact);
+    QString fechaRegistro = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+
+    QSqlQuery q(m_db);
+    q.prepare(R"(
+        INSERT INTO meses_cerrados (anio, mes, cerrado, fecha_cierre_mes, fecha_cierre_q1, fecha_cierre_q2, fecha_pago, snapshot_json, fecha_registro)
+        VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
+    )");
+    q.addBindValue(anio);
+    q.addBindValue(mes);
+    q.addBindValue(fechaCierreMes);
+    q.addBindValue(fechaCierreQ1);
+    q.addBindValue(fechaCierreQ2);
+    q.addBindValue(fechaPago);
+    q.addBindValue(snapshotJson);
+    q.addBindValue(fechaRegistro);
+
+    if (!q.exec()) {
+        qCritical() << "[DatabaseManager] Error al cerrar mes:" << q.lastError().text();
+        return false;
+    }
+
+    qInfo() << "[DatabaseManager] Mes" << mes << "/" << anio << "cerrado exitosamente.";
+    return true;
+}
+
+QVariantMap DatabaseManager::getMonthSnapshot(int anio, int mes) const
+{
+    QSqlQuery q(m_db);
+    q.prepare("SELECT snapshot_json FROM meses_cerrados WHERE anio = ? AND mes = ? AND cerrado = 1");
+    q.addBindValue(anio);
+    q.addBindValue(mes);
+    q.exec();
+    if (q.next()) {
+        QString jsonStr = q.value(0).toString();
+        QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8());
+        if (doc.isObject()) {
+            return doc.object().toVariantMap();
+        }
+    }
+    return {};
+}
+
+QVariantMap DatabaseManager::getMonthClosingData(int anio, int mes) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(R"(
+        SELECT anio, mes, cerrado, fecha_cierre_mes, fecha_cierre_q1, fecha_cierre_q2,
+               fecha_pago, fecha_registro
+        FROM meses_cerrados
+        WHERE anio = ? AND mes = ?
+    )");
+    q.addBindValue(anio);
+    q.addBindValue(mes);
+    q.exec();
+    if (q.next()) {
+        return {
+            {"anio", q.value("anio")},
+            {"mes", q.value("mes")},
+            {"cerrado", q.value("cerrado").toInt() == 1},
+            {"fecha_cierre_mes", q.value("fecha_cierre_mes")},
+            {"fecha_cierre_q1", q.value("fecha_cierre_q1")},
+            {"fecha_cierre_q2", q.value("fecha_cierre_q2")},
+            {"fecha_pago", q.value("fecha_pago")},
+            {"fecha_registro", q.value("fecha_registro")},
+        };
+    }
+    return {};
+}
+
+QVariantList DatabaseManager::listClosedMonths() const
+{
+    QVariantList result;
+    QSqlQuery q(m_db);
+    q.exec("SELECT anio, mes, fecha_cierre_mes, fecha_pago, fecha_registro FROM meses_cerrados WHERE cerrado = 1 ORDER BY anio DESC, mes DESC");
+    while (q.next()) {
+        result.append(QVariantMap{
+            {"anio", q.value("anio")},
+            {"mes", q.value("mes")},
+            {"fecha_cierre_mes", q.value("fecha_cierre_mes")},
+            {"fecha_pago", q.value("fecha_pago")},
+            {"fecha_registro", q.value("fecha_registro")},
+        });
+    }
+    return result;
+}
+
+QVariantList DatabaseManager::getEmployeeFieldValuesForPeriod(int employeeId, const QString &quincena, int anio, int mes) const
+{
+    if (anio > 0 && mes > 0 && isMonthClosed(anio, mes)) {
+        QVariantMap snapshot = getMonthSnapshot(anio, mes);
+        if (!snapshot.isEmpty() && snapshot.contains("empleados")) {
+            QVariantList emps = snapshot["empleados"].toList();
+            for (const QVariant &ev : emps) {
+                QVariantMap e = ev.toMap();
+                if (e["id"].toInt() == employeeId) {
+                    QVariantMap fvMap = e["field_values"].toMap();
+                    if (fvMap.contains(quincena)) {
+                        return fvMap[quincena].toList();
+                    }
+                }
+            }
+        }
+    }
+    return getEmployeeFieldValues(employeeId, quincena);
+}
+
+bool DatabaseManager::reopenMonth(int anio, int mes)
+{
+    qInfo() << "[DatabaseManager] Reabriendo mes" << mes << "/" << anio;
+    QSqlQuery q(m_db);
+    q.prepare("DELETE FROM meses_cerrados WHERE anio = ? AND mes = ?");
+    q.addBindValue(anio);
+    q.addBindValue(mes);
+    return q.exec();
+}
+

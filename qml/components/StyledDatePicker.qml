@@ -7,6 +7,7 @@ Item {
     id: root
 
     property date selectedDate: new Date()
+    property string selectedDateString: Qt.formatDate(selectedDate, "yyyy-MM-dd")
     property bool readOnly: false
 
     readonly property int selectedDay: selectedDate.getDate()
@@ -27,6 +28,24 @@ Item {
     onSelectedDateChanged: {
         currentViewMonth = selectedDate.getMonth()
         currentViewYear = selectedDate.getFullYear()
+        var f = Qt.formatDate(selectedDate, "yyyy-MM-dd")
+        if (selectedDateString !== f) {
+            selectedDateString = f
+        }
+    }
+
+    onSelectedDateStringChanged: {
+        if (selectedDateString && selectedDateString !== formattedDate) {
+            var parts = selectedDateString.split("-")
+            if (parts.length === 3) {
+                var y = parseInt(parts[0], 10)
+                var m = parseInt(parts[1], 10) - 1
+                var d = parseInt(parts[2], 10)
+                if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+                    selectedDate = new Date(y, m, d)
+                }
+            }
+        }
     }
 
     // Helper functions for calendar logic

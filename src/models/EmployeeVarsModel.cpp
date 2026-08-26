@@ -35,6 +35,11 @@ bool EmployeeVarsModel::setData(const QModelIndex &index, const QVariant &value,
     if (!index.isValid() || index.row() >= m_data.size() || role != ValueRole)
         return false;
 
+    if (isReadOnly()) {
+        qWarning() << "[EmployeeVarsModel] Modificación bloqueada: el modelo está en modo solo lectura (mes cerrado o bloqueado).";
+        return false;
+    }
+
     QVariantMap f = m_data[index.row()].toMap();
     int fieldId = f["field_id"].toInt();
     QString fieldCode = f["field_code"].toString();
@@ -75,6 +80,9 @@ bool EmployeeVarsModel::setData(const QModelIndex &index, const QVariant &value,
 Qt::ItemFlags EmployeeVarsModel::flags(const QModelIndex &index) const
 {
     if (!index.isValid()) return Qt::NoItemFlags;
+    if (isReadOnly()) {
+        return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    }
     return Qt::ItemIsEditable | Qt::ItemIsEnabled | Qt::ItemIsSelectable;
 }
 
@@ -111,12 +119,61 @@ void EmployeeVarsModel::setQuincena(const QString &q)
     refresh();
 }
 
+int EmployeeVarsModel::anio() const { return m_anio; }
+
+void EmployeeVarsModel::setAnio(int y)
+{
+    if (m_anio == y) return;
+    m_anio = y;
+    emit periodChanged();
+    refresh();
+}
+
+int EmployeeVarsModel::mes() const { return m_mes; }
+
+void EmployeeVarsModel::setMes(int m)
+{
+    if (m_mes == m) return;
+    m_mes = m;
+    emit periodChanged();
+    refresh();
+}
+
+void EmployeeVarsModel::setPeriod(int y, int m)
+{
+    if (m_anio == y && m_mes == m) return;
+    m_anio = y;
+    m_mes = m;
+    emit periodChanged();
+    refresh();
+}
+
+bool EmployeeVarsModel::isReadOnly() const
+{
+    if (m_isReadOnly) return true;
+    if (m_anio > 0 && m_mes > 0 && m_db && m_db->isMonthClosed(m_anio, m_mes)) {
+        return true;
+    }
+    return false;
+}
+
+void EmployeeVarsModel::setIsReadOnly(bool ro)
+{
+    if (m_isReadOnly == ro) return;
+    m_isReadOnly = ro;
+    emit isReadOnlyChanged();
+}
+
 void EmployeeVarsModel::refresh()
 {
     beginResetModel();
-    if (m_employeeId > 0) {
-        m_data = m_db->getEmployeeFieldValues(m_employeeId, m_quincena);
-        qDebug() << "[EmployeeVarsModel] Variables cargadas para Empleado ID:" << m_employeeId << "Quincena:" << m_quincena << "Total:" << m_data.size();
+    if (m_employeeId > 0 && m_db) {
+        if (m_anio > 0 && m_mes > 0) {
+            m_data = m_db->getEmployeeFieldValuesForPeriod(m_employeeId, m_quincena, m_anio, m_mes);
+        } else {
+            m_data = m_db->getEmployeeFieldValues(m_employeeId, m_quincena);
+        }
+        qDebug() << "[EmployeeVarsModel] Variables cargadas para Empleado ID:" << m_employeeId << "Quincena:" << m_quincena << "Período:" << m_mes << "/" << m_anio << "Total:" << m_data.size();
     } else {
         m_data.clear();
     }
@@ -127,3 +184,4 @@ bool EmployeeVarsModel::setValue(int row, const QString &value)
 {
     return setData(index(row), value, ValueRole);
 }
+

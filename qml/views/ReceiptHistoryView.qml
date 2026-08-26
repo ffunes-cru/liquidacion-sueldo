@@ -148,41 +148,68 @@ MasterDetailView {
             onDismissed: root.statusMsg = ""
         }
 
-        // Receipt metadata card
-        SectionPanel {
-            visible: root.receiptDetails !== null
+    property var parsedJson: {
+        if (!root.receiptDetails || !root.receiptDetails["datos_json"]) return null
+        try {
+            return JSON.parse(root.receiptDetails["datos_json"])
+        } catch(e) {
+            return null
+        }
+    }
 
-            GridLayout {
-                Layout.fillWidth: true
-                columns: 2
-                rowSpacing: 10
-                columnSpacing: 15
+    // Receipt metadata card
+    SectionPanel {
+        visible: root.receiptDetails !== null
 
-                Label { text: "Empleado:"; color: Theme.subtextColor; font.pixelSize: 13 }
-                Label {
-                    text: root.receiptDetails ? (root.receiptDetails["nombre_completo"] || root.receiptDetails["empleado_id"]) : ""
-                    color: Theme.textColor; font.bold: true; font.pixelSize: 14
+        GridLayout {
+            Layout.fillWidth: true
+            columns: 4
+            rowSpacing: 10
+            columnSpacing: 15
+
+            Label { text: "Empleado:"; color: Theme.subtextColor; font.pixelSize: 12 }
+            Label {
+                text: root.parsedJson && root.parsedJson.empleado ? (root.parsedJson.empleado.nombre_completo + " (Leg. " + (root.parsedJson.empleado.legajo || "-") + ")") : (root.receiptDetails ? (root.receiptDetails["nombre_completo"] || root.receiptDetails["empleado_id"]) : "")
+                color: Theme.textColor; font.bold: true; font.pixelSize: 13
+            }
+
+            Label { text: "Período:"; color: Theme.subtextColor; font.pixelSize: 12 }
+            Label {
+                text: root.receiptDetails ? root.receiptDetails["periodo"] : ""
+                color: Theme.accentColor; font.bold: true; font.pixelSize: 13
+            }
+
+            Label { text: "Fecha Cierre:"; color: Theme.subtextColor; font.pixelSize: 12 }
+            Label {
+                text: root.parsedJson && root.parsedJson.meta ? (root.parsedJson.meta.fecha_cierre || root.parsedJson.meta.fecha_calculo || "-") : "-"
+                color: Theme.textColor; font.pixelSize: 13
+            }
+
+            Label { text: "Fecha Pago:"; color: Theme.subtextColor; font.pixelSize: 12 }
+            Label {
+                text: root.parsedJson && root.parsedJson.meta ? (root.parsedJson.meta.fecha_pago || "-") : "-"
+                color: Theme.textColor; font.pixelSize: 13
+            }
+
+            Label { text: "Categoría:"; color: Theme.subtextColor; font.pixelSize: 12 }
+            Label {
+                text: {
+                    if (root.parsedJson && root.parsedJson.empleado && root.parsedJson.empleado.categoria_nombre) {
+                        var vh = root.parsedJson.empleado.valor_hora || 0
+                        return root.parsedJson.empleado.categoria_nombre + (vh > 0 ? (" ($ " + vh + "/hs)") : "")
+                    }
+                    return "N/A"
                 }
+                color: Theme.textColor; font.pixelSize: 13
+            }
 
-                Label { text: "Período:"; color: Theme.subtextColor; font.pixelSize: 13 }
-                Label {
-                    text: root.receiptDetails ? root.receiptDetails["periodo"] : ""
-                    color: Theme.accentColor; font.bold: true; font.pixelSize: 14
-                }
-
-                Label { text: "Esquema:"; color: Theme.subtextColor; font.pixelSize: 13 }
-                Label {
-                    text: root.receiptDetails ? root.receiptDetails["esquema_codigo"] : ""
-                    color: Theme.textColor; font.pixelSize: 13
-                }
-
-                Label { text: "Fecha Emisión:"; color: Theme.subtextColor; font.pixelSize: 13 }
-                Label {
-                    text: root.receiptDetails ? root.receiptDetails["fecha_emision"] : ""
-                    color: Theme.textColor; font.pixelSize: 13
-                }
+            Label { text: "Neto a Cobrar:"; color: Theme.subtextColor; font.pixelSize: 12 }
+            Label {
+                text: root.parsedJson && root.parsedJson.totales ? ("$ " + Number(root.parsedJson.totales.neto_a_cobrar).toLocaleString(Qt.locale("es_AR"), 'f', 2)) : "-"
+                color: Theme.successColor; font.bold: true; font.pixelSize: 14
             }
         }
+    }
 
         // JSON payload preview
         Label {
