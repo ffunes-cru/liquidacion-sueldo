@@ -1,6 +1,7 @@
 #include "FormulaEngine.h"
 #include <QDebug>
 #include <cmath>
+#include <functional>
 
 FormulaEngine::FormulaEngine(QObject *parent) : QObject(parent) {
   m_engine = new QJSEngine(this);
@@ -43,7 +44,50 @@ void FormulaEngine::setupBuiltinFunctions() {
             if (args.length === 0) return 0;
             return Math.min.apply(null, args);
         }
+
+        function Q_sum_(varName) {
+            if (typeof env !== 'undefined' && env.quincenas && Array.isArray(env.quincenas)) {
+                return env.quincenas.reduce(function(acc, q) { return acc + (Number(q[varName]) || 0); }, 0);
+            }
+            return typeof this['Q_sum_' + varName] !== 'undefined' ? this['Q_sum_' + varName] : 0;
+        }
+        function Q_avg_(varName) {
+            if (typeof env !== 'undefined' && env.quincenas && Array.isArray(env.quincenas) && env.quincenas.length > 0) {
+                return Q_sum_(varName) / env.quincenas.length;
+            }
+            return typeof this['Q_avg_' + varName] !== 'undefined' ? this['Q_avg_' + varName] : 0;
+        }
+        function Q_max_(varName) {
+            if (typeof env !== 'undefined' && env.quincenas && Array.isArray(env.quincenas) && env.quincenas.length > 0) {
+                var vals = env.quincenas.map(function(q) { return Number(q[varName]) || 0; });
+                return Math.max.apply(null, vals);
+            }
+            return typeof this['Q_max_' + varName] !== 'undefined' ? this['Q_max_' + varName] : 0;
+        }
+        function Q_min_(varName) {
+            if (typeof env !== 'undefined' && env.quincenas && Array.isArray(env.quincenas) && env.quincenas.length > 0) {
+                var vals = env.quincenas.map(function(q) { return Number(q[varName]) || 0; });
+                return Math.min.apply(null, vals);
+            }
+            return typeof this['Q_min_' + varName] !== 'undefined' ? this['Q_min_' + varName] : 0;
+        }
+        function sumar_q(varName) { return Q_sum_(varName); }
+        function promedio_q(varName) { return Q_avg_(varName); }
+        function max_q(varName) { return Q_max_(varName); }
+        function min_q(varName) { return Q_min_(varName); }
+        function cant_q() {
+            if (typeof env !== 'undefined' && env.quincenas && Array.isArray(env.quincenas)) {
+                return env.quincenas.length;
+            }
+            return typeof _cant_q !== 'undefined' ? _cant_q : 1;
+        }
     )");
+}
+
+void FormulaEngine::evaluateScript(const QString &script) {
+  if (m_engine) {
+    m_engine->evaluate(script);
+  }
 }
 
 void FormulaEngine::setContext(const QVariantMap &context) {
@@ -212,28 +256,82 @@ QVariant FormulaEngine::evaluate(const QString &formula, QString *error) {
   QString expr = formula.trimmed();
 
   // 1. Transpile Python ternary: A if COND else B  ->  ((COND) ? (A) : (B))
-  QRegularExpression pythonTernaryRegex(
-      R"(^\s*(.+?)\s+if\s+(.+?)\s+else\s+(.+)\s*$)");
-  QRegularExpressionMatch ternaryMatch = pythonTernaryRegex.match(expr);
-  if (ternaryMatch.hasMatch()) {
-    QString trueVal = ternaryMatch.captured(1).trimmed();
-    QString condVal = ternaryMatch.captured(2).trimmed();
-    QString falseVal = ternaryMatch.captured(3).trimmed();
+  //    Strategy: Process parenthesized sub-expressions first (innermost out),
+  //    then handle top-level ternaries. This correctly handles embedded cases like:
+  //    (100 if a > 5 else 50) + (200 if b > 15 else 75)
+  //    basico * (0.10 if antiguedad > 5 else 0.05)
+  {
+    // Helper lambda: transpile a flat ternary expression (no nested parens).
+    // Handles chaining by recursively processing the else-branch first.
+    std::function<QString(QString)> transpileFlatTernary;
+    transpileFlatTernary = [&transpileFlatTernary](QString s) -> QString {
+      s = s.trimmed();
+      QRegularExpression ternaryRe(R"(^\s*(.+?)\s+if\s+(.+?)\s+else\s+(.+)\s*$)");
+      QRegularExpressionMatch m = ternaryRe.match(s);
+      if (!m.hasMatch()) return s;
 
-    condVal.replace(QRegularExpression(R"(\bor\b)"), "||");
-    condVal.replace(QRegularExpression(R"(\band\b)"), "&&");
-    condVal.replace(QRegularExpression(R"(\bnot\b)"), "!");
+      QString trueVal = m.captured(1).trimmed();
+      QString condVal = m.captured(2).trimmed();
+      QString falseVal = m.captured(3).trimmed();
 
-    expr = QString("((%1) ? (%2) : (%3))").arg(condVal, trueVal, falseVal);
-  } else {
-    expr.replace(QRegularExpression(R"(\bor\b)"), "||");
-    expr.replace(QRegularExpression(R"(\band\b)"), "&&");
-    expr.replace(QRegularExpression(R"(\bnot\b)"), "!");
+      // Recursively transpile the else-branch (handles chaining: a if c1 else b if c2 else d)
+      falseVal = transpileFlatTernary(falseVal);
+
+      condVal.replace(QRegularExpression(R"(\bor\b)"), "||");
+      condVal.replace(QRegularExpression(R"(\band\b)"), "&&");
+      condVal.replace(QRegularExpression(R"(\bnot\b)"), "!");
+      return QString("((%1) ? (%2) : (%3))").arg(condVal, trueVal, falseVal);
+    };
+
+    // Iteratively resolve innermost parenthesized groups containing ternaries
+    int safetyLimit = 30;
+    while (safetyLimit-- > 0) {
+      // Find innermost parenthesized group that contains ' if ' and ' else '
+      int bestStart = -1, bestEnd = -1;
+      int depth = 0;
+      QVector<int> openStack;
+      for (int i = 0; i < expr.length(); i++) {
+        if (expr[i] == '(') {
+          openStack.push_back(i);
+          depth++;
+        } else if (expr[i] == ')') {
+          if (!openStack.isEmpty()) {
+            int start = openStack.takeLast();
+            depth--;
+            // Check if this group contains a Python ternary
+            QString inner = expr.mid(start + 1, i - start - 1);
+            if (inner.contains(QRegularExpression(R"(\s+if\s+.*\s+else\s+)"))) {
+              bestStart = start;
+              bestEnd = i;
+              break;  // Process innermost first
+            }
+          }
+        }
+      }
+
+      if (bestStart >= 0 && bestEnd > bestStart) {
+        // Extract the inner content, transpile it, and replace
+        QString inner = expr.mid(bestStart + 1, bestEnd - bestStart - 1);
+        QString transpiled = transpileFlatTernary(inner);
+        expr = expr.left(bestStart) + "(" + transpiled + ")" + expr.mid(bestEnd + 1);
+      } else {
+        // No more parenthesized ternaries; try top-level
+        if (expr.contains(QRegularExpression(R"(\s+if\s+.*\s+else\s+)"))) {
+          expr = transpileFlatTernary(expr);
+        }
+        break;
+      }
+    }
   }
+
+  // Replace Python logical operators outside of ternary context
+  expr.replace(QRegularExpression(R"(\bor\b)"), "||");
+  expr.replace(QRegularExpression(R"(\band\b)"), "&&");
+  expr.replace(QRegularExpression(R"(\bnot\b)"), "!");
 
   // 2. Auto-initialize undefined identifiers to 0.0 to prevent ReferenceErrors
   //    BUT skip identifiers that appear inside quoted strings (arguments to
-  //    Q1(), H_sum(), etc.)
+  //    Q1(), H_sum(), etc.) and skip property accesses (e.g. env.quincenas, Math.max)
   QJSValue global = m_engine->globalObject();
   static const QSet<QString> jsKeywords = {
       "if",     "else",      "true",     "false",    "True",    "False",
@@ -248,11 +346,19 @@ QVariant FormulaEngine::evaluate(const QString &formula, QString *error) {
       "max_q",  "min_q",     "cant_q",   "_cant_q",  "varName", "arguments",
       "Q1",     "Q2",        "H_list",   "H_sum",    "H_max",   "H_avg",  "H_val"};
 
-  // Build a set of character positions that are inside quoted strings
+  // Build a set of character positions that are inside quoted strings,
+  // correctly handling escaped quotes (\' and \")
   QSet<int> quotedPositions;
   bool inSingle = false, inDouble = false;
   for (int i = 0; i < expr.length(); i++) {
     QChar c = expr[i];
+    // Skip escaped quotes
+    if (c == '\\' && i + 1 < expr.length()) {
+      quotedPositions.insert(i);
+      quotedPositions.insert(i + 1);
+      i++;  // skip next character
+      continue;
+    }
     if (c == '\'' && !inDouble)
       inSingle = !inSingle;
     else if (c == '"' && !inSingle)
@@ -268,6 +374,10 @@ QVariant FormulaEngine::evaluate(const QString &formula, QString *error) {
     int pos = match.capturedStart(0);
     // Skip identifiers inside quoted strings
     if (quotedPositions.contains(pos))
+      continue;
+
+    // Skip property accesses: if preceded by a dot (e.g. env.quincenas, Math.max)
+    if (pos > 0 && expr[pos - 1] == '.')
       continue;
 
     QString varName = match.captured(0);

@@ -237,8 +237,14 @@ MasterDetailView {
             StyledButton {
                 variant: "danger"
                 text: "🗑️ Eliminar Quincena"
-                visible: AppController.currentRole === "admin" && !AppController.isCurrentPeriodClosed && cbQuincenas.count > 1 && cbQuincenas.currentText !== "Q1"
+                visible: AppController.currentRole === "admin" && !AppController.employeeVarsModel.isReadOnly && cbQuincenas.count > 1 && cbQuincenas.currentText !== "Q1"
                 onClicked: confirmDeleteQuincenaDialog.open()
+            }
+
+            BadgePill {
+                text: "🔒 Quincena Cerrada"
+                variant: "warning"
+                visible: AppController.employeeVarsModel.isReadOnly
             }
         }
 
@@ -267,9 +273,9 @@ MasterDetailView {
                         fieldLabel: model.fieldLabel
                         fieldType: model.fieldType
                         value: model.value || model.defaultValue
-                        readOnly: AppController.isCurrentPeriodClosed
+                        readOnly: AppController.employeeVarsModel.isReadOnly
                         onValueSaved: function(newValue) {
-                            if (!AppController.isCurrentPeriodClosed) {
+                            if (!AppController.employeeVarsModel.isReadOnly) {
                                 AppController.employeeVarsModel.setValue(index, newValue)
                             }
                         }

@@ -5,24 +5,43 @@ ComboBox {
     id: control
 
     font.pixelSize: 13
+    implicitWidth: 160
+    implicitHeight: 36
+
+    displayText: {
+        if (currentIndex < 0 || currentIndex >= count) return ""
+        var item = (typeof model !== "undefined" && model && model.length > currentIndex) ? model[currentIndex] : currentText
+        if (typeof item === "object" && item !== null) {
+            if (control.textRole && typeof item[control.textRole] !== "undefined") {
+                return String(item[control.textRole])
+            }
+            if (typeof item.label !== "undefined") return String(item.label)
+            if (typeof item.text !== "undefined") return String(item.text)
+            if (typeof item.nombre !== "undefined") return String(item.nombre)
+            if (typeof item.name !== "undefined") return String(item.name)
+        }
+        return currentText || ""
+    }
 
     delegate: ItemDelegate {
-        width: control.width
+        width: ListView.view ? ListView.view.width : control.width
         implicitHeight: 34
         text: {
-            if (control.textRole && model && model[control.textRole] !== undefined) {
-                var v = model[control.textRole]
-                return (v !== null && typeof v !== "undefined") ? String(v) : ""
-            }
-            if (typeof modelData !== "undefined" && modelData !== null) {
-                if (typeof modelData === "object") {
-                    return modelData.text !== undefined ? String(modelData.text) : (modelData.nombre !== undefined ? String(modelData.nombre) : (modelData.name !== undefined ? String(modelData.name) : ""))
+            var item = typeof modelData !== "undefined" ? modelData : (typeof model !== "undefined" ? model : null)
+            if (typeof item === "object" && item !== null) {
+                if (control.textRole && typeof item[control.textRole] !== "undefined") {
+                    return String(item[control.textRole])
                 }
-                return String(modelData)
+                if (typeof item.label !== "undefined") return String(item.label)
+                if (typeof item.text !== "undefined") return String(item.text)
+                if (typeof item.nombre !== "undefined") return String(item.nombre)
+                if (typeof item.name !== "undefined") return String(item.name)
             }
-            return ""
+            return (item !== null && typeof item !== "undefined") ? String(item) : ""
         }
         contentItem: Text {
+            leftPadding: 8
+            rightPadding: 8
             text: parent.text
             color: Theme.textColor
             font.pixelSize: 13
@@ -31,14 +50,15 @@ ComboBox {
         }
         background: Rectangle {
             color: highlighted ? Theme.selectedBg : (hovered ? Theme.hoverBg : Theme.cardBg)
+            radius: 4
         }
         highlighted: control.highlightedIndex === index
     }
 
     contentItem: Text {
         leftPadding: 12
-        rightPadding: 24
-        text: control.displayText || ""
+        rightPadding: 28
+        text: control.displayText
         font.pixelSize: 13
         color: Theme.textColor
         verticalAlignment: Text.AlignVCenter
@@ -49,24 +69,25 @@ ComboBox {
         implicitWidth: 160
         implicitHeight: 36
         color: Theme.inputBg
-        border.color: control.activeFocus || control.pressed ? Theme.accentColor : Theme.borderColor
+        border.color: control.activeFocus || control.pressed || (control.popup && control.popup.visible) ? Theme.accentColor : Theme.borderColor
         border.width: 1
         radius: 6
     }
 
     popup: Popup {
         y: control.height + 4
-        width: control.width
-        implicitHeight: Math.min(contentItem.implicitHeight + 8, 200)
+        width: Math.max(control.width, 220)
+        implicitHeight: Math.min(contentItem.contentHeight + 10, 240)
         padding: 4
 
         contentItem: ListView {
             clip: true
             implicitHeight: contentHeight
-            model: control.popup.visible ? control.delegateModel : null
+            model: control.delegateModel
             currentIndex: control.highlightedIndex
+            boundsBehavior: Flickable.StopAtBounds
 
-            ScrollIndicator.vertical: ScrollIndicator { }
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         }
 
         background: Rectangle {

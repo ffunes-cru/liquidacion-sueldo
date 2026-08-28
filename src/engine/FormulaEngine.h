@@ -70,6 +70,9 @@ public:
   /// Evaluate a boolean condition
   bool evaluateCondition(const QString &condition, QString *error = nullptr);
 
+  /// Evaluate a raw JS script without tracking auto-initialized variables
+  void evaluateScript(const QString &script);
+
   /// Clear all variables and reset the engine
   void reset();
 

@@ -151,8 +151,13 @@ void EmployeeVarsModel::setPeriod(int y, int m)
 bool EmployeeVarsModel::isReadOnly() const
 {
     if (m_isReadOnly) return true;
-    if (m_anio > 0 && m_mes > 0 && m_db && m_db->isMonthClosed(m_anio, m_mes)) {
-        return true;
+    if (m_anio > 0 && m_mes > 0 && m_db && m_employeeId > 0) {
+        QVariantMap emp = m_db->getEmployee(m_employeeId);
+        QString tipoLiq = emp.value("tipo_liquidacion").toString();
+        QString tipoCierre = (tipoLiq == "jornal") ? m_quincena : "M";
+        if (m_db->isCierreClosed(m_anio, m_mes, tipoCierre, tipoLiq)) {
+            return true;
+        }
     }
     return false;
 }
@@ -178,6 +183,7 @@ void EmployeeVarsModel::refresh()
         m_data.clear();
     }
     endResetModel();
+    emit isReadOnlyChanged();
 }
 
 bool EmployeeVarsModel::setValue(int row, const QString &value)

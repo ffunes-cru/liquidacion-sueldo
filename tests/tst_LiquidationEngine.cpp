@@ -74,6 +74,13 @@ private slots:
     void testHistoricalConceptRenameResilience();
     void testReceiptSnapshotSelfContained();
 
+    // ── Batch Closings & QN Quincenas & Env ────────────────────
+    void testValidateBatchJornalQ1AndQ2();
+    void testValidateBatchMensual();
+    void testExecuteBatchCloseAtomicity();
+    void testEnvHistorialAcrossClosedPeriods();
+    void testEnvQuincenasInJornal();
+
 private:
     DatabaseManager *m_db = nullptr;
     LiquidationEngine *m_engine = nullptr;
@@ -781,6 +788,162 @@ void TestLiquidationEngine::testReceiptPersistenceWithClosingAndPaymentDates()
     QJsonObject metaObj = doc.object()["meta"].toObject();
     QCOMPARE(metaObj["fecha_cierre"].toString(), QString("2026-08-31"));
     QCOMPARE(metaObj["fecha_pago"].toString(), QString("2026-09-05"));
+}
+
+void TestLiquidationEngine::testValidateBatchJornalQ1AndQ2()
+{
+    m_db->saveSchema("", "JORNAL_BATCH", "Jornal Batch", "jornal");
+    int catId = m_db->saveCategory(0, "Oficial", 2000.0);
+    int emp1 = m_db->saveEmployee(0, "JB01", "Jornal 1", "jornal", "JORNAL_BATCH", catId, "2022-01-01", "");
+    int emp2 = m_db->saveEmployee(0, "JB02", "Jornal 2", "jornal", "JORNAL_BATCH", catId, "2022-01-01", "");
+
+    m_db->addQuincena(emp1, "Q1");
+    m_db->addQuincena(emp1, "Q2");
+    m_db->addQuincena(emp2, "Q1");
+    m_db->addQuincena(emp2, "Q2");
+
+    int fHoras = m_db->addSchemaField("JORNAL_BATCH", "horas", "Horas", "number", "0", 1);
+    m_db->setEmployeeFieldValue(emp1, fHoras, "Q1", "80");
+    m_db->setEmployeeFieldValue(emp1, fHoras, "Q2", "88");
+    m_db->setEmployeeFieldValue(emp2, fHoras, "Q1", "90");
+    m_db->setEmployeeFieldValue(emp2, fHoras, "Q2", "96");
+
+    m_db->saveCell(0, "RECIBO", "sueldo_bruto", "Sueldo Bruto", "", "", "", "horas * valor_hora", 10, "JORNAL_BATCH", "formula", 0, "", 0, true);
+
+    // Validate Q1
+    QVariantMap valQ1 = m_engine->validateBatch(8, 2026, "jornal", "Q1", "2026-08-15", "2026-08-20");
+    QVERIFY(valQ1["valido"].toBool());
+    QCOMPARE(valQ1["empleados_procesados"].toInt(), 2);
+    // (80 + 90) * 2000 = 340,000
+    QCOMPARE(valQ1["total_neto"].toDouble(), 340000.0);
+
+    // Validate Q2
+    QVariantMap valQ2 = m_engine->validateBatch(8, 2026, "jornal", "Q2", "2026-08-31", "2026-09-05");
+    QVERIFY(valQ2["valido"].toBool());
+    QCOMPARE(valQ2["empleados_procesados"].toInt(), 2);
+    // (88 + 96) * 2000 = 368,000
+    QCOMPARE(valQ2["total_neto"].toDouble(), 368000.0);
+}
+
+void TestLiquidationEngine::testValidateBatchMensual()
+{
+    m_db->saveSchema("", "MENSUAL_BATCH", "Mensual Batch", "mensual");
+    int emp1 = m_db->saveEmployee(0, "MB01", "Mensual 1", "mensual", "MENSUAL_BATCH", 0, "2022-01-01", "");
+    int emp2 = m_db->saveEmployee(0, "MB02", "Mensual 2", "mensual", "MENSUAL_BATCH", 0, "2022-01-01", "");
+
+    int fBasico = m_db->addSchemaField("MENSUAL_BATCH", "basico", "Básico", "number", "0", 1);
+    m_db->setEmployeeFieldValue(emp1, fBasico, "Q1", "400000");
+    m_db->setEmployeeFieldValue(emp2, fBasico, "Q1", "600000");
+
+    m_db->saveCell(0, "RECIBO", "sueldo_neto", "Sueldo Neto", "", "", "", "basico", 10, "MENSUAL_BATCH", "formula", 0, "", 0, true);
+
+    QVariantMap valM = m_engine->validateBatch(8, 2026, "mensual", "M", "2026-08-31", "2026-09-05");
+    QVERIFY(valM["valido"].toBool());
+    QCOMPARE(valM["empleados_procesados"].toInt(), 2);
+    QCOMPARE(valM["total_neto"].toDouble(), 1000000.0);
+}
+
+void TestLiquidationEngine::testExecuteBatchCloseAtomicity()
+{
+    m_db->saveSchema("", "ATOM_TEST", "Atomicity Test", "jornal");
+    int catId = m_db->saveCategory(0, "Oficial", 1000.0);
+    int emp1 = m_db->saveEmployee(0, "AT01", "Atom Emp 1", "jornal", "ATOM_TEST", catId, "2022-01-01", "");
+    int emp2 = m_db->saveEmployee(0, "AT02", "Atom Emp 2", "jornal", "ATOM_TEST", catId, "2022-01-01", "");
+    m_db->addQuincena(emp1, "Q1");
+    m_db->addQuincena(emp1, "Q2");
+    m_db->addQuincena(emp2, "Q1");
+    m_db->addQuincena(emp2, "Q2");
+
+    int fHoras = m_db->addSchemaField("ATOM_TEST", "horas", "Horas", "number", "0", 1);
+    m_db->setEmployeeFieldValue(emp1, fHoras, "Q1", "50");
+    m_db->setEmployeeFieldValue(emp2, fHoras, "Q1", "60");
+
+    m_db->saveCell(0, "RECIBO", "monto_neto", "Monto", "", "", "", "horas * valor_hora", 10, "ATOM_TEST", "formula", 0, "", 0, true);
+
+    // Execute Q1 closing
+    QVariantMap resClose = m_engine->executeBatchClose(8, 2026, "jornal", "Q1", "2026-08-15", "2026-08-20", "");
+    QVERIFY(resClose["ok"].toBool());
+    int cierreId = resClose["cierre_id"].toInt();
+    QVERIFY(cierreId > 0);
+
+    // Verify closing state in DB
+    QVERIFY(m_db->isCierreClosed(2026, 8, "Q1", "jornal"));
+
+    // Verify receipts were persisted and linked to cierre_id
+    QVariantList recs1 = m_db->listReceiptsByEmployee(emp1);
+    QCOMPARE(recs1.size(), 1);
+    QCOMPARE(recs1.first().toMap()["periodo"].toString(), QString("Mes 8/2026 (Q1)"));
+
+    QVariantList recs2 = m_db->listReceiptsByEmployee(emp2);
+    QCOMPARE(recs2.size(), 1);
+    QCOMPARE(recs2.first().toMap()["periodo"].toString(), QString("Mes 8/2026 (Q1)"));
+}
+
+void TestLiquidationEngine::testEnvHistorialAcrossClosedPeriods()
+{
+    m_db->saveSchema("", "HIST_ENV_TEST", "History Env Test", "mensual");
+    int empId = m_db->saveEmployee(0, "HIST01", "Hist Emp", "mensual", "HIST_ENV_TEST", 0, "2020-01-01", "");
+
+    int fSueldo = m_db->addSchemaField("HIST_ENV_TEST", "sueldo_input", "Sueldo", "number", "0", 1);
+    int fHE = m_db->addSchemaField("HIST_ENV_TEST", "he_input", "Horas Extras", "number", "0", 2);
+
+    m_db->saveCell(0, "RECIBO", "sueldo_base", "Sueldo Base", "", "", "", "sueldo_input", 10, "HIST_ENV_TEST", "formula", 0, "", 0, true);
+    m_db->saveCell(0, "RECIBO", "he_monto", "HE Monto", "", "", "", "he_input", 20, "HIST_ENV_TEST", "formula", 0, "", 0, true);
+
+    // Helper functions in formula
+    m_db->saveCell(0, "RECIBO", "calc_mejor_sueldo", "Mejor Sueldo 6M", "", "", "", "mejor_sueldo('sueldo_base', 6)", 30, "HIST_ENV_TEST", "formula", 0, "", 0, true);
+    m_db->saveCell(0, "RECIBO", "calc_promedio_he", "Promedio HE 6M", "", "", "", "promedio_historial('he_monto', 6)", 40, "HIST_ENV_TEST", "formula", 0, "", 0, true);
+    m_db->saveCell(0, "RECIBO", "calc_total_he", "Total HE 6M", "", "", "", "sumar_historial('he_monto', 6)", 50, "HIST_ENV_TEST", "formula", 0, "", 0, true);
+
+    // Close Months 1 to 3 with specific values
+    // Mes 1: Sueldo 100k, HE 10k
+    m_db->setEmployeeFieldValues(empId, "Q1", {{"sueldo_input", "100000"}, {"he_input", "10000"}});
+    m_engine->executeBatchClose(1, 2026, "mensual", "M", "2026-01-31", "2026-02-05", "");
+
+    // Mes 2: Sueldo 150k, HE 20k
+    m_db->setEmployeeFieldValues(empId, "Q1", {{"sueldo_input", "150000"}, {"he_input", "20000"}});
+    m_engine->executeBatchClose(2, 2026, "mensual", "M", "2026-02-28", "2026-03-05", "");
+
+    // Mes 3: Sueldo 120k, HE 30k
+    m_db->setEmployeeFieldValues(empId, "Q1", {{"sueldo_input", "120000"}, {"he_input", "30000"}});
+    m_engine->executeBatchClose(3, 2026, "mensual", "M", "2026-03-31", "2026-04-05", "");
+
+    // Now calculate Mes 4 (live, not closed)
+    m_db->setEmployeeFieldValues(empId, "Q1", {{"sueldo_input", "130000"}, {"he_input", "0"}});
+    QVariantMap resMes4 = m_engine->processLiquidation(empId, "", "2026-04-30");
+    QVariantMap ctx4 = resMes4["contexto_final"].toMap();
+
+    // Mejor sueldo in history: 150,000 (Mes 2)
+    QCOMPARE(ctx4["calc_mejor_sueldo"].toDouble(), 150000.0);
+
+    // Promedio HE in history: (10,000 + 20,000 + 30,000) / 3 = 20,000
+    QCOMPARE(ctx4["calc_promedio_he"].toDouble(), 20000.0);
+
+    // Total HE in history: 10,000 + 20,000 + 30,000 = 60,000
+    QCOMPARE(ctx4["calc_total_he"].toDouble(), 60000.0);
+}
+
+void TestLiquidationEngine::testEnvQuincenasInJornal()
+{
+    m_db->saveSchema("", "QUINCENAS_ENV_TEST", "Quincenas Env Test", "jornal");
+    int catId = m_db->saveCategory(0, "Oficial", 2500.0);
+    int empId = m_db->saveEmployee(0, "QENV01", "Quincenas Emp", "jornal", "QUINCENAS_ENV_TEST", catId, "2022-01-01", "");
+
+    m_db->addQuincena(empId, "Q1");
+    m_db->addQuincena(empId, "Q2");
+
+    int fHs = m_db->addSchemaField("QUINCENAS_ENV_TEST", "horas_trabajadas", "Horas", "number", "0", 1);
+    m_db->setEmployeeFieldValue(empId, fHs, "Q1", "90");
+    m_db->setEmployeeFieldValue(empId, fHs, "Q2", "95");
+
+    // Concept calculating total hours worked in month using quincenas aggregation
+    m_db->saveCell(0, "RECIBO", "horas_totales_mes", "Horas Totales Mes", "", "", "", "sumar_q('horas_trabajadas')", 10, "QUINCENAS_ENV_TEST", "formula", 0, "", 0, true);
+
+    QVariantMap res = m_engine->processLiquidation(empId, "Q2", "2026-08-31");
+    QVariantMap ctx = res["contexto_final"].toMap();
+
+    // 90 + 95 = 185 hours
+    QCOMPARE(ctx["horas_totales_mes"].toDouble(), 185.0);
 }
 
 #include "tst_LiquidationEngine.moc"

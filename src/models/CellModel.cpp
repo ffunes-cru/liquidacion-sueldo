@@ -149,14 +149,15 @@ bool CellModel::moveCellUp(int index)
         order2 = (index - 1) * 10 + 10;
     }
 
-    // Swap orders
+    // Swap orders — preserve color_hex, en_grafico, es_grafico_total
     m_db->saveCell(id1, item1["seccion_codigo"].toString(), item1["codigo_variable"].toString(),
                    item1["descripcion"].toString(), item1["condicion"].toString(),
                    item1["formula_unidad"].toString(), item1["formula_base"].toString(),
                    item1["formula_monto"].toString(), order2, item1["esquema_codigo"].toString(),
                    item1["tipo_calculo"].toString(), item1["simple_porcentaje"].toDouble(),
                    item1["simple_base_variable"].toString(), item1["simple_monto_fijo"].toDouble(),
-                   item1["visible_recibo"].toBool());
+                   item1["visible_recibo"].toBool(), item1["color_hex"].toString(),
+                   item1["en_grafico"].toBool(), item1["es_grafico_total"].toBool());
 
     m_db->saveCell(id2, item2["seccion_codigo"].toString(), item2["codigo_variable"].toString(),
                    item2["descripcion"].toString(), item2["condicion"].toString(),
@@ -164,7 +165,8 @@ bool CellModel::moveCellUp(int index)
                    item2["formula_monto"].toString(), order1, item2["esquema_codigo"].toString(),
                    item2["tipo_calculo"].toString(), item2["simple_porcentaje"].toDouble(),
                    item2["simple_base_variable"].toString(), item2["simple_monto_fijo"].toDouble(),
-                   item2["visible_recibo"].toBool());
+                   item2["visible_recibo"].toBool(), item2["color_hex"].toString(),
+                   item2["en_grafico"].toBool(), item2["es_grafico_total"].toBool());
 
     refresh();
     return true;
@@ -198,10 +200,12 @@ bool CellModel::moveCell(int fromIndex, int toIndex)
                        m["formula_monto"].toString(), newOrder, m["esquema_codigo"].toString(),
                        m["tipo_calculo"].toString(), m["simple_porcentaje"].toDouble(),
                        m["simple_base_variable"].toString(), m["simple_monto_fijo"].toDouble(),
-                       m["visible_recibo"].toBool());
+                       m["visible_recibo"].toBool(), m["color_hex"].toString(),
+                       m["en_grafico"].toBool(), m["es_grafico_total"].toBool());
     }
     endResetModel();
     return true;
 }
+
 
 

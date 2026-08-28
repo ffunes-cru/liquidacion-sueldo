@@ -72,7 +72,27 @@ public:
   Q_INVOKABLE int persistLiquidation(const QVariantMap &result, int mes,
                                       int anio, const QString &periodo,
                                       const QString &fechaCierre = "",
-                                      const QString &fechaPago = "");
+                                      const QString &fechaPago = "",
+                                      int cierreId = 0);
+
+  /**
+   * @brief Validate batch liquidation for a specific schema type and quincena.
+   */
+  Q_INVOKABLE QVariantMap validateBatch(int mes, int anio,
+                                        const QString &esquemaTipo,
+                                        const QString &quincena,
+                                        const QString &fechaCierre,
+                                        const QString &fechaPago);
+
+  /**
+   * @brief Execute atomic batch closing: backup, persist all receipts, create closure snapshot, export PDFs.
+   */
+  Q_INVOKABLE QVariantMap executeBatchClose(int mes, int anio,
+                                            const QString &esquemaTipo,
+                                            const QString &quincena,
+                                            const QString &fechaCierre,
+                                            const QString &fechaPago,
+                                            const QString &exportPath = "");
 
 private:
   int calculateSeniorityYears(const QString &fechaIngreso,

@@ -8,6 +8,13 @@ SpinBox {
     implicitHeight: 36
     implicitWidth: 140
 
+    textFromValue: function(value, locale) {
+        return Number(value).toString()
+    }
+    valueFromText: function(text, locale) {
+        return parseInt(text) || 0
+    }
+
     contentItem: TextInput {
         text: control.textFromValue(control.value, control.locale)
         font: control.font

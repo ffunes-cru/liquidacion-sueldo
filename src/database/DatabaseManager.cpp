@@ -259,6 +259,7 @@ void DatabaseManager::createTables()
             periodo        TEXT    NOT NULL DEFAULT 'M',
             datos_json     TEXT    NOT NULL,
             fecha_emision  TEXT    NOT NULL,
+            cierre_id      INTEGER REFERENCES cierres(id) ON DELETE SET NULL,
             UNIQUE(empleado_id, esquema_codigo, mes, anio, periodo)
         )
     )");
@@ -282,17 +283,18 @@ void DatabaseManager::createTables()
     )");
 
     q.exec(R"(
-        CREATE TABLE IF NOT EXISTS meses_cerrados (
-            anio             INTEGER NOT NULL,
-            mes              INTEGER NOT NULL,
-            cerrado          INTEGER NOT NULL DEFAULT 1,
-            fecha_cierre_mes TEXT NOT NULL,
-            fecha_cierre_q1  TEXT DEFAULT '',
-            fecha_cierre_q2  TEXT DEFAULT '',
-            fecha_pago       TEXT DEFAULT '',
-            snapshot_json    TEXT NOT NULL,
-            fecha_registro   TEXT NOT NULL,
-            PRIMARY KEY (anio, mes)
+        CREATE TABLE IF NOT EXISTS cierres (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            anio            INTEGER NOT NULL,
+            mes             INTEGER NOT NULL,
+            tipo            TEXT    NOT NULL,
+            esquema_tipo    TEXT    NOT NULL,
+            fecha_cierre    TEXT    NOT NULL,
+            fecha_pago      TEXT    NOT NULL,
+            snapshot_json   TEXT    NOT NULL,
+            backup_path     TEXT    DEFAULT '',
+            fecha_registro  TEXT    NOT NULL,
+            UNIQUE(anio, mes, tipo, esquema_tipo)
         )
     )");
 }
@@ -300,10 +302,12 @@ void DatabaseManager::createTables()
 void DatabaseManager::runMigrations()
 {
     QSqlQuery q(m_db);
+    q.exec("DROP TABLE IF EXISTS meses_cerrados");
     q.exec("ALTER TABLE empleados ADD COLUMN activo INTEGER DEFAULT 1");
     q.exec("ALTER TABLE celdas_calculo ADD COLUMN color_hex TEXT DEFAULT ''");
     q.exec("ALTER TABLE celdas_calculo ADD COLUMN en_grafico INTEGER DEFAULT 0");
     q.exec("ALTER TABLE celdas_calculo ADD COLUMN es_grafico_total INTEGER DEFAULT 0");
+    q.exec("ALTER TABLE recibos ADD COLUMN cierre_id INTEGER DEFAULT NULL");
 
     // Sembrar funciones de historial estándar si no existen
     auto seedFunc = [this](const QString &name, const QString &params, const QString &body, const QString &desc) {
@@ -413,22 +417,28 @@ bool DatabaseManager::deleteSchema(const QString &code)
         return false;
     }
 
+    // Use transaction to ensure atomicity of cascade deletion
+    m_db.transaction();
+
     QSqlQuery q(m_db);
     q.prepare("DELETE FROM celdas_calculo WHERE esquema_codigo = ?");
     q.addBindValue(code);
-    q.exec();
+    if (!q.exec()) { m_db.rollback(); return false; }
 
     q.prepare("DELETE FROM celdas_grafico WHERE esquema_codigo = ?");
     q.addBindValue(code);
-    q.exec();
+    if (!q.exec()) { m_db.rollback(); return false; }
 
     q.prepare("DELETE FROM schema_fields WHERE esquema_codigo = ?");
     q.addBindValue(code);
-    q.exec();
+    if (!q.exec()) { m_db.rollback(); return false; }
 
     q.prepare("DELETE FROM esquemas_calculo WHERE codigo = ?");
     q.addBindValue(code);
-    return q.exec();
+    if (!q.exec()) { m_db.rollback(); return false; }
+
+    m_db.commit();
+    return true;
 }
 
 QVariantList DatabaseManager::listCategories() const
@@ -485,6 +495,18 @@ int DatabaseManager::saveCategory(int id, const QString &name, double valorHora)
 bool DatabaseManager::deleteCategory(int id)
 {
     qInfo() << "[DatabaseManager] Eliminando categoría jornalera ID:" << id;
+
+    // Check if any employees reference this category
+    QSqlQuery check(m_db);
+    check.prepare("SELECT COUNT(*) FROM empleados WHERE categoria_jornal_id = ? AND activo = 1");
+    check.addBindValue(id);
+    check.exec();
+    if (check.next() && check.value(0).toInt() > 0) {
+        qWarning() << "[DatabaseManager] No se puede eliminar la categoría ID" << id
+                   << "porque posee empleados asignados.";
+        return false;
+    }
+
     QSqlQuery q(m_db);
     q.prepare("DELETE FROM categorias_jornal WHERE id = ?");
     q.addBindValue(id);
@@ -592,6 +614,16 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
 
     QSqlQuery q(m_db);
     if (exists) {
+        // Check if schema is changing to trigger field sync
+        QSqlQuery oldSchemaQ(m_db);
+        oldSchemaQ.prepare("SELECT esquema_codigo FROM empleados WHERE id = ?");
+        oldSchemaQ.addBindValue(id);
+        oldSchemaQ.exec();
+        QString oldSchema;
+        if (oldSchemaQ.next()) {
+            oldSchema = oldSchemaQ.value(0).toString();
+        }
+
         q.prepare("UPDATE empleados SET legajo=?, nombre_completo=?, tipo_liquidacion=?, esquema_codigo=?, categoria_jornal_id=?, fecha_ingreso=?, cuil=? WHERE id=?");
         q.bindValue(0, legajo);
         q.bindValue(1, nombre);
@@ -605,6 +637,12 @@ int DatabaseManager::saveEmployee(int id, const QString &legajo, const QString &
             qCritical() << "[DatabaseManager] Error al actualizar empleado ID" << id << ":" << q.lastError().text();
             return -1;
         }
+
+        // If schema changed, sync fields for the new schema
+        if (oldSchema != safeEsquema) {
+            syncEmployeeFieldsForSchema(safeEsquema);
+        }
+
         return id;
     } else {
         if (id > 0) {
@@ -1505,17 +1543,17 @@ QVariantMap DatabaseManager::getReceipt(int id) const
 
 int DatabaseManager::saveReceipt(int employeeId, const QString &esquemaCodigo,
                                   int mes, int anio, const QString &periodo,
-                                  const QString &datosJson)
+                                  const QString &datosJson, int cierreId)
 {
-    qInfo() << "[DatabaseManager] Guardando recibo snapshot para empleado ID:" << employeeId << "Mes:" << mes << "Año:" << anio << "Periodo:" << periodo;
+    qInfo() << "[DatabaseManager] Guardando recibo snapshot para empleado ID:" << employeeId << "Mes:" << mes << "Año:" << anio << "Periodo:" << periodo << "CierreId:" << cierreId;
     QString fecha = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
 
     QSqlQuery q(m_db);
     q.prepare(R"(
-        INSERT INTO recibos (empleado_id, esquema_codigo, mes, anio, periodo, datos_json, fecha_emision)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO recibos (empleado_id, esquema_codigo, mes, anio, periodo, datos_json, fecha_emision, cierre_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empleado_id, esquema_codigo, mes, anio, periodo)
-        DO UPDATE SET datos_json=excluded.datos_json, fecha_emision=excluded.fecha_emision
+        DO UPDATE SET datos_json=excluded.datos_json, fecha_emision=excluded.fecha_emision, cierre_id=excluded.cierre_id
         RETURNING id
     )");
     q.addBindValue(employeeId);
@@ -1525,6 +1563,7 @@ int DatabaseManager::saveReceipt(int employeeId, const QString &esquemaCodigo,
     q.addBindValue(periodo);
     q.addBindValue(datosJson);
     q.addBindValue(fecha);
+    q.addBindValue(cierreId > 0 ? QVariant(cierreId) : QVariant(QMetaType::fromType<int>()));
 
     if (q.exec() && q.next()) {
         return q.value(0).toInt();
@@ -1601,6 +1640,11 @@ void DatabaseManager::setConfig(const QString &key, const QString &value)
 
 QString DatabaseManager::createBackup()
 {
+    if (m_dbPath == ":memory:" || m_dbPath.isEmpty()) {
+        qInfo() << "[DatabaseManager] Base de datos en memoria (:memory:), omitiendo copia física.";
+        return ":memory:_backup";
+    }
+
     QFileInfo fi(m_dbPath);
     QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
     QString backupPath = fi.absolutePath() + "/" + fi.completeBaseName()
@@ -1643,6 +1687,7 @@ QString DatabaseManager::resetNewMonth()
     }
 
     q.exec("DELETE FROM employee_field_values WHERE quincena != 'Q1'");
+    q.exec("DELETE FROM quincenas_empleado WHERE quincena != 'Q1'");
 
     m_db.commit();
     qInfo() << "[DatabaseManager] Reinicio de nuevo mes completado exitosamente.";
@@ -1651,161 +1696,214 @@ QString DatabaseManager::resetNewMonth()
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Closed Months (meses_cerrados)
+// Granular Closings (cierres)
 // ═══════════════════════════════════════════════════════════════════
 
-bool DatabaseManager::isMonthClosed(int anio, int mes) const
+QStringList DatabaseManager::listActiveJornalQuincenas() const
+{
+    QStringList quincenas;
+    QSqlQuery q(m_db);
+    q.exec(R"(
+        SELECT DISTINCT qe.quincena
+        FROM quincenas_empleado qe
+        JOIN empleados e ON e.id = qe.empleado_id
+        WHERE e.activo = 1 AND e.tipo_liquidacion = 'jornal'
+        ORDER BY qe.quincena ASC
+    )");
+    while (q.next()) {
+        QString qn = q.value(0).toString();
+        if (!qn.isEmpty() && !quincenas.contains(qn)) {
+            quincenas.append(qn);
+        }
+    }
+    if (quincenas.isEmpty()) {
+        quincenas << "Q1" << "Q2";
+    }
+    return quincenas;
+}
+
+QVariantList DatabaseManager::listActiveEmployeesByTipo(const QString &tipoLiquidacion) const
+{
+    QVariantList result;
+    QSqlQuery q(m_db);
+    q.prepare(R"(
+        SELECT e.*, c.nombre AS categoria_nombre
+        FROM empleados e
+        LEFT JOIN categorias_jornal c ON c.id = e.categoria_jornal_id
+        WHERE e.activo = 1 AND e.tipo_liquidacion = ?
+        ORDER BY e.legajo ASC
+    )");
+    q.addBindValue(tipoLiquidacion);
+    if (q.exec()) {
+        while (q.next()) {
+            result.append(QVariantMap{
+                {"id", q.value("id")},
+                {"legajo", q.value("legajo")},
+                {"nombre_completo", q.value("nombre_completo")},
+                {"tipo_liquidacion", q.value("tipo_liquidacion")},
+                {"esquema_codigo", q.value("esquema_codigo")},
+                {"categoria_jornal_id", q.value("categoria_jornal_id")},
+                {"fecha_ingreso", q.value("fecha_ingreso")},
+                {"cuil", q.value("cuil")},
+                {"categoria_nombre", q.value("categoria_nombre")},
+            });
+        }
+    }
+    return result;
+}
+
+bool DatabaseManager::isCierreClosed(int anio, int mes, const QString &tipo, const QString &esquemaTipo) const
 {
     QSqlQuery q(m_db);
-    q.prepare("SELECT cerrado FROM meses_cerrados WHERE anio = ? AND mes = ?");
+    q.prepare("SELECT id FROM cierres WHERE anio = ? AND mes = ? AND tipo = ? AND esquema_tipo = ?");
     q.addBindValue(anio);
     q.addBindValue(mes);
-    q.exec();
-    if (q.next()) {
-        return q.value(0).toInt() == 1;
+    q.addBindValue(tipo);
+    q.addBindValue(esquemaTipo);
+    if (q.exec() && q.next()) {
+        return true;
     }
     return false;
 }
 
-bool DatabaseManager::closeMonth(int anio, int mes,
-                                  const QString &fechaCierreMes,
-                                  const QString &fechaCierreQ1,
-                                  const QString &fechaCierreQ2,
-                                  const QString &fechaPago)
+bool DatabaseManager::canCloseQuincena(int anio, int mes, const QString &quincena) const
 {
-    qInfo() << "[DatabaseManager] Cerrando mes" << mes << "/" << anio;
-
-    if (isMonthClosed(anio, mes)) {
-        qWarning() << "[DatabaseManager] El mes" << mes << "/" << anio << "ya se encuentra cerrado.";
+    if (isCierreClosed(anio, mes, quincena, "jornal")) {
         return false;
     }
 
-    // Build comprehensive snapshot JSON
-    QJsonObject snapshot;
+    QStringList allQuincenas = listActiveJornalQuincenas();
+    int idx = allQuincenas.indexOf(quincena);
+    if (idx <= 0) {
+        return idx == 0;
+    }
 
-    // 1. Snapshot metadata
-    QJsonObject metaObj;
-    metaObj["anio"] = anio;
-    metaObj["mes"] = mes;
-    metaObj["fecha_cierre_mes"] = fechaCierreMes;
-    metaObj["fecha_cierre_q1"] = fechaCierreQ1;
-    metaObj["fecha_cierre_q2"] = fechaCierreQ2;
-    metaObj["fecha_pago"] = fechaPago;
-    metaObj["fecha_registro"] = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
-    snapshot["meta"] = metaObj;
+    QString prevQuincena = allQuincenas.at(idx - 1);
+    return isCierreClosed(anio, mes, prevQuincena, "jornal");
+}
 
-    // 2. Snapshot all employees
-    QJsonArray empleadosArr;
-    QVariantList emps = listEmployees();
-    for (const QVariant &ev : emps) {
-        QVariantMap e = ev.toMap();
-        QJsonObject empObj;
-        empObj["id"] = e["id"].toInt();
-        empObj["legajo"] = e["legajo"].toString();
-        empObj["nombre_completo"] = e["nombre_completo"].toString();
-        empObj["tipo_liquidacion"] = e["tipo_liquidacion"].toString();
-        empObj["esquema_codigo"] = e["esquema_codigo"].toString();
-        empObj["categoria_jornal_id"] = e["categoria_jornal_id"].toInt();
-        empObj["fecha_ingreso"] = e["fecha_ingreso"].toString();
-        empObj["cuil"] = e["cuil"].toString();
-        empObj["categoria_nombre"] = e["categoria_nombre"].toString();
+bool DatabaseManager::canReopenQuincena(int anio, int mes, const QString &quincena) const
+{
+    if (!isCierreClosed(anio, mes, quincena, "jornal")) {
+        return false;
+    }
 
-        // Employee field values for all quincenas
-        QStringList quincenas = listEmployeeQuincenas(e["id"].toInt());
-        QJsonObject quincenasObj;
-        for (const QString &qn : quincenas) {
-            QVariantList fValues = getEmployeeFieldValues(e["id"].toInt(), qn);
-            QJsonArray fieldsArr;
-            for (const QVariant &fv : fValues) {
-                QVariantMap fm = fv.toMap();
-                QJsonObject fieldObj;
-                fieldObj["field_id"] = fm["field_id"].toInt();
-                fieldObj["field_code"] = fm["field_code"].toString();
-                fieldObj["field_label"] = fm["field_label"].toString();
-                fieldObj["field_type"] = fm["field_type"].toString();
-                fieldObj["value"] = fm["value"].toString();
-                fieldObj["default_value"] = fm["default_value"].toString();
-                fieldsArr.append(fieldObj);
-            }
-            quincenasObj[qn] = fieldsArr;
+    QStringList allQuincenas = listActiveJornalQuincenas();
+    int idx = allQuincenas.indexOf(quincena);
+    if (idx < 0 || idx == allQuincenas.size() - 1) {
+        return true;
+    }
+
+    QString nextQuincena = allQuincenas.at(idx + 1);
+    return !isCierreClosed(anio, mes, nextQuincena, "jornal");
+}
+
+bool DatabaseManager::isMonthFullyClosed(int anio, int mes) const
+{
+    QSqlQuery qJornal(m_db);
+    qJornal.exec("SELECT COUNT(*) FROM empleados WHERE activo = 1 AND tipo_liquidacion = 'jornal'");
+    bool hasJornal = (qJornal.next() && qJornal.value(0).toInt() > 0);
+
+    QSqlQuery qMensual(m_db);
+    qMensual.exec("SELECT COUNT(*) FROM empleados WHERE activo = 1 AND tipo_liquidacion = 'mensual'");
+    bool hasMensual = (qMensual.next() && qMensual.value(0).toInt() > 0);
+
+    if (!hasJornal && !hasMensual) {
+        QSqlQuery qCierres(m_db);
+        qCierres.prepare("SELECT COUNT(*) FROM cierres WHERE anio = ? AND mes = ?");
+        qCierres.addBindValue(anio);
+        qCierres.addBindValue(mes);
+        if (qCierres.exec() && qCierres.next()) {
+            return qCierres.value(0).toInt() > 0;
         }
-        empObj["quincenas"] = QJsonArray::fromStringList(quincenas);
-        empObj["field_values"] = quincenasObj;
-
-        empleadosArr.append(empObj);
-    }
-    snapshot["empleados"] = empleadosArr;
-
-    // 3. Snapshot categories
-    QJsonArray catsArr;
-    QVariantList cats = listCategories();
-    for (const QVariant &cv : cats) {
-        QVariantMap c = cv.toMap();
-        QJsonObject catObj;
-        catObj["id"] = c["id"].toInt();
-        catObj["nombre"] = c["nombre"].toString();
-        catObj["valor_hora"] = c["valor_hora"].toDouble();
-        catsArr.append(catObj);
-    }
-    snapshot["categorias"] = catsArr;
-
-    // 4. Snapshot global variables
-    QJsonArray globalsArr;
-    QVariantList globals = listGlobalVariables();
-    for (const QVariant &gv : globals) {
-        QVariantMap g = gv.toMap();
-        QJsonObject gObj;
-        gObj["id"] = g["id"].toInt();
-        gObj["codigo"] = g["codigo"].toString();
-        gObj["valor"] = g["valor"].toString();
-        gObj["descripcion"] = g["descripcion"].toString();
-        globalsArr.append(gObj);
-    }
-    snapshot["variables_globales"] = globalsArr;
-
-    // 5. Snapshot company
-    QVariantMap comp = getCompany();
-    QJsonObject compObj;
-    compObj["razon_social"] = comp.value("razon_social").toString();
-    compObj["cuit"] = comp.value("cuit").toString();
-    compObj["direccion"] = comp.value("direccion").toString();
-    compObj["lugar_de_pago"] = comp.value("lugar_de_pago").toString();
-    snapshot["empresa"] = compObj;
-
-    QString snapshotJson = QJsonDocument(snapshot).toJson(QJsonDocument::Compact);
-    QString fechaRegistro = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
-
-    QSqlQuery q(m_db);
-    q.prepare(R"(
-        INSERT INTO meses_cerrados (anio, mes, cerrado, fecha_cierre_mes, fecha_cierre_q1, fecha_cierre_q2, fecha_pago, snapshot_json, fecha_registro)
-        VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
-    )");
-    q.addBindValue(anio);
-    q.addBindValue(mes);
-    q.addBindValue(fechaCierreMes);
-    q.addBindValue(fechaCierreQ1);
-    q.addBindValue(fechaCierreQ2);
-    q.addBindValue(fechaPago);
-    q.addBindValue(snapshotJson);
-    q.addBindValue(fechaRegistro);
-
-    if (!q.exec()) {
-        qCritical() << "[DatabaseManager] Error al cerrar mes:" << q.lastError().text();
         return false;
     }
 
-    qInfo() << "[DatabaseManager] Mes" << mes << "/" << anio << "cerrado exitosamente.";
+    if (hasJornal) {
+        QStringList jornalQuincenas = listActiveJornalQuincenas();
+        for (const QString &qName : jornalQuincenas) {
+            if (!isCierreClosed(anio, mes, qName, "jornal")) {
+                return false;
+            }
+        }
+    }
+
+    if (hasMensual) {
+        if (!isCierreClosed(anio, mes, "M", "mensual")) {
+            return false;
+        }
+    }
+
     return true;
 }
 
-QVariantMap DatabaseManager::getMonthSnapshot(int anio, int mes) const
+QVariantList DatabaseManager::listCierresForMonth(int anio, int mes) const
 {
+    QVariantList result;
     QSqlQuery q(m_db);
-    q.prepare("SELECT snapshot_json FROM meses_cerrados WHERE anio = ? AND mes = ? AND cerrado = 1");
+    q.prepare(R"(
+        SELECT id, anio, mes, tipo, esquema_tipo, fecha_cierre, fecha_pago, backup_path, fecha_registro
+        FROM cierres
+        WHERE anio = ? AND mes = ?
+        ORDER BY id ASC
+    )");
     q.addBindValue(anio);
     q.addBindValue(mes);
-    q.exec();
-    if (q.next()) {
+    if (q.exec()) {
+        while (q.next()) {
+            result.append(QVariantMap{
+                {"id", q.value("id")},
+                {"anio", q.value("anio")},
+                {"mes", q.value("mes")},
+                {"tipo", q.value("tipo")},
+                {"esquema_tipo", q.value("esquema_tipo")},
+                {"fecha_cierre", q.value("fecha_cierre")},
+                {"fecha_pago", q.value("fecha_pago")},
+                {"backup_path", q.value("backup_path")},
+                {"fecha_registro", q.value("fecha_registro")},
+            });
+        }
+    }
+    return result;
+}
+
+QVariantMap DatabaseManager::getCierre(int anio, int mes, const QString &tipo, const QString &esquemaTipo) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(R"(
+        SELECT id, anio, mes, tipo, esquema_tipo, fecha_cierre, fecha_pago, backup_path, fecha_registro
+        FROM cierres
+        WHERE anio = ? AND mes = ? AND tipo = ? AND esquema_tipo = ?
+    )");
+    q.addBindValue(anio);
+    q.addBindValue(mes);
+    q.addBindValue(tipo);
+    q.addBindValue(esquemaTipo);
+    if (q.exec() && q.next()) {
+        return {
+            {"id", q.value("id")},
+            {"anio", q.value("anio")},
+            {"mes", q.value("mes")},
+            {"tipo", q.value("tipo")},
+            {"esquema_tipo", q.value("esquema_tipo")},
+            {"fecha_cierre", q.value("fecha_cierre")},
+            {"fecha_pago", q.value("fecha_pago")},
+            {"backup_path", q.value("backup_path")},
+            {"fecha_registro", q.value("fecha_registro")},
+        };
+    }
+    return {};
+}
+
+QVariantMap DatabaseManager::getCierreSnapshot(int anio, int mes, const QString &tipo, const QString &esquemaTipo) const
+{
+    QSqlQuery q(m_db);
+    q.prepare("SELECT snapshot_json FROM cierres WHERE anio = ? AND mes = ? AND tipo = ? AND esquema_tipo = ?");
+    q.addBindValue(anio);
+    q.addBindValue(mes);
+    q.addBindValue(tipo);
+    q.addBindValue(esquemaTipo);
+    if (q.exec() && q.next()) {
         QString jsonStr = q.value(0).toString();
         QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8());
         if (doc.isObject()) {
@@ -1815,60 +1913,114 @@ QVariantMap DatabaseManager::getMonthSnapshot(int anio, int mes) const
     return {};
 }
 
-QVariantMap DatabaseManager::getMonthClosingData(int anio, int mes) const
+int DatabaseManager::insertCierre(int anio, int mes, const QString &tipo,
+                                  const QString &esquemaTipo, const QString &fechaCierre,
+                                  const QString &fechaPago, const QString &snapshotJson,
+                                  const QString &backupPath)
 {
+    qInfo() << "[DatabaseManager] Insertando cierre:" << tipo << esquemaTipo << "para mes" << mes << "/" << anio;
+    QString fechaRegistro = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+
     QSqlQuery q(m_db);
     q.prepare(R"(
-        SELECT anio, mes, cerrado, fecha_cierre_mes, fecha_cierre_q1, fecha_cierre_q2,
-               fecha_pago, fecha_registro
-        FROM meses_cerrados
-        WHERE anio = ? AND mes = ?
+        INSERT INTO cierres (anio, mes, tipo, esquema_tipo, fecha_cierre, fecha_pago, snapshot_json, backup_path, fecha_registro)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(anio, mes, tipo, esquema_tipo)
+        DO UPDATE SET fecha_cierre=excluded.fecha_cierre, fecha_pago=excluded.fecha_pago,
+                      snapshot_json=excluded.snapshot_json, backup_path=excluded.backup_path,
+                      fecha_registro=excluded.fecha_registro
+        RETURNING id
     )");
     q.addBindValue(anio);
     q.addBindValue(mes);
-    q.exec();
-    if (q.next()) {
-        return {
-            {"anio", q.value("anio")},
-            {"mes", q.value("mes")},
-            {"cerrado", q.value("cerrado").toInt() == 1},
-            {"fecha_cierre_mes", q.value("fecha_cierre_mes")},
-            {"fecha_cierre_q1", q.value("fecha_cierre_q1")},
-            {"fecha_cierre_q2", q.value("fecha_cierre_q2")},
-            {"fecha_pago", q.value("fecha_pago")},
-            {"fecha_registro", q.value("fecha_registro")},
-        };
+    q.addBindValue(tipo);
+    q.addBindValue(esquemaTipo);
+    q.addBindValue(fechaCierre);
+    q.addBindValue(fechaPago);
+    q.addBindValue(snapshotJson);
+    q.addBindValue(backupPath);
+    q.addBindValue(fechaRegistro);
+
+    if (q.exec() && q.next()) {
+        return q.value(0).toInt();
     }
-    return {};
+
+    QSqlQuery fb(m_db);
+    fb.prepare("SELECT id FROM cierres WHERE anio = ? AND mes = ? AND tipo = ? AND esquema_tipo = ?");
+    fb.addBindValue(anio);
+    fb.addBindValue(mes);
+    fb.addBindValue(tipo);
+    fb.addBindValue(esquemaTipo);
+    if (fb.exec() && fb.next()) {
+        return fb.value(0).toInt();
+    }
+
+    return -1;
 }
 
-QVariantList DatabaseManager::listClosedMonths() const
+bool DatabaseManager::reopenCierre(int anio, int mes, const QString &tipo, const QString &esquemaTipo)
 {
-    QVariantList result;
+    qInfo() << "[DatabaseManager] Reabriendo cierre:" << tipo << esquemaTipo << "de" << mes << "/" << anio;
     QSqlQuery q(m_db);
-    q.exec("SELECT anio, mes, fecha_cierre_mes, fecha_pago, fecha_registro FROM meses_cerrados WHERE cerrado = 1 ORDER BY anio DESC, mes DESC");
-    while (q.next()) {
-        result.append(QVariantMap{
-            {"anio", q.value("anio")},
-            {"mes", q.value("mes")},
-            {"fecha_cierre_mes", q.value("fecha_cierre_mes")},
-            {"fecha_pago", q.value("fecha_pago")},
-            {"fecha_registro", q.value("fecha_registro")},
-        });
-    }
-    return result;
+    q.prepare("DELETE FROM cierres WHERE anio = ? AND mes = ? AND tipo = ? AND esquema_tipo = ?");
+    q.addBindValue(anio);
+    q.addBindValue(mes);
+    q.addBindValue(tipo);
+    q.addBindValue(esquemaTipo);
+    return q.exec();
 }
 
 QVariantList DatabaseManager::getEmployeeFieldValuesForPeriod(int employeeId, const QString &quincena, int anio, int mes) const
 {
-    if (anio > 0 && mes > 0 && isMonthClosed(anio, mes)) {
-        QVariantMap snapshot = getMonthSnapshot(anio, mes);
+    QVariantMap emp = getEmployee(employeeId);
+    QString tipoLiq = emp.value("tipo_liquidacion").toString();
+    QString tipoCierre = (tipoLiq == "jornal") ? quincena : "M";
+
+    if (anio > 0 && mes > 0 && isCierreClosed(anio, mes, tipoCierre, tipoLiq)) {
+        QVariantMap snapshot = getCierreSnapshot(anio, mes, tipoCierre, tipoLiq);
         if (!snapshot.isEmpty() && snapshot.contains("empleados")) {
             QVariantList emps = snapshot["empleados"].toList();
             for (const QVariant &ev : emps) {
                 QVariantMap e = ev.toMap();
                 if (e["id"].toInt() == employeeId) {
-                    QVariantMap fvMap = e["field_values"].toMap();
+                    QVariant fvRaw = e["field_values"];
+
+                    // Handle field_values stored as a QJsonArray (flat list from executeBatchClose)
+                    // Format: [{"field_id": N, "field_code": "X", "value": "Y"}, ...]
+                    if (fvRaw.canConvert<QVariantList>()) {
+                        QVariantList fvList = fvRaw.toList();
+                        if (!fvList.isEmpty()) {
+                            // Check if it's a flat array of field objects (from executeBatchClose)
+                            QVariantMap firstItem = fvList.first().toMap();
+                            if (firstItem.contains("field_code")) {
+                                // Flat array format — enrich with schema field metadata
+                                QString esquema = e.value("esquema_codigo", emp.value("esquema_codigo")).toString();
+                                QVariantList schemaFields = listSchemaFields(esquema);
+                                QMap<QString, QVariantMap> fieldMeta;
+                                for (const QVariant &sf : schemaFields) {
+                                    QVariantMap sfm = sf.toMap();
+                                    fieldMeta[sfm["field_code"].toString()] = sfm;
+                                }
+
+                                QVariantList enriched;
+                                for (const QVariant &fv : fvList) {
+                                    QVariantMap fm = fv.toMap();
+                                    QString code = fm["field_code"].toString();
+                                    if (fieldMeta.contains(code)) {
+                                        QVariantMap meta = fieldMeta[code];
+                                        fm["field_label"] = meta.value("field_label");
+                                        fm["field_type"] = meta.value("field_type");
+                                    }
+                                    enriched.append(fm);
+                                }
+                                return enriched;
+                            }
+                        }
+                    }
+
+                    // Handle field_values stored as a QVariantMap keyed by quincena
+                    // Format: {"Q1": [{"field_code": "X", "value": "Y"}, ...]}
+                    QVariantMap fvMap = fvRaw.toMap();
                     if (fvMap.contains(quincena)) {
                         return fvMap[quincena].toList();
                     }
@@ -1877,15 +2029,5 @@ QVariantList DatabaseManager::getEmployeeFieldValuesForPeriod(int employeeId, co
         }
     }
     return getEmployeeFieldValues(employeeId, quincena);
-}
-
-bool DatabaseManager::reopenMonth(int anio, int mes)
-{
-    qInfo() << "[DatabaseManager] Reabriendo mes" << mes << "/" << anio;
-    QSqlQuery q(m_db);
-    q.prepare("DELETE FROM meses_cerrados WHERE anio = ? AND mes = ?");
-    q.addBindValue(anio);
-    q.addBindValue(mes);
-    return q.exec();
 }
 

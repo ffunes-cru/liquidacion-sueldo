@@ -230,8 +230,8 @@ void TestModelsAndController::testEmployeeVarsModelReadOnlyInClosedMonth()
     int empId = m_db->saveEmployee(0, "RO1", "ReadOnly Emp", "mensual", "MENSUAL", 0, "2020-01-01", "");
     m_db->setEmployeeFieldValue(empId, fId, "Q1", "1234");
 
-    // Close month 2026-08
-    m_db->closeMonth(2026, 8, "2026-08-31", "2026-08-15", "2026-08-31", "2026-09-05");
+    // Close M for 2026-08
+    m_db->insertCierre(2026, 8, "M", "mensual", "2026-08-31", "2026-09-05", "{}", "");
 
     auto varsModel = m_controller->employeeVarsModel();
     varsModel->setEmployeeId(empId);
@@ -247,7 +247,7 @@ void TestModelsAndController::testEmployeeVarsModelReadOnlyInClosedMonth()
     QCOMPARE(varsModel->data(varsModel->index(0, 0), EmployeeVarsModel::ValueRole).toString(), QString("1234"));
 
     // Verify DB value was not modified
-    auto fVals = m_db->getEmployeeFieldValuesForPeriod(empId, "Q1", 2026, 8);
+    auto fVals = m_db->getEmployeeFieldValues(empId, "Q1");
     QCOMPARE(fVals.first().toMap()["value"].toString(), QString("1234"));
 }
 
@@ -260,12 +260,11 @@ void TestModelsAndController::testGlobalPeriodSelection()
     QCOMPARE(m_controller->selectedMonth(), 3);
     QVERIFY(!m_controller->isCurrentPeriodClosed());
 
-    // Closing period via controller
-    bool closed = m_controller->closeMonth(2027, 3, "2027-03-31", "2027-03-15", "2027-03-31", "2027-04-05");
-    QVERIFY(closed);
+    // Closing period via executeBatchClose
+    QVariantMap res = m_controller->executeBatchClose("mensual", "M", "2027-03-31", "2027-04-05", "");
+    QVERIFY(res.value("ok").toBool());
     QVERIFY(m_controller->isCurrentPeriodClosed());
     QCOMPARE(m_controller->fechaCierreMes(), QString("2027-03-31"));
-    QCOMPARE(m_controller->fechaCierreQ1(), QString("2027-03-15"));
     QCOMPARE(m_controller->fechaPago(), QString("2027-04-05"));
 
     // Switch to another month (open)
@@ -277,7 +276,7 @@ void TestModelsAndController::testGlobalPeriodSelection()
     QVERIFY(m_controller->isCurrentPeriodClosed());
 
     // Reopen
-    bool reopened = m_controller->reopenMonth(2027, 3);
+    bool reopened = m_controller->reopenCierre("M", "mensual");
     QVERIFY(reopened);
     QVERIFY(!m_controller->isCurrentPeriodClosed());
 }

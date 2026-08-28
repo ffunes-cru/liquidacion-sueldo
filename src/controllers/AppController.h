@@ -66,6 +66,10 @@ class AppController : public QObject {
                  selectedMonthChanged)
   Q_PROPERTY(bool isCurrentPeriodClosed READ isCurrentPeriodClosed NOTIFY
                  periodClosedChanged)
+  Q_PROPERTY(QStringList activeQuincenas READ activeQuincenas NOTIFY
+                 activeQuincenasChanged)
+  Q_PROPERTY(QVariantList periodCierres READ periodCierres NOTIFY
+                 periodClosedChanged)
   Q_PROPERTY(QString fechaCierreMes READ fechaCierreMes NOTIFY
                  periodClosedChanged)
   Q_PROPERTY(QString fechaCierreQ1 READ fechaCierreQ1 NOTIFY
@@ -74,6 +78,9 @@ class AppController : public QObject {
                  periodClosedChanged)
   Q_PROPERTY(QString fechaPago READ fechaPago NOTIFY
                  periodClosedChanged)
+  Q_PROPERTY(bool isQ1Closed READ isQ1Closed NOTIFY periodClosedChanged)
+  Q_PROPERTY(bool isQ2Closed READ isQ2Closed NOTIFY periodClosedChanged)
+  Q_PROPERTY(bool isMClosed READ isMClosed NOTIFY periodClosedChanged)
 
 public:
   explicit AppController(DatabaseManager *db, QObject *parent = nullptr);
@@ -108,30 +115,48 @@ public:
   Q_INVOKABLE int persistLiquidation(const QVariantMap &result, int mes,
                                      int anio, const QString &periodo,
                                      const QString &fechaCierre = "",
-                                     const QString &fechaPago = "");
+                                     const QString &fechaPago = "",
+                                     int cierreId = 0);
   Q_INVOKABLE QString resetNewMonth();
   Q_INVOKABLE QString createBackup();
 
-  // ── Global Period ───────────────────────────────────────────
+  // ── Global Period & Granular Closings ────────────────────────
   int selectedYear() const;
   void setSelectedYear(int year);
   int selectedMonth() const;
   void setSelectedMonth(int month);
   bool isCurrentPeriodClosed() const;
+  QStringList activeQuincenas() const;
+  QVariantList periodCierres() const;
   QString fechaCierreMes() const;
   QString fechaCierreQ1() const;
   QString fechaCierreQ2() const;
   QString fechaPago() const;
+  bool isQ1Closed() const;
+  bool isQ2Closed() const;
+  bool isMClosed() const;
 
-  Q_INVOKABLE bool closeMonth(int anio, int mes,
-                              const QString &fechaCierreMes,
-                              const QString &fechaCierreQ1,
-                              const QString &fechaCierreQ2,
-                              const QString &fechaPago);
-  Q_INVOKABLE bool reopenMonth(int anio, int mes);
-  Q_INVOKABLE QVariantMap getMonthSnapshot(int anio, int mes);
-  Q_INVOKABLE QVariantMap getMonthClosingData(int anio, int mes);
-  Q_INVOKABLE QVariantList listClosedMonths();
+  Q_INVOKABLE bool isCierreClosed(const QString &tipo, const QString &esquemaTipo) const;
+  Q_INVOKABLE bool canCloseTarget(const QString &tipo, const QString &esquemaTipo) const;
+  Q_INVOKABLE bool canReopenTarget(const QString &tipo, const QString &esquemaTipo) const;
+  Q_INVOKABLE bool canEditQuincena(int employeeId, const QString &quincena) const;
+  Q_INVOKABLE bool canPersistReceipt(int employeeId, const QString &quincena) const;
+
+  Q_INVOKABLE QVariantMap validateBatch(const QString &esquemaTipo,
+                                        const QString &quincena,
+                                        const QString &fechaCierre,
+                                        const QString &fechaPago);
+
+  Q_INVOKABLE QVariantMap executeBatchClose(const QString &esquemaTipo,
+                                            const QString &quincena,
+                                            const QString &fechaCierre,
+                                            const QString &fechaPago,
+                                            const QString &exportPath);
+
+  Q_INVOKABLE bool reopenCierre(const QString &tipo, const QString &esquemaTipo);
+  Q_INVOKABLE QVariantMap getCierre(const QString &tipo, const QString &esquemaTipo) const;
+  Q_INVOKABLE QVariantMap getCierreSnapshot(const QString &tipo, const QString &esquemaTipo) const;
+  Q_INVOKABLE QVariantList listCierresForMonth(int anio, int mes) const;
   Q_INVOKABLE void refreshPeriodState();
 
   // Company CRUD shortcuts
@@ -198,6 +223,8 @@ signals:
   void selectedYearChanged();
   void selectedMonthChanged();
   void periodClosedChanged();
+  void activeQuincenasChanged();
+  void batchCloseCompleted(bool ok, const QString &message);
 
 private:
   DatabaseManager *m_db;

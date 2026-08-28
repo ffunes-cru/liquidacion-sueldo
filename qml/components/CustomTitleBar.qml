@@ -73,10 +73,6 @@ Rectangle {
             elide: Text.ElideRight
         }
 
-        RoleSelector {
-            Layout.alignment: Qt.AlignVCenter
-        }
-
         Item { Layout.fillWidth: true }
 
         StyledButton {

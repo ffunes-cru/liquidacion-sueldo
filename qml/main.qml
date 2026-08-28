@@ -59,22 +59,6 @@ ApplicationWindow {
                 anchors.rightMargin: 20
                 spacing: 16
 
-                // App Brand Title
-                ColumnLayout {
-                    spacing: 2
-                    Label {
-                        text: "SISTEMA DE LIQUIDACIÓN"
-                        font.pixelSize: 16
-                        font.bold: true
-                        color: Theme.textColor
-                    }
-                    Label {
-                        text: "Sueldos & Costo Laboral"
-                        font.pixelSize: 11
-                        color: Theme.subtextColor
-                    }
-                }
-
                 // Global Period Selector
                 Rectangle {
                     implicitHeight: 38
@@ -98,7 +82,7 @@ ApplicationWindow {
 
                         StyledComboBox {
                             id: monthCombo
-                            implicitWidth: 120
+                            implicitWidth: 125
                             implicitHeight: 30
                             model: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
                                     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -106,45 +90,93 @@ ApplicationWindow {
                             onActivated: AppController.selectedMonth = currentIndex + 1
                         }
 
-                        StyledSpinBox {
-                            id: yearSpin
-                            implicitWidth: 88
-                            implicitHeight: 30
-                            from: 2020
-                            to: 2035
-                            value: AppController.selectedYear
-                            onValueModified: AppController.selectedYear = value
+                        // Year Selector with buttons and direct text edit
+                        RowLayout {
+                            spacing: 2
+                            StyledButton {
+                                text: "◀"
+                                implicitWidth: 26
+                                implicitHeight: 30
+                                variant: "secondary"
+                                onClicked: AppController.selectedYear -= 1
+                            }
+                            Rectangle {
+                                implicitWidth: 54
+                                implicitHeight: 30
+                                color: Theme.inputBg
+                                border.color: Theme.borderColor
+                                border.width: 1
+                                radius: 4
+
+                                TextInput {
+                                    id: yearInput
+                                    anchors.centerIn: parent
+                                    text: AppController.selectedYear.toString()
+                                    color: Theme.textColor
+                                    font.bold: true
+                                    font.pixelSize: 13
+                                    validator: IntValidator { bottom: 2000; top: 2099 }
+                                    inputMethodHints: Qt.ImhDigitsOnly
+                                    onEditingFinished: {
+                                        var y = parseInt(text)
+                                        if (y >= 2000 && y <= 2099) {
+                                            AppController.selectedYear = y
+                                        } else {
+                                            text = AppController.selectedYear.toString()
+                                        }
+                                    }
+                                }
+                            }
+                            StyledButton {
+                                text: "▶"
+                                implicitWidth: 26
+                                implicitHeight: 30
+                                variant: "secondary"
+                                onClicked: AppController.selectedYear += 1
+                            }
                         }
 
-                        // Closed / Open Period Badge
+                        // Closed / Open Period Badges (Granular chips)
+                        RowLayout {
+                            spacing: 4
+                            visible: !AppController.isCurrentPeriodClosed
+                            Repeater {
+                                model: AppController.activeQuincenas
+                                delegate: BadgePill {
+                                    property bool closed: {
+                                        var _ = AppController.periodCierres;
+                                        return AppController.isCierreClosed(modelData, "jornal");
+                                    }
+                                    text: modelData + (closed ? " 🔒" : " 🟢")
+                                    variant: closed ? "warning" : "secondary"
+                                }
+                            }
+                            BadgePill {
+                                property bool mClosed: {
+                                    var _ = AppController.periodCierres;
+                                    return AppController.isMClosed;
+                                }
+                                text: "M" + (mClosed ? " 🔒" : " 🟢")
+                                variant: mClosed ? "warning" : "secondary"
+                            }
+                        }
+
                         BadgePill {
-                            text: AppController.isCurrentPeriodClosed ? "🔒 Cerrado" : "🟢 Abierto"
-                            variant: AppController.isCurrentPeriodClosed ? "warning" : "success"
+                            text: "🔒 Mes Completo Cerrado"
+                            variant: "warning"
+                            visible: AppController.isCurrentPeriodClosed
                         }
                     }
                 }
 
-                // Close / Reopen Month Action Buttons
+                // Manage Closures Button
                 StyledButton {
-                    text: "🔒 Cerrar Mes"
-                    variant: "primary"
-                    visible: !AppController.isCurrentPeriodClosed
+                    text: AppController.isCurrentPeriodClosed ? "🔒 Ver / Reabrir Cierres" : "📋 Gestionar Cierres"
+                    variant: AppController.isCurrentPeriodClosed ? "secondary" : "primary"
                     onClicked: closeMonthDialog.open()
                 }
 
-                StyledButton {
-                    text: "🔓 Reabrir Mes"
-                    variant: "secondary"
-                    visible: AppController.isCurrentPeriodClosed && AppController.currentRole === "admin"
-                    onClicked: reopenConfirmDialog.open()
-                }
-
                 Item { Layout.fillWidth: true }
-
-                // Role Selector Pill
-                RoleSelector {
-                    Layout.alignment: Qt.AlignVCenter
-                }
 
                 // Settings Gear Button
                 StyledButton {
@@ -235,15 +267,6 @@ ApplicationWindow {
 
     CloseMonthDialog {
         id: closeMonthDialog
-    }
-
-    ConfirmDialog {
-        id: reopenConfirmDialog
-        title: "Reabrir Período"
-        text: "¿Está seguro que desea reabrir el período " + AppController.selectedMonth + "/" + AppController.selectedYear + "? Esto eliminará el snapshot y permitirá editar nuevamente los valores de los empleados."
-        confirmText: "Reabrir Período"
-        variant: "warning"
-        onAccepted: AppController.reopenMonth(AppController.selectedYear, AppController.selectedMonth)
     }
 
     Connections {

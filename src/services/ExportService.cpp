@@ -78,12 +78,14 @@ QString ExportService::exportDataXlsx(const QString &path)
     xlsx.selectSheet("Esquemas de Cálculo");
     xlsx.write(1, 1, "codigo");
     xlsx.write(1, 2, "nombre");
+    xlsx.write(1, 3, "tipo_liquidacion");
     auto schemas = m_db->listSchemas();
     int row = 2;
     for (const auto &s : schemas) {
         auto m = s.toMap();
         xlsx.write(row, 1, m["codigo"].toString());
         xlsx.write(row, 2, m["nombre"].toString());
+        xlsx.write(row, 3, m["tipo_liquidacion"].toString());
         row++;
     }
 
@@ -150,7 +152,8 @@ QString ExportService::exportDataXlsx(const QString &path)
     xlsx.selectSheet("Celdas de Cálculo");
     QStringList cellHeaders = {"id", "seccion_codigo", "codigo_variable", "descripcion", "condicion",
                                "formula_unidad", "formula_base", "formula_monto", "orden", "esquema_codigo",
-                               "tipo_calculo", "simple_porcentaje", "simple_base_variable", "simple_monto_fijo"};
+                               "tipo_calculo", "simple_porcentaje", "simple_base_variable", "simple_monto_fijo",
+                               "visible_recibo", "color_hex", "en_grafico", "es_grafico_total"};
     for (int i = 0; i < cellHeaders.size(); i++)
         xlsx.write(1, i + 1, cellHeaders[i]);
     auto cells = m_db->listAllCells();
@@ -171,6 +174,10 @@ QString ExportService::exportDataXlsx(const QString &path)
         xlsx.write(row, 12, m["simple_porcentaje"].toDouble());
         xlsx.write(row, 13, m["simple_base_variable"].toString());
         xlsx.write(row, 14, m["simple_monto_fijo"].toDouble());
+        xlsx.write(row, 15, m["visible_recibo"].toBool() ? 1 : 0);
+        xlsx.write(row, 16, m["color_hex"].toString());
+        xlsx.write(row, 17, m["en_grafico"].toBool() ? 1 : 0);
+        xlsx.write(row, 18, m["es_grafico_total"].toBool() ? 1 : 0);
         row++;
     }
 
@@ -206,7 +213,7 @@ QString ExportService::exportDataXlsx(const QString &path)
         xlsx.write(2, 2, comp["razon_social"].toString());
         xlsx.write(2, 3, comp["direccion"].toString());
         xlsx.write(2, 4, comp["cuit"].toString());
-        xlsx.write(2, 5, comp["lugar_pago"].toString());
+        xlsx.write(2, 5, comp["lugar_de_pago"].toString());
     }
 
     // 8. Variables de Esquema (schema_fields)
@@ -360,8 +367,10 @@ bool ExportService::importDataXlsx(const QString &path)
         for (int r = 2; r <= xlsx.dimension().lastRow(); r++) {
             QString code = xlsx.read(r, 1).toString();
             QString name = xlsx.read(r, 2).toString();
+            QString tipoLiq = xlsx.read(r, 3).toString();
+            if (tipoLiq.isEmpty()) tipoLiq = "mensual";
             if (!code.isEmpty()) {
-                m_db->saveSchema("", code, name, "mensual");
+                m_db->saveSchema("", code, name, tipoLiq);
             }
         }
     }
@@ -418,6 +427,15 @@ bool ExportService::importDataXlsx(const QString &path)
             QString desc = xlsx.read(r, 4).toString();
             if (secCodigo.isEmpty() && desc.isEmpty() && codigoVar.isEmpty()) continue;
 
+            // Read optional chart/visibility fields (columns 15-18)
+            QVariant visibleRaw = xlsx.read(r, 15);
+            bool visibleRecibo = visibleRaw.isNull() ? true : visibleRaw.toBool();
+            QString colorHex = xlsx.read(r, 16).toString();
+            QVariant enGraficoRaw = xlsx.read(r, 17);
+            bool enGrafico = enGraficoRaw.isNull() ? false : enGraficoRaw.toBool();
+            QVariant esGraficoTotalRaw = xlsx.read(r, 18);
+            bool esGraficoTotal = esGraficoTotalRaw.isNull() ? false : esGraficoTotalRaw.toBool();
+
             m_db->saveCell(
                 0,  // new
                 secCodigo,
@@ -433,7 +451,10 @@ bool ExportService::importDataXlsx(const QString &path)
                 xlsx.read(r, 12).toDouble(), // simple_porcentaje
                 xlsx.read(r, 13).toString(), // simple_base_variable
                 xlsx.read(r, 14).toDouble(), // simple_monto_fijo
-                true                         // visible_recibo
+                visibleRecibo,
+                colorHex,
+                enGrafico,
+                esGraficoTotal
             );
         }
     }
@@ -960,8 +981,8 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
     int y = 0;
 
     // ── Helper lambdas ──────────────────────────────────────────
-    auto drawLine = [&](int y1) {
-        painter.setPen(QPen(QColor(148, 163, 184), 1.5));
+    auto drawLine = [&](int y1, const QColor &color = QColor(203, 213, 225), qreal width = 1.0) {
+        painter.setPen(QPen(color, width));
         painter.drawLine(0, y1, pageW, y1);
         painter.setPen(QPen(Qt::black, 1));
     };
@@ -975,16 +996,29 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
         return s.replace('.', ',');
     };
 
-    auto fmtMoney = [](double val, int maxDecimals = 4) -> QString {
+    auto fmtMoney = [](double val, int maxDecimals = 2) -> QString {
         QString s = QString::number(val, 'f', maxDecimals);
         if (s.contains('.')) {
             while (s.endsWith('0') && s.length() - s.indexOf('.') > 3) s.chop(1);
         }
-        return s.replace('.', ',');
+        // Format thousands with period and decimals with comma (Argentine format)
+        QStringList parts = s.split('.');
+        QString intPart = parts[0];
+        QString decPart = parts.size() > 1 ? parts[1] : "00";
+        if (decPart.length() < 2) decPart += "0";
+
+        // Insert thousands separator
+        for (int i = intPart.length() - 3; i > 0; i -= 3) {
+            if (i == 1 && intPart.startsWith('-')) continue;
+            intPart.insert(i, '.');
+        }
+        return intPart + "," + decPart;
     };
 
-    QFont titleFont("Helvetica", 13, QFont::Bold);
-    QFont headerFont("Helvetica", 9.5, QFont::Bold);
+    QFont titleFont("Helvetica", 14, QFont::Bold);
+    QFont subTitleFont("Helvetica", 10.5, QFont::Bold);
+    QFont headerFont("Helvetica", 9, QFont::Bold);
+    QFont labelBoldFont("Helvetica", 8.5, QFont::Bold);
     QFont normalFont("Helvetica", 8.5);
     QFont smallFont("Helvetica", 7.5);
 
@@ -1005,27 +1039,41 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
         }
     }
 
-    // ── Company Header ──────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    // 1. Company Header
+    // ═══════════════════════════════════════════════════════════════
     painter.setFont(titleFont);
-    painter.setPen(QPen(Qt::black));
+    painter.setPen(QPen(QColor(15, 23, 42)));
     QString razonSocial = effectiveCompany.value("razon_social", "EMPRESA").toString();
-    painter.drawText(QRect(0, y, pageW, 70), Qt::AlignLeft | Qt::AlignVCenter, razonSocial);
-    y += 75;
+    painter.drawText(QRect(0, y, pageW, 50), Qt::AlignLeft | Qt::AlignVCenter, razonSocial);
+    y += 54;
 
     painter.setFont(smallFont);
-    painter.setPen(QPen(Qt::black));
-    painter.drawText(QRect(0, y, pageW / 2, 40), Qt::AlignLeft,
-                     "CUIT: " + effectiveCompany.value("cuit", "").toString());
-    painter.drawText(QRect(pageW / 2, y, pageW / 2, 40), Qt::AlignRight,
-                     "Dirección: " + effectiveCompany.value("direccion", "").toString());
-    y += 45;
-    drawLine(y);
-    y += 12;
+    painter.setPen(QPen(QColor(71, 85, 105)));
+    QString cuitStr = effectiveCompany.value("cuit", "").toString();
+    QString dirStr = effectiveCompany.value("direccion", "").toString();
+    QString pagoLugar = effectiveCompany.value("lugar_de_pago", "").toString();
 
-    // ── Employee & Period Header ────────────────────────────────
-    painter.setFont(headerFont);
-    painter.setPen(QPen(Qt::black));
-    painter.drawText(QRect(0, y, pageW / 2, 40), Qt::AlignLeft | Qt::AlignVCenter, "RECIBO DE SUELDO");
+    painter.drawText(QRect(0, y, pageW / 2, 36), Qt::AlignLeft | Qt::AlignVCenter,
+                     "CUIT: " + (cuitStr.isEmpty() ? "-" : cuitStr));
+    QString rightCompText;
+    if (!dirStr.isEmpty()) rightCompText += "Dirección: " + dirStr;
+    if (!pagoLugar.isEmpty()) {
+        if (!rightCompText.isEmpty()) rightCompText += "  |  ";
+        rightCompText += "Lugar de Pago: " + pagoLugar;
+    }
+    painter.drawText(QRect(pageW / 2, y, pageW / 2, 36), Qt::AlignRight | Qt::AlignVCenter, rightCompText);
+    y += 42;
+
+    drawLine(y, QColor(148, 163, 184), 1.5);
+    y += 16;
+
+    // ═══════════════════════════════════════════════════════════════
+    // 2. Receipt Subtitle & Closing/Payment Dates Banner
+    // ═══════════════════════════════════════════════════════════════
+    painter.setFont(subTitleFont);
+    painter.setPen(QPen(QColor(15, 23, 42)));
+    painter.drawText(QRect(0, y, pageW * 0.45, 42), Qt::AlignLeft | Qt::AlignVCenter, "RECIBO DE HABERES");
 
     // Format Fecha de Cierre
     QString rawCierre = liquidationResult.value("FECHA_CIERRE", liquidationResult.value("fecha_cierre")).toString();
@@ -1046,20 +1094,18 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
     if (dPago.isValid()) fechaPagoStr = dPago.toString("dd/MM/yyyy");
     else if (rawPago.isEmpty()) fechaPagoStr = QDate::currentDate().toString("dd/MM/yyyy");
 
-    painter.drawText(QRect(pageW / 2, y, pageW / 2, 40), Qt::AlignRight | Qt::AlignVCenter,
-                     "Fecha de Cierre: " + fechaCierreStr + "   |   Fecha de Pago: " + fechaPagoStr);
-    y += 45;
-
     painter.setFont(normalFont);
-    painter.setPen(QPen(Qt::black));
+    painter.setPen(QPen(QColor(30, 41, 59)));
+    painter.drawText(QRect(pageW * 0.45, y, pageW * 0.55, 42), Qt::AlignRight | Qt::AlignVCenter,
+                     "Fecha de Cierre: " + fechaCierreStr + "   |   Fecha de Pago: " + fechaPagoStr);
+    y += 48;
+
+    // ═══════════════════════════════════════════════════════════════
+    // 3. Employee Info Card (Well-spaced framed box)
+    // ═══════════════════════════════════════════════════════════════
     QString empName = effectiveEmployee.value("nombre_completo", "Empleado").toString();
     QString empLegajo = effectiveEmployee.value("legajo", "").toString();
     QString empCuil = effectiveEmployee.value("cuil", "").toString();
-    painter.drawText(QRect(0, y, pageW * 0.6, 32), Qt::AlignLeft, "Empleado: " + empName);
-    painter.drawText(QRect(pageW * 0.6, y, pageW * 0.4, 32), Qt::AlignRight,
-                     "Legajo: " + empLegajo + (!empCuil.isEmpty() ? ("   CUIL: " + empCuil) : ""));
-    y += 34;
-
     QString tipoLiq = effectiveEmployee.value("tipo_liquidacion", "mensual").toString().toLower();
     QString categoriaNombre = effectiveEmployee.value("categoria_nombre", liquidationResult.value("categoria_nombre")).toString();
     double valorHora = liquidationResult.value("valor_hora", effectiveEmployee.value("valor_hora", 0.0)).toDouble();
@@ -1071,51 +1117,158 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
     int antiguedad = liquidationResult.value("antiguedad_anios",
                         liquidationResult.value("contexto_final").toMap().value("antiguedad_anios", 0)).toInt();
 
+    int cardHeight = 110;
+    QRect empCardRect(0, y, pageW, cardHeight);
+    painter.fillRect(empCardRect, QColor(248, 250, 252));
+    painter.setPen(QPen(QColor(203, 213, 225), 1.0));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(empCardRect);
+
+    // Row 1 inside Card: Empleado Name, Legajo, CUIL
+    int row1Y = y + 10;
+    int rowH = 42;
+    painter.setFont(normalFont);
+    painter.setPen(QPen(QColor(15, 23, 42)));
+    painter.drawText(QRect(14, row1Y, pageW * 0.55 - 14, rowH), Qt::AlignLeft | Qt::AlignVCenter,
+                     "Empleado: " + empName);
+
+    QString legCuilText = "Legajo: " + (empLegajo.isEmpty() ? "-" : empLegajo);
+    if (!empCuil.isEmpty()) {
+        legCuilText += "   |   CUIL: " + empCuil;
+    }
+    painter.drawText(QRect(pageW * 0.55, row1Y, pageW * 0.45 - 14, rowH), Qt::AlignRight | Qt::AlignVCenter, legCuilText);
+
+    // Row 2 inside Card: Liquidacion, Categoria, Valor/Hora, Ingreso
+    int row2Y = y + 54;
     QString tipoStr = (tipoLiq == "jornal") ? "Liquidación: Jornal" : "Liquidación: Mensual";
     if (tipoLiq == "jornal" && !categoriaNombre.isEmpty()) {
         tipoStr += "  |  Categoría: " + categoriaNombre;
     }
-    painter.drawText(QRect(0, y, pageW * 0.6, 32), Qt::AlignLeft, tipoStr);
+    painter.drawText(QRect(14, row2Y, pageW * 0.55 - 14, rowH), Qt::AlignLeft | Qt::AlignVCenter, tipoStr);
 
     QString rightDetails;
     if (tipoLiq == "jornal" && valorHora > 0) {
-        rightDetails += "Valor/Hora: $ " + fmtMoney(valorHora, 2) + "   ";
+        rightDetails += "Valor/Hora: $ " + fmtMoney(valorHora, 2) + "   |   ";
     }
     if (!fechaIngresoStr.isEmpty()) {
         rightDetails += "Ingreso: " + fechaIngresoStr + " (" + QString::number(antiguedad) + " a.)";
     }
     if (!rightDetails.isEmpty()) {
-        painter.drawText(QRect(pageW * 0.4, y, pageW * 0.6, 32), Qt::AlignRight, rightDetails);
+        painter.drawText(QRect(pageW * 0.45, row2Y, pageW * 0.55 - 14, rowH), Qt::AlignRight | Qt::AlignVCenter, rightDetails);
     }
-    y += 36;
 
-    drawLine(y);
-    y += 12;
+    y += cardHeight + 20;
 
-    // ── Concept Lines ───────────────────────────────────────────
-    painter.setFont(headerFont);
-    painter.setPen(QPen(Qt::black));
+    // ═══════════════════════════════════════════════════════════════
+    // 4. Concept Table Header Bar
+    // ═══════════════════════════════════════════════════════════════
     int colDesc = 0;
-    int colUnit = pageW * 0.55;
-    int colBase = pageW * 0.67;
-    int colMonto = pageW * 0.81;
+    int colUnit = pageW * 0.52;
+    int colBase = pageW * 0.66;
+    int colMonto = pageW * 0.80;
 
-    painter.drawText(QRect(colDesc, y, colUnit - colDesc, 40), Qt::AlignLeft, "Concepto");
-    painter.drawText(QRect(colUnit, y, colBase - colUnit, 40), Qt::AlignRight, "Unidad");
-    painter.drawText(QRect(colBase, y, colMonto - colBase, 40), Qt::AlignRight, "Base");
-    painter.drawText(QRect(colMonto, y, pageW - colMonto, 40), Qt::AlignRight, "Monto ($)");
-    y += 45;
-    drawLine(y);
-    y += 8;
+    int tblHeaderH = 44;
+    QRect tblHeaderRect(0, y, pageW, tblHeaderH);
+    painter.fillRect(tblHeaderRect, QColor(241, 245, 249));
+    painter.setPen(QPen(QColor(203, 213, 225), 1.0));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(tblHeaderRect);
+
+    painter.setFont(headerFont);
+    painter.setPen(QPen(QColor(15, 23, 42)));
+    painter.drawText(QRect(colDesc + 14, y, colUnit - colDesc - 20, tblHeaderH), Qt::AlignLeft | Qt::AlignVCenter, "Concepto / Descripción");
+    painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, tblHeaderH), Qt::AlignRight | Qt::AlignVCenter, "Unidad");
+    painter.drawText(QRect(colBase, y, colMonto - colBase - 10, tblHeaderH), Qt::AlignRight | Qt::AlignVCenter, "Base Imponible");
+    painter.drawText(QRect(colMonto, y, pageW - colMonto - 14, tblHeaderH), Qt::AlignRight | Qt::AlignVCenter, "Monto ($)");
+    y += tblHeaderH + 6;
+
+    // ═══════════════════════════════════════════════════════════════
+    // 5. Concept Rows (Filter by visible_recibo with DB fallback)
+    // ═══════════════════════════════════════════════════════════════
+    // Pre-cache schema cell definitions in case historical snapshot omitted metadata
+    QMap<int, QVariantMap> dbCellsById;
+    QMap<QString, QVariantMap> dbCellsByCode;
+    if (m_db) {
+        QString esqCode = effectiveEmployee.value("esquema_codigo", "MENSUAL").toString();
+        if (esqCode.isEmpty() && liquidationResult.contains("esquema_codigo")) {
+            esqCode = liquidationResult.value("esquema_codigo").toString();
+        }
+        QVariantList schemaCells = m_db->listCellsBySchema(esqCode);
+        for (const auto &scVar : schemaCells) {
+            QVariantMap scMap = scVar.toMap();
+            int scId = scMap.value("id", 0).toInt();
+            QString scCode = scMap.value("codigo_variable").toString();
+            if (scId > 0) dbCellsById[scId] = scMap;
+            if (!scCode.isEmpty()) dbCellsByCode[scCode] = scMap;
+        }
+    }
+
+    // First pass: collect only visible concepts
+    QVariantList rawConceptos = liquidationResult.value("conceptos").toList();
+    QVariantList visibleConceptos;
+    for (const auto &concepto : rawConceptos) {
+        auto c = concepto.toMap();
+        int cId = c.value("cell_id", c.value("id", 0)).toInt();
+        QString codigo = c.value("codigo", c.value("codigo_variable", "")).toString();
+
+        QVariantMap fallbackCell;
+        if (cId > 0 && dbCellsById.contains(cId)) fallbackCell = dbCellsById[cId];
+        else if (!codigo.isEmpty() && dbCellsByCode.contains(codigo)) fallbackCell = dbCellsByCode[codigo];
+
+        bool isVisibleInReceipt = true;
+        if (c.contains("visible_recibo") && !c.value("visible_recibo").isNull()) {
+            QVariant visVal = c.value("visible_recibo");
+            if (visVal.typeId() == QMetaType::Bool) {
+                isVisibleInReceipt = visVal.toBool();
+            } else if (visVal.typeId() == QMetaType::QString) {
+                QString vs = visVal.toString().trimmed().toLower();
+                isVisibleInReceipt = (vs == "1" || vs == "true");
+            } else {
+                isVisibleInReceipt = (visVal.toInt() != 0);
+            }
+        } else if (!fallbackCell.isEmpty()) {
+            QVariant visVal = fallbackCell.value("visible_recibo");
+            if (visVal.typeId() == QMetaType::Bool) {
+                isVisibleInReceipt = visVal.toBool();
+            } else {
+                isVisibleInReceipt = (visVal.toInt() != 0);
+            }
+        }
+
+        if (isVisibleInReceipt) {
+            visibleConceptos.append(c);
+        }
+    }
+
+    // Filter out trailing or consecutive empty separators
+    QVariantList finalConceptos;
+    for (int i = 0; i < visibleConceptos.size(); i++) {
+        QVariantMap c = visibleConceptos[i].toMap();
+        QString tipoCalc = c["tipo_calculo"].toString();
+        QString codigo = c["codigo"].toString();
+        bool isSep = (tipoCalc == "separator" || codigo.startsWith("SEP_"));
+
+        if (isSep) {
+            // Check if there is at least one non-separator item following this separator
+            bool hasContent = false;
+            for (int j = i + 1; j < visibleConceptos.size(); j++) {
+                QVariantMap nextC = visibleConceptos[j].toMap();
+                QString nextTipo = nextC["tipo_calculo"].toString();
+                QString nextCode = nextC["codigo"].toString();
+                if (nextTipo == "separator" || nextCode.startsWith("SEP_")) {
+                    break;
+                }
+                hasContent = true;
+                break;
+            }
+            if (!hasContent) continue; // Skip empty separator
+        }
+        finalConceptos.append(c);
+    }
 
     painter.setFont(normalFont);
-    QVariantList conceptos = liquidationResult.value("conceptos").toList();
-    for (const auto &concepto : conceptos) {
+    for (const auto &concepto : finalConceptos) {
         auto c = concepto.toMap();
-        QVariant visVal = c.value("visible_recibo");
-        bool isVisibleInReceipt = visVal.isValid() ? (visVal.toInt() != 0 && visVal.toBool()) : true;
-        if (!isVisibleInReceipt) continue;
-
         QString desc = c["descripcion"].toString();
         QString seccion = c["seccion"].toString().toUpper();
         QString tipoCalc = c["tipo_calculo"].toString();
@@ -1129,228 +1282,220 @@ QString ExportService::exportReceiptPdf(const QVariantMap &liquidationResult,
 
         if (isSeparator) {
             y += 4;
-            QRect sepRect(0, y, pageW, 36);
-            painter.fillRect(sepRect, QColor(234, 242, 253));
-            painter.setPen(QPen(QColor(59, 130, 246), 1));
+            int sepH = 42;
+            QRect sepRect(0, y, pageW, sepH);
+            painter.fillRect(sepRect, QColor(239, 246, 255));
+            painter.setPen(QPen(QColor(147, 197, 253), 1.0));
+            painter.setBrush(Qt::NoBrush);
             painter.drawRect(sepRect);
 
             QFont sepFont("Helvetica", 8.5, QFont::Bold);
             painter.setFont(sepFont);
-            painter.setPen(QPen(QColor(15, 23, 42)));
-            painter.drawText(QRect(8, y, pageW - 16, 36), Qt::AlignLeft | Qt::AlignVCenter, "■  " + desc.toUpper());
+            painter.setPen(QPen(QColor(30, 58, 138)));
+            painter.drawText(QRect(14, y, pageW - 28, sepH), Qt::AlignLeft | Qt::AlignVCenter, "■  " + desc.toUpper());
 
             painter.setFont(normalFont);
             painter.setPen(QPen(Qt::black));
-            y += 42;
+            y += sepH + 6;
         } else {
+            int rowHeight = isTotal ? 46 : 38;
             if (isTotal) {
-                y += 2;
-                QRect totalRect(0, y, pageW, 36);
-                painter.fillRect(totalRect, QColor(234, 242, 253));
-                painter.setPen(QPen(QColor(59, 130, 246), 1));
+                y += 3;
+                QRect totalRect(0, y, pageW, rowHeight);
+                painter.fillRect(totalRect, QColor(239, 246, 255));
+                painter.setPen(QPen(QColor(96, 165, 250), 1.2));
+                painter.setBrush(Qt::NoBrush);
                 painter.drawRect(totalRect);
 
                 QFont boldFont("Helvetica", 8.5, QFont::Bold);
                 painter.setFont(boldFont);
                 painter.setPen(QPen(QColor(15, 23, 42)));
             } else {
-                painter.setPen(QPen(Qt::black));
+                painter.setPen(QPen(QColor(15, 23, 42)));
             }
 
-            painter.drawText(QRect(colDesc + (isTotal ? 6 : 0), y, colUnit - colDesc - 10, 32), Qt::AlignLeft | Qt::AlignVCenter, desc);
+            painter.drawText(QRect(colDesc + 14, y, colUnit - colDesc - 20, rowHeight), Qt::AlignLeft | Qt::AlignVCenter, desc);
 
             QString tc = c["tipo_calculo"].toString().toLower();
             double sPct = c["simple_porcentaje"].toDouble();
-            QString sBaseVar = c["simple_base_variable"].toString();
             bool isPct = (tc == "porcentaje" || tc == "percentage" || tc == "simple" || sPct > 0);
 
             if (isPct && unidad > 0) {
-                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, 32), Qt::AlignRight | Qt::AlignVCenter, "% " + fmtNum(unidad, 2));
+                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, rowHeight), Qt::AlignRight | Qt::AlignVCenter, "% " + fmtNum(unidad, 2));
             } else if (isPct && sPct > 0) {
-                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, 32), Qt::AlignRight | Qt::AlignVCenter, "% " + fmtNum(sPct, 2));
+                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, rowHeight), Qt::AlignRight | Qt::AlignVCenter, "% " + fmtNum(sPct, 2));
             } else if (unidad != 0) {
-                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, 32), Qt::AlignRight | Qt::AlignVCenter, fmtNum(unidad, 4));
+                painter.drawText(QRect(colUnit, y, colBase - colUnit - 10, rowHeight), Qt::AlignRight | Qt::AlignVCenter, fmtNum(unidad, 4));
             }
 
             if (!isSeparator && !isTotal && base > 0) {
-                painter.drawText(QRect(colBase, y, colMonto - colBase - 10, 32), Qt::AlignRight | Qt::AlignVCenter, fmtMoney(base, 2));
+                painter.drawText(QRect(colBase, y, colMonto - colBase - 10, rowHeight), Qt::AlignRight | Qt::AlignVCenter, "$ " + fmtMoney(base, 2));
             }
 
             if (monto != 0) {
-                painter.drawText(QRect(colMonto - (isTotal ? 6 : 0), y, pageW - colMonto, 32), Qt::AlignRight | Qt::AlignVCenter,
-                                 fmtMoney(monto, 4));
+                painter.drawText(QRect(colMonto, y, pageW - colMonto - 14, rowHeight), Qt::AlignRight | Qt::AlignVCenter,
+                                 "$ " + fmtMoney(monto, 2));
             }
 
             if (isTotal) {
                 painter.setFont(normalFont);
                 painter.setPen(QPen(Qt::black));
             }
-            y += isTotal ? 42 : 34;
+            y += rowHeight + 4;
         }
     }
 
-    // ── Vector Pie Chart PDF Rendering (Drawn once at the bottom) ──
+    // ═══════════════════════════════════════════════════════════════
+    // 6. Vector Pie Chart PDF Rendering
+    // ═══════════════════════════════════════════════════════════════
     struct ChartSlice {
         QString label;
         double value;
         QColor color;
     };
-        QList<ChartSlice> chartSlices;
-        double refTotal = 0.0;
+    QList<ChartSlice> chartSlices;
+    double refTotal = 0.0;
 
-        static const QList<QColor> chartColors = {
-            QColor(116, 199, 236), QColor(166, 227, 161), QColor(250, 179, 135),
-            QColor(243, 139, 168), QColor(203, 166, 247), QColor(137, 180, 250),
-            QColor(249, 226, 175), QColor(148, 226, 213)
-        };
+    static const QList<QColor> chartColors = {
+        QColor(59, 130, 246),  QColor(16, 185, 129), QColor(245, 158, 11),
+        QColor(239, 68, 68),   QColor(139, 92, 246), QColor(6, 182, 212),
+        QColor(236, 72, 153),  QColor(20, 184, 166)
+    };
 
-        // Cache schema cell definitions in case historical snapshot omitted chart flags
-        QMap<int, QVariantMap> dbCellsById;
-        QMap<QString, QVariantMap> dbCellsByCode;
-        if (m_db) {
-            QString esqCode = effectiveEmployee.value("esquema_codigo", "MENSUAL").toString();
-            QVariantList schemaCells = m_db->listCellsBySchema(esqCode);
-            for (const auto &scVar : schemaCells) {
-                QVariantMap scMap = scVar.toMap();
-                int scId = scMap.value("id", 0).toInt();
-                QString scCode = scMap.value("codigo_variable").toString();
-                if (scId > 0) dbCellsById[scId] = scMap;
-                if (!scCode.isEmpty()) dbCellsByCode[scCode] = scMap;
+    int colorIdx = 0;
+    for (const auto &cVar : finalConceptos) {
+        QVariantMap cMap = cVar.toMap();
+        int cId = cMap.value("cell_id", 0).toInt();
+        QString cCode = cMap.value("codigo", cMap.value("codigo_variable", "")).toString();
+
+        bool hasChartMetadata = cMap.contains("en_grafico");
+        bool inChart = cMap.value("en_grafico").toBool() || cMap.value("en_grafico").toInt() == 1;
+        bool isTotalRef = cMap.value("es_grafico_total").toBool() || cMap.value("es_grafico_total").toInt() == 1;
+        QString colHex = cMap.value("color_hex").toString();
+
+        if (!hasChartMetadata) {
+            QVariantMap fallbackCell;
+            if (cId > 0 && dbCellsById.contains(cId)) fallbackCell = dbCellsById[cId];
+            else if (!cCode.isEmpty() && dbCellsByCode.contains(cCode)) fallbackCell = dbCellsByCode[cCode];
+
+            if (!fallbackCell.isEmpty()) {
+                inChart = fallbackCell.value("en_grafico").toInt() == 1;
+                isTotalRef = fallbackCell.value("es_grafico_total").toInt() == 1;
+                colHex = fallbackCell.value("color_hex").toString();
             }
         }
 
-        int colorIdx = 0;
-        for (const auto &cVar : conceptos) {
-            QVariantMap cMap = cVar.toMap();
-            int cId = cMap.value("cell_id", 0).toInt();
-            QString cCode = cMap.value("codigo", cMap.value("codigo_variable", "")).toString();
+        double mVal = std::abs(cMap.value("monto").toDouble());
 
-            bool hasChartMetadata = cMap.contains("en_grafico");
-            bool inChart = cMap.value("en_grafico").toBool() || cMap.value("en_grafico").toInt() == 1;
-            bool isTotalRef = cMap.value("es_grafico_total").toBool() || cMap.value("es_grafico_total").toInt() == 1;
-            QString colHex = cMap.value("color_hex").toString();
+        if (isTotalRef && mVal > 0) {
+            refTotal = mVal;
+        }
+        if (inChart && mVal > 0) {
+            QColor sColor = colHex.isEmpty() ? chartColors[colorIdx % chartColors.size()] : QColor(colHex);
+            colorIdx++;
+            chartSlices.append({cMap.value("descripcion").toString(), mVal, sColor});
+        }
+    }
 
-            if (!hasChartMetadata) {
-                QVariantMap fallbackCell;
-                if (cId > 0 && dbCellsById.contains(cId)) fallbackCell = dbCellsById[cId];
-                else if (!cCode.isEmpty() && dbCellsByCode.contains(cCode)) fallbackCell = dbCellsByCode[cCode];
+    if (!chartSlices.isEmpty()) {
+        y += 20;
+        // Title Header Bar
+        int headerH = 34;
+        QRect chartHeaderRect(0, y, pageW, headerH);
+        painter.fillRect(chartHeaderRect, QColor(241, 245, 249));
+        painter.setPen(QPen(QColor(203, 213, 225), 1.0));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(chartHeaderRect);
 
-                if (!fallbackCell.isEmpty()) {
-                    inChart = fallbackCell.value("en_grafico").toInt() == 1;
-                    isTotalRef = fallbackCell.value("es_grafico_total").toInt() == 1;
-                    colHex = fallbackCell.value("color_hex").toString();
-                }
-            }
+        QFont chartTitleFont("Helvetica", 9, QFont::Bold);
+        painter.setFont(chartTitleFont);
+        painter.setPen(QPen(QColor(15, 23, 42)));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawText(chartHeaderRect.adjusted(14, 0, -14, 0), Qt::AlignLeft | Qt::AlignVCenter, "DISTRIBUCIÓN Y ANÁLISIS DEL RECIBO");
+        y += headerH + 20;
 
-            double mVal = std::abs(cMap.value("monto").toDouble());
+        double sumVal = 0;
+        for (const auto &sl : chartSlices) sumVal += sl.value;
+        double baseTotal = (refTotal > 0) ? refTotal : (sumVal > 0 ? sumVal : 1.0);
 
-            if (isTotalRef && mVal > 0) {
-                refTotal = mVal;
-            }
-            if (inChart && mVal > 0) {
-                QColor sColor = colHex.isEmpty() ? chartColors[colorIdx % chartColors.size()] : QColor(colHex);
-                colorIdx++;
-                chartSlices.append({cMap.value("descripcion").toString(), mVal, sColor});
-            }
+        int pieDiameter = qRound(pageW * 0.18);
+        int pieX = qRound(pageW * 0.04);
+        int pieY = y;
+
+        // Draw pie slices vectorially
+        int startAngle = 90 * 16;
+        for (const auto &sl : chartSlices) {
+            int spanAngle = -qRound((sl.value / baseTotal) * 360.0 * 16.0);
+            painter.setBrush(QBrush(sl.color));
+            painter.setPen(QPen(Qt::white, 1.5));
+            painter.drawPie(pieX, pieY, pieDiameter, pieDiameter, startAngle, spanAngle);
+            startAngle += spanAngle;
         }
 
-        if (!chartSlices.isEmpty()) {
-            y += 15;
-            // Title Header Bar
-            int headerH = 26;
-            QRect chartHeaderRect(0, y, pageW, headerH);
-            painter.fillRect(chartHeaderRect, QColor(241, 245, 249));
-            painter.setPen(QPen(QColor(203, 213, 225), 1));
+        // Draw center donut circle for modern flat visual
+        int innerD = qRound(pieDiameter * 0.45);
+        int innerX = pieX + (pieDiameter - innerD) / 2;
+        int innerY = pieY + (pieDiameter - innerD) / 2;
+        painter.setBrush(QBrush(Qt::white));
+        painter.setPen(QPen(QColor(226, 232, 240), 1.0));
+        painter.drawEllipse(innerX, innerY, innerD, innerD);
+
+        // Draw legend column to the right
+        int legendX = pieX + pieDiameter + qRound(pageW * 0.06);
+        int legendY = pieY;
+        int legendW = pageW - legendX - 10;
+
+        QFont legendFont("Helvetica", 8, QFont::Bold);
+        painter.setFont(legendFont);
+
+        int boxSize = 14;
+        int lineH = 32;
+
+        for (const auto &sl : chartSlices) {
+            // Color box
+            QRect boxRect(legendX, legendY + (lineH - boxSize) / 2, boxSize, boxSize);
+            painter.fillRect(boxRect, sl.color);
+            painter.setPen(QPen(QColor(148, 163, 184), 1.0));
             painter.setBrush(Qt::NoBrush);
-            painter.drawRect(chartHeaderRect);
+            painter.drawRect(boxRect);
 
-            QFont titleFont("Helvetica", 9, QFont::Bold);
-            painter.setFont(titleFont);
+            // Label & percentage formatted nicely with spanish monetary style
             painter.setPen(QPen(QColor(15, 23, 42)));
             painter.setBrush(Qt::NoBrush);
-            painter.drawText(chartHeaderRect.adjusted(12, 0, -12, 0), Qt::AlignLeft | Qt::AlignVCenter, "DISTRIBUCION Y ANALISIS DEL RECIBO");
-            y += headerH + 18;
-
-            double sumVal = 0;
-            for (const auto &sl : chartSlices) sumVal += sl.value;
-            double baseTotal = (refTotal > 0) ? refTotal : (sumVal > 0 ? sumVal : 1.0);
-
-            int pieDiameter = qRound(pageW * 0.18);
-            int pieX = qRound(pageW * 0.04);
-            int pieY = y;
-
-            // Draw pie slices vectorially
-            int startAngle = 90 * 16;
-            for (const auto &sl : chartSlices) {
-                int spanAngle = -qRound((sl.value / baseTotal) * 360.0 * 16.0);
-                painter.setBrush(QBrush(sl.color));
-                painter.setPen(QPen(Qt::white, 1.5));
-                painter.drawPie(pieX, pieY, pieDiameter, pieDiameter, startAngle, spanAngle);
-                startAngle += spanAngle;
-            }
-
-            // Draw center donut circle for modern flat visual
-            int innerD = qRound(pieDiameter * 0.45);
-            int innerX = pieX + (pieDiameter - innerD) / 2;
-            int innerY = pieY + (pieDiameter - innerD) / 2;
-            painter.setBrush(QBrush(Qt::white));
-            painter.setPen(QPen(QColor(226, 232, 240), 1));
-            painter.drawEllipse(innerX, innerY, innerD, innerD);
-
-            // Draw legend column to the right
-            int legendX = pieX + pieDiameter + qRound(pageW * 0.06);
-            int legendY = pieY;
-            int legendW = pageW - legendX - 5;
-
-            QFont legendFont("Helvetica", 8, QFont::Bold);
-            painter.setFont(legendFont);
-
-            int boxSize = 11;
-            int lineH = 24;
-
-            for (const auto &sl : chartSlices) {
-                // Color box
-                QRect boxRect(legendX, legendY + (lineH - boxSize) / 2, boxSize, boxSize);
-                painter.fillRect(boxRect, sl.color);
-                painter.setPen(QPen(QColor(148, 163, 184), 1));
-                painter.setBrush(Qt::NoBrush);
-                painter.drawRect(boxRect);
-
-                // Label & percentage formatted nicely with spanish monetary style
-                painter.setPen(QPen(Qt::black));
-                painter.setBrush(Qt::NoBrush);
-                double pct = (sl.value / baseTotal) * 100.0;
-                QString lineText = QString("%1:  $ %2  (%3%)")
-                                   .arg(sl.label)
-                                   .arg(fmtMoney(sl.value, 2))
-                                   .arg(QString::number(pct, 'f', 1));
-                painter.drawText(QRect(legendX + boxSize + 12, legendY, legendW - boxSize - 12, lineH), Qt::AlignLeft | Qt::AlignVCenter, lineText);
-                legendY += lineH + 4;
-            }
-
-            y = std::max(pieY + pieDiameter + 15, legendY + 10);
+            double pct = (sl.value / baseTotal) * 100.0;
+            QString lineText = QString("%1:   $ %2   (%3%)")
+                               .arg(sl.label)
+                               .arg(fmtMoney(sl.value, 2))
+                               .arg(QString::number(pct, 'f', 1));
+            painter.drawText(QRect(legendX + boxSize + 14, legendY, legendW - boxSize - 14, lineH), Qt::AlignLeft | Qt::AlignVCenter, lineText);
+            legendY += lineH + 6;
         }
 
-    // ── Signatures Block (Empleador y Trabajador) ─────────────────
+        y = std::max(pieY + pieDiameter + 25, legendY + 15);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 7. Signatures Block (Empleador y Trabajador)
+    // ═══════════════════════════════════════════════════════════════
     int pageH = writer.height();
     int sigWidth = qRound(pageW * 0.36);
     int sigLeftX = qRound(pageW * 0.06);
     int sigRightX = pageW - sigLeftX - sigWidth;
 
-    // Posicionar la firma asegurando que esté en la parte inferior de la página A4
-    int sigLineY = qMax(y + 50, pageH - 90);
+    // Posicionar la firma asegurando que esté en la parte inferior de la página A4 con margen de seguridad
+    int sigLineY = qMax(y + 80, pageH - 120);
 
     painter.setPen(QPen(QColor(15, 23, 42), 1.5));
     painter.drawLine(sigLeftX, sigLineY, sigLeftX + sigWidth, sigLineY);
     painter.drawLine(sigRightX, sigLineY, sigRightX + sigWidth, sigLineY);
 
-    QFont sigFont("Helvetica", 9, QFont::Bold);
+    QFont sigFont("Helvetica", 8.5, QFont::Bold);
     painter.setFont(sigFont);
     painter.setPen(QPen(QColor(15, 23, 42)));
     painter.setBrush(Qt::NoBrush);
 
-    painter.drawText(QRect(sigLeftX, sigLineY + 8, sigWidth, 30), Qt::AlignCenter, "Firma del Empleador");
-    painter.drawText(QRect(sigRightX, sigLineY + 8, sigWidth, 30), Qt::AlignCenter, "Firma del Trabajador");
+    painter.drawText(QRect(sigLeftX, sigLineY + 12, sigWidth, 36), Qt::AlignCenter | Qt::AlignVCenter, "Firma del Empleador");
+    painter.drawText(QRect(sigRightX, sigLineY + 12, sigWidth, 36), Qt::AlignCenter | Qt::AlignVCenter, "Firma del Trabajador");
 
     painter.end();
 

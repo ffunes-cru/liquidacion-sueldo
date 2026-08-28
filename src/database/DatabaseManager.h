@@ -134,7 +134,7 @@ public:
     QVariantMap  getReceipt(int id) const;
     int          saveReceipt(int employeeId, const QString &esquemaCodigo,
                              int mes, int anio, const QString &periodo,
-                             const QString &datosJson);
+                             const QString &datosJson, int cierreId = 0);
     bool         deleteReceipt(int id);
     QVariantList searchReceipts(int employeeId, int mes, int anio) const;
 
@@ -146,18 +146,22 @@ public:
     QString createBackup();
     QString resetNewMonth();
 
-    // ── Closed Months (meses_cerrados) ──────────────────────────────
-    bool isMonthClosed(int anio, int mes) const;
-    bool closeMonth(int anio, int mes,
-                    const QString &fechaCierreMes,
-                    const QString &fechaCierreQ1,
-                    const QString &fechaCierreQ2,
-                    const QString &fechaPago);
-    QVariantMap getMonthSnapshot(int anio, int mes) const;
-    QVariantMap getMonthClosingData(int anio, int mes) const;
-    QVariantList listClosedMonths() const;
+    // ── Granular Closings (cierres) ─────────────────────────────────
+    QStringList  listActiveJornalQuincenas() const;
+    bool         isCierreClosed(int anio, int mes, const QString &tipo, const QString &esquemaTipo) const;
+    bool         canCloseQuincena(int anio, int mes, const QString &quincena) const;
+    bool         canReopenQuincena(int anio, int mes, const QString &quincena) const;
+    bool         isMonthFullyClosed(int anio, int mes) const;
+    QVariantList listCierresForMonth(int anio, int mes) const;
+    QVariantMap  getCierre(int anio, int mes, const QString &tipo, const QString &esquemaTipo) const;
+    QVariantMap  getCierreSnapshot(int anio, int mes, const QString &tipo, const QString &esquemaTipo) const;
+    int          insertCierre(int anio, int mes, const QString &tipo,
+                              const QString &esquemaTipo, const QString &fechaCierre,
+                              const QString &fechaPago, const QString &snapshotJson,
+                              const QString &backupPath);
+    bool         reopenCierre(int anio, int mes, const QString &tipo, const QString &esquemaTipo);
     QVariantList getEmployeeFieldValuesForPeriod(int employeeId, const QString &quincena, int anio, int mes) const;
-    bool reopenMonth(int anio, int mes);
+    QVariantList listActiveEmployeesByTipo(const QString &tipoLiquidacion) const;
 
     // ── Transaction Helpers ─────────────────────────────────────────
     bool transaction() { return m_db.transaction(); }

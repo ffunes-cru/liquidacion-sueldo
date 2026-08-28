@@ -18,6 +18,15 @@ Item {
         companyData = AppController.getCompany()
     }
 
+    property bool isCurrentTargetClosed: {
+        if (!root.employeeData) return false
+        var isJornal = (root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal"
+        var qSel = isJornal ? cbQuincena.currentText : "M"
+        var tipoLiq = isJornal ? "jornal" : "mensual"
+        return AppController.isCierreClosed(qSel, tipoLiq)
+    }
+    property bool canSaveReceipt: !isCurrentTargetClosed
+
     EmployeeSelectorDialog {
         id: employeeSelectorDialog
         onEmployeeSelected: function(empId, empData) {
@@ -85,7 +94,7 @@ Item {
                 }
                 StyledComboBox {
                     id: cbQuincena
-                    Layout.preferredWidth: 110
+                    Layout.preferredWidth: 100
                     model: ["Q1", "Q2"]
                     visible: root.employeeData && ((root.employeeData.tipoLiquidacion || root.employeeData.tipo_liquidacion) === "jornal")
                     onCurrentTextChanged: {
@@ -108,6 +117,12 @@ Item {
                         }
                         return AppController.fechaCierreMes
                     }
+                }
+
+                BadgePill {
+                    text: "🔒 Período Cerrado"
+                    variant: "warning"
+                    visible: root.isCurrentTargetClosed
                 }
 
                 Item { Layout.fillWidth: true }
@@ -144,8 +159,9 @@ Item {
 
                 StyledButton {
                     variant: "secondary"
-                    text: "💾 Historial"
-                    enabled: root.liquidationResult !== null
+                    text: "💾 Guardar en Historial"
+                    enabled: root.liquidationResult !== null && root.canSaveReceipt
+                    visible: root.canSaveReceipt
                     onClicked: confirmHistoryDialog.open()
                 }
 
@@ -331,7 +347,14 @@ Item {
                             spacing: 4
 
                             Repeater {
-                                model: root.liquidationResult ? root.liquidationResult.conceptos : []
+                                model: {
+                                    if (!root.liquidationResult || !root.liquidationResult.conceptos) return []
+                                    return root.liquidationResult.conceptos.filter(function(c) {
+                                        var vis = c["visible_recibo"]
+                                        if (vis === undefined || vis === null) return true
+                                        return (vis === true || vis === 1 || vis === "1" || vis === "true")
+                                    })
+                                }
 
                                 delegate: Item {
                                     Layout.fillWidth: true

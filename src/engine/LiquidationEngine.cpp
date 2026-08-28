@@ -2,6 +2,7 @@
 #include "FormulaEngine.h"
 #include "QuincenaAggregator.h"
 #include "database/DatabaseManager.h"
+#include "services/ExportService.h"
 
 #include <QDate>
 #include <QDebug>
@@ -359,6 +360,33 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
   qDebug() << "[LiquidationEngine] Loaded" << historyList.size()
            << "historical receipt snapshots for env.historial";
 
+  // Inject flat aggregated variables (Q_sum_*, Q_avg_*, Q_max_*, Q_min_*) for formulas
+  if (esJornal) {
+    QSet<QString> allVarNames;
+    for (const auto &qData : quincenaComputed) {
+      for (auto vi = qData.begin(); vi != qData.end(); ++vi) {
+        allVarNames.insert(vi.key());
+      }
+    }
+    for (const QString &varName : allVarNames) {
+      double sumVal = 0.0;
+      double maxVal = -1e18;
+      double minVal = 1e18;
+      int count = quincenaComputed.size();
+      for (const auto &qData : quincenaComputed) {
+        double v = qData.value(varName).toDouble();
+        sumVal += v;
+        if (v > maxVal) maxVal = v;
+        if (v < minVal) minVal = v;
+      }
+      contexto["Q_sum_" + varName] = sumVal;
+      contexto["Q_avg_" + varName] = count > 0 ? (sumVal / count) : 0.0;
+      contexto["Q_max_" + varName] = maxVal;
+      contexto["Q_min_" + varName] = minVal;
+    }
+    contexto["_cant_q"] = quincenaComputed.size();
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // STEP 4: Setup env object, custom functions and evaluate cells
   // ═══════════════════════════════════════════════════════════════
@@ -389,20 +417,6 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
   if (!customFuncs.isEmpty()) {
     engine.registerCustomFunctions(customFuncs);
   }
-
-  // Register helper functions as JS code
-  auto setupFunctions = QString(R"(
-        function Q_sum_(varName) { return typeof this['Q_sum_' + varName] !== 'undefined' ? this['Q_sum_' + varName] : 0; }
-        function Q_avg_(varName) { return typeof this['Q_avg_' + varName] !== 'undefined' ? this['Q_avg_' + varName] : 0; }
-        function Q_max_(varName) { return typeof this['Q_max_' + varName] !== 'undefined' ? this['Q_max_' + varName] : 0; }
-        function Q_min_(varName) { return typeof this['Q_min_' + varName] !== 'undefined' ? this['Q_min_' + varName] : 0; }
-        function sumar_q(varName) { return Q_sum_(varName); }
-        function promedio_q(varName) { return Q_avg_(varName); }
-        function max_q(varName) { return Q_max_(varName); }
-        function min_q(varName) { return Q_min_(varName); }
-        function cant_q() { return typeof _cant_q !== 'undefined' ? _cant_q : 1; }
-    )");
-  engine.evaluate(setupFunctions);
 
   // ═══════════════════════════════════════════════════════════════
   // STEP 5: Evaluate all cells sequentially
@@ -518,6 +532,11 @@ QVariantMap LiquidationEngine::processLiquidation(int employeeId,
         } else {
           monto = montoResult.toDouble();
         }
+      } else if (!formulaB.isEmpty() || !formulaU.isEmpty()) {
+        // Fallback: if no monto formula but base/unit exist, compute monto = base * (unit > 0 ? unit : 1)
+        double bVal = engine.getVariable("base").toDouble();
+        double uVal = engine.getVariable("unidad").toDouble();
+        monto = bVal * (uVal > 0.0 ? uVal : 1.0);
       }
     }
 
@@ -754,7 +773,8 @@ QVariantMap LiquidationEngine::buildQuincenaContext(
 int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
                                           int anio, const QString &periodo,
                                           const QString &fechaCierre,
-                                          const QString &fechaPago) {
+                                          const QString &fechaPago,
+                                          int cierreId) {
   QVariantMap emp = result.value("empleado").toMap();
   if (emp.isEmpty())
     return -1;
@@ -774,6 +794,9 @@ int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
   metaObj["fecha_calculo"] = ctx.value("fecha_calculo").toString();
   metaObj["fecha_cierre"] = fechaCierre.isEmpty() ? ctx.value("fecha_cierre").toString() : fechaCierre;
   metaObj["fecha_pago"] = fechaPago.isEmpty() ? ctx.value("fecha_pago").toString() : fechaPago;
+  if (cierreId > 0) {
+    metaObj["cierre_id"] = cierreId;
+  }
   rootObj["meta"] = metaObj;
 
   // 1.1 Snapshot de la Empresa al momento de emitir el recibo
@@ -878,5 +901,268 @@ int LiquidationEngine::persistLiquidation(const QVariantMap &result, int mes,
   rootObj["conceptos"] = conceptosArr;
 
   QString datosJson = QJsonDocument(rootObj).toJson(QJsonDocument::Compact);
-  return m_db->saveReceipt(emp["id"].toInt(), esquema, mes, anio, periodo, datosJson);
+  return m_db->saveReceipt(emp["id"].toInt(), esquema, mes, anio, periodo, datosJson, cierreId);
+}
+
+QVariantMap LiquidationEngine::validateBatch(int mes, int anio,
+                                            const QString &esquemaTipo,
+                                            const QString &quincena,
+                                            const QString &fechaCierre,
+                                            const QString &fechaPago)
+{
+  qInfo() << "[LiquidationEngine] Validando batch para esquema:" << esquemaTipo
+          << "quincena:" << quincena << "mes:" << mes << "año:" << anio;
+
+  QVariantList employees = m_db->listActiveEmployeesByTipo(esquemaTipo);
+  QVariantList erroresPorEmpleado;
+  QVariantList resultadosList;
+  int procesados = 0;
+  double totalNeto = 0.0;
+  double totalRemunerativo = 0.0;
+  double totalNoRemunerativo = 0.0;
+  double totalDescuentos = 0.0;
+
+  for (const QVariant &ev : employees) {
+    QVariantMap emp = ev.toMap();
+    int empId = emp["id"].toInt();
+
+    // If jornal, check if employee has this quincena configured
+    if (esquemaTipo == "jornal") {
+      QStringList empQuincenas = m_db->listEmployeeQuincenas(empId);
+      if (!empQuincenas.contains(quincena)) {
+        continue;
+      }
+    }
+
+    QVariantMap res = processLiquidation(empId, quincena, fechaCierre, fechaCierre, fechaPago);
+    QVariantList errs = res.value("errores").toList();
+    if (!errs.isEmpty()) {
+      QVariantMap errItem;
+      errItem["empleado_id"] = empId;
+      errItem["legajo"] = emp.value("legajo").toString();
+      errItem["nombre"] = emp.value("nombre_completo").toString();
+      errItem["errores"] = errs;
+      erroresPorEmpleado.append(errItem);
+    }
+
+    double empNeto = res.value("neto_a_cobrar").toDouble();
+    if (empNeto == 0.0) {
+      empNeto = res.value("total_remunerativo").toDouble() - res.value("total_descuentos").toDouble() + res.value("total_no_remunerativo").toDouble();
+    }
+    if (empNeto == 0.0) {
+      for (const auto &c : res.value("conceptos").toList()) {
+        empNeto += c.toMap().value("monto").toDouble();
+      }
+    }
+    totalNeto += empNeto;
+    totalRemunerativo += res.value("total_remunerativo").toDouble();
+    totalNoRemunerativo += res.value("total_no_remunerativo").toDouble();
+    totalDescuentos += res.value("total_descuentos").toDouble();
+    procesados++;
+
+    QVariantMap resItem;
+    resItem["empleado_id"] = empId;
+    resItem["legajo"] = emp.value("legajo").toString();
+    resItem["nombre"] = emp.value("nombre_completo").toString();
+    resItem["quincena"] = quincena;
+    resItem["result"] = res;
+    resultadosList.append(resItem);
+  }
+
+  QVariantMap result;
+  result["valido"] = erroresPorEmpleado.isEmpty();
+  result["empleados_procesados"] = procesados;
+  result["total_neto"] = totalNeto;
+  result["total_remunerativo"] = totalRemunerativo;
+  result["total_no_remunerativo"] = totalNoRemunerativo;
+  result["total_descuentos"] = totalDescuentos;
+  result["errores_por_empleado"] = erroresPorEmpleado;
+  result["resultados"] = resultadosList;
+
+  return result;
+}
+
+QVariantMap LiquidationEngine::executeBatchClose(int mes, int anio,
+                                                const QString &esquemaTipo,
+                                                const QString &quincena,
+                                                const QString &fechaCierre,
+                                                const QString &fechaPago,
+                                                const QString &exportPath)
+{
+  qInfo() << "[LiquidationEngine] Ejecutando cierre batch para esquema:" << esquemaTipo
+          << "quincena:" << quincena << "mes:" << mes << "año:" << anio;
+
+  // 1. Sequential & Status checks
+  if (esquemaTipo == "jornal") {
+    if (!m_db->canCloseQuincena(anio, mes, quincena)) {
+      return {
+          {"ok", false},
+          {"mensaje", QString("No se puede cerrar la quincena %1. Verifique que la quincena previa esté cerrada y que no haya sido cerrada previamente.").arg(quincena)}
+      };
+    }
+  } else {
+    if (m_db->isCierreClosed(anio, mes, "M", "mensual")) {
+      return {
+          {"ok", false},
+          {"mensaje", "El cierre mensual para este período ya se encuentra cerrado."}
+      };
+    }
+  }
+
+  // 2. Validate all calculations
+  QVariantMap val = validateBatch(mes, anio, esquemaTipo, quincena, fechaCierre, fechaPago);
+  if (!val.value("valido").toBool()) {
+    return {
+        {"ok", false},
+        {"mensaje", "Existen errores de cálculo en uno o más empleados."},
+        {"errores_por_empleado", val.value("errores_por_empleado")}
+    };
+  }
+
+  // 3. Create pre-closing backup
+  QString backupPath = m_db->createBackup();
+
+  // 4. Build comprehensive snapshot JSON of this closing
+  QJsonObject snapshot;
+  QJsonObject metaObj;
+  metaObj["anio"] = anio;
+  metaObj["mes"] = mes;
+  metaObj["tipo"] = (esquemaTipo == "jornal") ? quincena : "M";
+  metaObj["esquema_tipo"] = esquemaTipo;
+  metaObj["fecha_cierre"] = fechaCierre;
+  metaObj["fecha_pago"] = fechaPago;
+  metaObj["fecha_registro"] = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+  metaObj["backup_path"] = backupPath;
+  snapshot["meta"] = metaObj;
+
+  // Snapshot company
+  QVariantMap comp = m_db->getCompany();
+  QJsonObject compObj;
+  compObj["razon_social"] = comp.value("razon_social").toString();
+  compObj["cuit"] = comp.value("cuit").toString();
+  compObj["direccion"] = comp.value("direccion").toString();
+  compObj["lugar_de_pago"] = comp.value("lugar_de_pago").toString();
+  snapshot["empresa"] = compObj;
+
+  // Snapshot categories
+  QJsonArray catsArr;
+  QVariantList cats = m_db->listCategories();
+  for (const QVariant &cv : cats) {
+    QVariantMap c = cv.toMap();
+    QJsonObject catObj;
+    catObj["id"] = c["id"].toInt();
+    catObj["nombre"] = c["nombre"].toString();
+    catObj["valor_hora"] = c["valor_hora"].toDouble();
+    catsArr.append(catObj);
+  }
+  snapshot["categorias"] = catsArr;
+
+  // Snapshot global variables
+  QJsonArray globalsArr;
+  QVariantList globals = m_db->listGlobalVariables();
+  for (const QVariant &gv : globals) {
+    QVariantMap g = gv.toMap();
+    QJsonObject gObj;
+    gObj["id"] = g["id"].toInt();
+    gObj["codigo"] = g["codigo"].toString();
+    gObj["valor"] = g["valor"].toString();
+    gObj["descripcion"] = g["descripcion"].toString();
+    globalsArr.append(gObj);
+  }
+  snapshot["variables_globales"] = globalsArr;
+
+  // Snapshot employees in this closing
+  QJsonArray empsArr;
+  QVariantList resultsList = val.value("resultados").toList();
+  for (const QVariant &rv : resultsList) {
+    QVariantMap item = rv.toMap();
+    int empId = item["empleado_id"].toInt();
+    QVariantMap empData = m_db->getEmployee(empId);
+    QJsonObject eObj;
+    eObj["id"] = empId;
+    eObj["legajo"] = empData.value("legajo").toString();
+    eObj["nombre_completo"] = empData.value("nombre_completo").toString();
+    eObj["tipo_liquidacion"] = empData.value("tipo_liquidacion").toString();
+    eObj["esquema_codigo"] = empData.value("esquema_codigo").toString();
+    eObj["categoria_nombre"] = empData.value("categoria_nombre").toString();
+
+    QVariantList fValues = m_db->getEmployeeFieldValues(empId, (esquemaTipo == "jornal") ? quincena : "Q1");
+    QJsonArray fieldsArr;
+    for (const QVariant &fv : fValues) {
+      QVariantMap fm = fv.toMap();
+      QJsonObject fObj;
+      fObj["field_id"] = fm["field_id"].toInt();
+      fObj["field_code"] = fm["field_code"].toString();
+      fObj["value"] = fm["value"].toString();
+      fieldsArr.append(fObj);
+    }
+    eObj["field_values"] = fieldsArr;
+    empsArr.append(eObj);
+  }
+  snapshot["empleados"] = empsArr;
+
+  QString snapshotJson = QJsonDocument(snapshot).toJson(QJsonDocument::Compact);
+
+  // 5. Execute in atomic SQLite transaction
+  m_db->transaction();
+
+  QString tipoStr = (esquemaTipo == "jornal") ? quincena : "M";
+  int cierreId = m_db->insertCierre(anio, mes, tipoStr, esquemaTipo, fechaCierre, fechaPago, snapshotJson, backupPath);
+  if (cierreId <= 0) {
+    m_db->rollback();
+    return {
+        {"ok", false},
+        {"mensaje", "Error al registrar el cierre en la base de datos."}
+    };
+  }
+
+  int receiptsPersisted = 0;
+  int pdfsExported = 0;
+  ExportService exportService(m_db);
+
+  for (const QVariant &rv : resultsList) {
+    QVariantMap item = rv.toMap();
+    int empId = item["empleado_id"].toInt();
+    QVariantMap res = item["result"].toMap();
+
+    QString periodoStr = (esquemaTipo == "jornal")
+                             ? QString("Mes %1/%2 (%3)").arg(mes).arg(anio).arg(quincena)
+                             : QString("Mes %1/%2").arg(mes).arg(anio);
+
+    int recId = persistLiquidation(res, mes, anio, periodoStr, fechaCierre, fechaPago, cierreId);
+    if (recId <= 0) {
+      m_db->rollback();
+      return {
+          {"ok", false},
+          {"mensaje", QString("Error al guardar el recibo para el empleado ID %1").arg(empId)}
+      };
+    }
+    receiptsPersisted++;
+
+    if (!exportPath.isEmpty()) {
+      QVariantMap empData = m_db->getEmployee(empId);
+      QString legajo = empData.value("legajo", QString::number(empId)).toString();
+      QString cleanPeriod = periodoStr;
+      cleanPeriod.replace("/", "_").replace(" ", "_").replace("(", "").replace(")", "");
+      QString pdfPath = QString("%1/Recibo_%2_%3.pdf").arg(exportPath, legajo, cleanPeriod);
+      QString outPdf = exportService.exportReceiptPdf(res, comp, empData, pdfPath);
+      if (!outPdf.isEmpty()) {
+        pdfsExported++;
+      }
+    }
+  }
+
+  m_db->commit();
+
+  qInfo() << "[LiquidationEngine] Cierre batch completado con éxito. Recibos:" << receiptsPersisted
+          << "PDFs:" << pdfsExported << "Backup:" << backupPath;
+
+  return {
+      {"ok", true},
+      {"cierre_id", cierreId},
+      {"empleados_procesados", receiptsPersisted},
+      {"pdfs_exportados", pdfsExported},
+      {"backup_path", backupPath},
+      {"mensaje", QString("Cierre completado exitosamente. Se generaron %1 recibos.").arg(receiptsPersisted)}
+  };
 }

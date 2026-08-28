@@ -140,7 +140,8 @@ QVariantMap AppController::processLiquidation(int employeeId,
 int AppController::persistLiquidation(const QVariantMap &result, int mes,
                                       int anio, const QString &periodo,
                                       const QString &fechaCierre,
-                                      const QString &fechaPago) {
+                                      const QString &fechaPago,
+                                      int cierreId) {
   int m = mes > 0 ? mes : m_selectedMonth;
   int a = anio > 0 ? anio : m_selectedYear;
   QString fc = fechaCierre;
@@ -152,8 +153,8 @@ int AppController::persistLiquidation(const QVariantMap &result, int mes,
   QString fp = fechaPago.isEmpty() ? m_fechaPago : fechaPago;
 
   qInfo() << "[AppController] Persistiendo recibo histórico. Mes:" << m
-          << "Año:" << a << "Período:" << periodo << "Fecha Cierre:" << fc << "Fecha Pago:" << fp;
-  return m_engine->persistLiquidation(result, m, a, periodo, fc, fp);
+          << "Año:" << a << "Período:" << periodo << "Fecha Cierre:" << fc << "Fecha Pago:" << fp << "CierreId:" << cierreId;
+  return m_engine->persistLiquidation(result, m, a, periodo, fc, fp, cierreId);
 }
 
 int AppController::selectedYear() const { return m_selectedYear; }
@@ -173,75 +174,128 @@ void AppController::setSelectedMonth(int month) {
 }
 
 bool AppController::isCurrentPeriodClosed() const { return m_isCurrentPeriodClosed; }
+QStringList AppController::activeQuincenas() const { return m_db->listActiveJornalQuincenas(); }
+QVariantList AppController::periodCierres() const { return m_db->listCierresForMonth(m_selectedYear, m_selectedMonth); }
 QString AppController::fechaCierreMes() const { return m_fechaCierreMes; }
 QString AppController::fechaCierreQ1() const { return m_fechaCierreQ1; }
 QString AppController::fechaCierreQ2() const { return m_fechaCierreQ2; }
 QString AppController::fechaPago() const { return m_fechaPago; }
+bool AppController::isQ1Closed() const { return isCierreClosed("Q1", "jornal"); }
+bool AppController::isQ2Closed() const { return isCierreClosed("Q2", "jornal"); }
+bool AppController::isMClosed() const { return isCierreClosed("M", "mensual"); }
 
-bool AppController::closeMonth(int anio, int mes,
-                               const QString &fechaCierreMes,
-                               const QString &fechaCierreQ1,
-                               const QString &fechaCierreQ2,
-                               const QString &fechaPago) {
-  int y = anio > 0 ? anio : m_selectedYear;
-  int m = mes > 0 ? mes : m_selectedMonth;
-  bool ok = m_db->closeMonth(y, m, fechaCierreMes, fechaCierreQ1, fechaCierreQ2, fechaPago);
+bool AppController::isCierreClosed(const QString &tipo, const QString &esquemaTipo) const {
+  return m_db->isCierreClosed(m_selectedYear, m_selectedMonth, tipo, esquemaTipo);
+}
+
+bool AppController::canCloseTarget(const QString &tipo, const QString &esquemaTipo) const {
+  if (esquemaTipo == "jornal") {
+    return m_db->canCloseQuincena(m_selectedYear, m_selectedMonth, tipo);
+  } else {
+    return !m_db->isCierreClosed(m_selectedYear, m_selectedMonth, "M", "mensual");
+  }
+}
+
+bool AppController::canReopenTarget(const QString &tipo, const QString &esquemaTipo) const {
+  if (esquemaTipo == "jornal") {
+    return m_db->canReopenQuincena(m_selectedYear, m_selectedMonth, tipo);
+  } else {
+    return m_db->isCierreClosed(m_selectedYear, m_selectedMonth, "M", "mensual");
+  }
+}
+
+bool AppController::canEditQuincena(int employeeId, const QString &quincena) const {
+  QVariantMap emp = m_db->getEmployee(employeeId);
+  QString tipoLiq = emp.value("tipo_liquidacion").toString();
+  QString tipoCierre = (tipoLiq == "jornal") ? quincena : "M";
+  return !m_db->isCierreClosed(m_selectedYear, m_selectedMonth, tipoCierre, tipoLiq);
+}
+
+bool AppController::canPersistReceipt(int employeeId, const QString &quincena) const {
+  return canEditQuincena(employeeId, quincena);
+}
+
+QVariantMap AppController::validateBatch(const QString &esquemaTipo,
+                                        const QString &quincena,
+                                        const QString &fechaCierre,
+                                        const QString &fechaPago) {
+  QString fc = fechaCierre.isEmpty() ? m_fechaCierreMes : fechaCierre;
+  QString fp = fechaPago.isEmpty() ? m_fechaPago : fechaPago;
+  return m_engine->validateBatch(m_selectedMonth, m_selectedYear, esquemaTipo, quincena, fc, fp);
+}
+
+QVariantMap AppController::executeBatchClose(const QString &esquemaTipo,
+                                            const QString &quincena,
+                                            const QString &fechaCierre,
+                                            const QString &fechaPago,
+                                            const QString &exportPath) {
+  QString fc = fechaCierre.isEmpty() ? m_fechaCierreMes : fechaCierre;
+  QString fp = fechaPago.isEmpty() ? m_fechaPago : fechaPago;
+  QVariantMap res = m_engine->executeBatchClose(m_selectedMonth, m_selectedYear, esquemaTipo, quincena, fc, fp, exportPath);
+  if (res.value("ok").toBool()) {
+    refreshPeriodState();
+    m_receiptHistoryModel->refresh();
+    m_employeeVarsModel->refresh();
+    emit batchCloseCompleted(true, res.value("mensaje").toString());
+  } else {
+    emit batchCloseCompleted(false, res.value("mensaje").toString());
+  }
+  return res;
+}
+
+bool AppController::reopenCierre(const QString &tipo, const QString &esquemaTipo) {
+  bool ok = m_db->reopenCierre(m_selectedYear, m_selectedMonth, tipo, esquemaTipo);
   if (ok) {
     refreshPeriodState();
+    m_receiptHistoryModel->refresh();
+    m_employeeVarsModel->refresh();
   }
   return ok;
 }
 
-bool AppController::reopenMonth(int anio, int mes) {
-  int y = anio > 0 ? anio : m_selectedYear;
-  int m = mes > 0 ? mes : m_selectedMonth;
-  bool ok = m_db->reopenMonth(y, m);
-  if (ok) {
-    refreshPeriodState();
-  }
-  return ok;
+QVariantMap AppController::getCierre(const QString &tipo, const QString &esquemaTipo) const {
+  return m_db->getCierre(m_selectedYear, m_selectedMonth, tipo, esquemaTipo);
 }
 
-QVariantMap AppController::getMonthSnapshot(int anio, int mes) {
-  int y = anio > 0 ? anio : m_selectedYear;
-  int m = mes > 0 ? mes : m_selectedMonth;
-  return m_db->getMonthSnapshot(y, m);
+QVariantMap AppController::getCierreSnapshot(const QString &tipo, const QString &esquemaTipo) const {
+  return m_db->getCierreSnapshot(m_selectedYear, m_selectedMonth, tipo, esquemaTipo);
 }
 
-QVariantMap AppController::getMonthClosingData(int anio, int mes) {
-  int y = anio > 0 ? anio : m_selectedYear;
-  int m = mes > 0 ? mes : m_selectedMonth;
-  return m_db->getMonthClosingData(y, m);
-}
-
-QVariantList AppController::listClosedMonths() {
-  return m_db->listClosedMonths();
+QVariantList AppController::listCierresForMonth(int anio, int mes) const {
+  return m_db->listCierresForMonth(anio > 0 ? anio : m_selectedYear, mes > 0 ? mes : m_selectedMonth);
 }
 
 void AppController::refreshPeriodState() {
-  bool closed = m_db->isMonthClosed(m_selectedYear, m_selectedMonth);
-  m_isCurrentPeriodClosed = closed;
+  bool fullyClosed = m_db->isMonthFullyClosed(m_selectedYear, m_selectedMonth);
+  m_isCurrentPeriodClosed = fullyClosed;
 
-  if (closed) {
-    QVariantMap closing = m_db->getMonthClosingData(m_selectedYear, m_selectedMonth);
-    m_fechaCierreMes = closing.value("fecha_cierre_mes").toString();
-    m_fechaCierreQ1 = closing.value("fecha_cierre_q1").toString();
-    m_fechaCierreQ2 = closing.value("fecha_cierre_q2").toString();
-    m_fechaPago = closing.value("fecha_pago").toString();
-  } else {
-    // Sensible defaults for the selected period
-    QDate q1Date(m_selectedYear, m_selectedMonth, 15);
-    QDate lastDayDate(m_selectedYear, m_selectedMonth, QDate(m_selectedYear, m_selectedMonth, 1).daysInMonth());
-    QDate nextMonthDate = lastDayDate.addDays(5);
+  // Defaults
+  QDate q1Date(m_selectedYear, m_selectedMonth, 15);
+  QDate lastDayDate(m_selectedYear, m_selectedMonth, QDate(m_selectedYear, m_selectedMonth, 1).daysInMonth());
+  QDate nextMonthDate = lastDayDate.addDays(5);
 
-    m_fechaCierreQ1 = q1Date.toString("yyyy-MM-dd");
-    m_fechaCierreQ2 = lastDayDate.toString("yyyy-MM-dd");
-    m_fechaCierreMes = lastDayDate.toString("yyyy-MM-dd");
-    m_fechaPago = nextMonthDate.toString("yyyy-MM-dd");
+  m_fechaCierreQ1 = q1Date.toString("yyyy-MM-dd");
+  m_fechaCierreQ2 = lastDayDate.toString("yyyy-MM-dd");
+  m_fechaCierreMes = lastDayDate.toString("yyyy-MM-dd");
+  m_fechaPago = nextMonthDate.toString("yyyy-MM-dd");
+
+  QVariantList cierres = m_db->listCierresForMonth(m_selectedYear, m_selectedMonth);
+  for (const QVariant &cv : cierres) {
+    QVariantMap cm = cv.toMap();
+    QString tipo = cm.value("tipo").toString();
+    if (tipo == "Q1") {
+      m_fechaCierreQ1 = cm.value("fecha_cierre").toString();
+    } else if (tipo == "Q2") {
+      m_fechaCierreQ2 = cm.value("fecha_cierre").toString();
+    } else if (tipo == "M") {
+      m_fechaCierreMes = cm.value("fecha_cierre").toString();
+      m_fechaPago = cm.value("fecha_pago").toString();
+    }
   }
 
   m_employeeVarsModel->setPeriod(m_selectedYear, m_selectedMonth);
   emit periodClosedChanged();
+  emit activeQuincenasChanged();
 }
 
 QString AppController::resetNewMonth() {

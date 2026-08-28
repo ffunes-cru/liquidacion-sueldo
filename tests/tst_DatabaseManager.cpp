@@ -7,6 +7,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 #include "database/DatabaseManager.h"
 
 class TestDatabaseManager : public QObject
@@ -69,12 +72,19 @@ private slots:
     // ── Reset New Month & Backup ──────────────────────────────
     void testResetNewMonth();
 
-    // ── Closed Months (meses_cerrados) ──────────────────────────────
-    void testCloseMonthCreatesSnapshot();
-    void testIsMonthClosed();
+    // ── Granular Closings (cierres) ───────────────────────────
+    void testInsertCierreGranular();
+    void testSequentialQuincenaConstraints();
+    void testMonthFullyClosedDerived();
+    void testReopenCierre();
     void testSnapshotImmutability();
     void testGetEmployeeFieldValuesForClosedPeriod();
-    void testReopenMonth();
+
+    // ── Bug Fix Validations ─────────────────────────────────────
+    void testSnapshotFlatArrayFormat();
+    void testCellReorderPreservesChartSettings();
+    void testDeleteCategoryBlockedByEmployees();
+    void testEmployeeSchemaChangeSyncsFields();
 
 private:
     DatabaseManager *m_db = nullptr;
@@ -487,14 +497,14 @@ void TestDatabaseManager::testResetNewMonth()
 }
 
 // ════════════════════════════════════════════════════════════════
-// Closed Months (meses_cerrados)
+// Granular Closings (cierres)
 // ════════════════════════════════════════════════════════════════
 
-void TestDatabaseManager::testCloseMonthCreatesSnapshot()
+void TestDatabaseManager::testInsertCierreGranular()
 {
-    m_db->saveSchema("", "JORNAL", "Comercio Jornalero", "jornal");
     int catId = m_db->saveCategory(0, "Maestranza", 1500.0);
     int empId = m_db->saveEmployee(0, "J100", "Jornalero Test", "jornal", "JORNAL", catId, "2021-05-10", "20-11111111-9");
+    m_db->addQuincena(empId, "Q1");
     m_db->addQuincena(empId, "Q2");
 
     int fId = m_db->addSchemaField("JORNAL", "horas_trabajadas", "Horas Trabajadas", "number", "0", 1);
@@ -503,41 +513,94 @@ void TestDatabaseManager::testCloseMonthCreatesSnapshot()
 
     m_db->saveGlobalVariable(0, "Sueldo_Basico_Global", "500000", "Básico general");
 
-    // Close month 2026-08
-    bool ok = m_db->closeMonth(2026, 8, "2026-08-31", "2026-08-15", "2026-08-31", "2026-09-05");
-    QVERIFY(ok);
+    QJsonObject snapshot;
+    snapshot["meta"] = QJsonObject{{"test", "snapshot"}};
+    QString snapStr = QJsonDocument(snapshot).toJson(QJsonDocument::Compact);
 
-    // Verify snapshot exists and contains employees, categories, globals
-    QVariantMap snapshot = m_db->getMonthSnapshot(2026, 8);
-    QVERIFY(!snapshot.isEmpty());
-    QVERIFY(snapshot.contains("meta"));
-    QVERIFY(snapshot.contains("empleados"));
-    QVERIFY(snapshot.contains("categorias"));
-    QVERIFY(snapshot.contains("variables_globales"));
+    // Insert Q1 closure
+    int cierreId = m_db->insertCierre(2026, 8, "Q1", "jornal", "2026-08-15", "2026-08-20", snapStr, "/backup/path.db");
+    QVERIFY(cierreId > 0);
 
-    QVariantList emps = snapshot["empleados"].toList();
-    QVERIFY(emps.size() >= 1);
+    QVERIFY(m_db->isCierreClosed(2026, 8, "Q1", "jornal"));
+    QVERIFY(!m_db->isCierreClosed(2026, 8, "Q2", "jornal"));
+    QVERIFY(!m_db->isCierreClosed(2026, 8, "M", "mensual"));
 
-    bool foundEmp = false;
-    for (const QVariant &ev : emps) {
-        QVariantMap em = ev.toMap();
-        if (em["legajo"].toString() == "J100") {
-            foundEmp = true;
-            QCOMPARE(em["categoria_nombre"].toString(), QString("Maestranza"));
-            QVariantMap fValues = em["field_values"].toMap();
-            QVERIFY(fValues.contains("Q1"));
-            QVERIFY(fValues.contains("Q2"));
-        }
-    }
-    QVERIFY(foundEmp);
+    QVariantMap cData = m_db->getCierre(2026, 8, "Q1", "jornal");
+    QCOMPARE(cData["tipo"].toString(), QString("Q1"));
+    QCOMPARE(cData["fecha_cierre"].toString(), QString("2026-08-15"));
+    QCOMPARE(cData["backup_path"].toString(), QString("/backup/path.db"));
 }
 
-void TestDatabaseManager::testIsMonthClosed()
+void TestDatabaseManager::testSequentialQuincenaConstraints()
 {
-    QVERIFY(!m_db->isMonthClosed(2026, 9));
-    m_db->closeMonth(2026, 9, "2026-09-30", "2026-09-15", "2026-09-30", "2026-10-05");
-    QVERIFY(m_db->isMonthClosed(2026, 9));
-    QVERIFY(!m_db->isMonthClosed(2026, 10));
+    int catId = m_db->saveCategory(0, "Oficial", 2000.0);
+    int empId = m_db->saveEmployee(0, "J200", "Jornalero Sequential", "jornal", "JORNAL", catId, "2023-01-01", "20-22222222-9");
+    m_db->addQuincena(empId, "Q1");
+    m_db->addQuincena(empId, "Q2");
+    m_db->addQuincena(empId, "Q3");
+
+    // Q1 should be allowed to close first
+    QVERIFY(m_db->canCloseQuincena(2026, 9, "Q1"));
+    // Q2 should NOT be allowed to close before Q1
+    QVERIFY(!m_db->canCloseQuincena(2026, 9, "Q2"));
+    // Q3 should NOT be allowed to close before Q1 and Q2
+    QVERIFY(!m_db->canCloseQuincena(2026, 9, "Q3"));
+
+    // Close Q1
+    m_db->insertCierre(2026, 9, "Q1", "jornal", "2026-09-15", "2026-09-20", "{}", "");
+    QVERIFY(!m_db->canCloseQuincena(2026, 9, "Q1")); // Already closed
+    QVERIFY(m_db->canCloseQuincena(2026, 9, "Q2"));  // Now Q2 can close
+    QVERIFY(!m_db->canCloseQuincena(2026, 9, "Q3")); // Q3 still cannot
+
+    // Close Q2
+    m_db->insertCierre(2026, 9, "Q2", "jornal", "2026-09-30", "2026-10-05", "{}", "");
+    QVERIFY(m_db->canCloseQuincena(2026, 9, "Q3")); // Now Q3 can close
+
+    // Reopening constraints:
+    // Q1 cannot be reopened because Q2 is closed
+    QVERIFY(!m_db->canReopenQuincena(2026, 9, "Q1"));
+    // Q2 can be reopened (since Q3 is not closed yet)
+    QVERIFY(m_db->canReopenQuincena(2026, 9, "Q2"));
+
+    // Reopen Q2
+    m_db->reopenCierre(2026, 9, "Q2", "jornal");
+    // Now Q1 can be reopened
+    QVERIFY(m_db->canReopenQuincena(2026, 9, "Q1"));
+}
+
+void TestDatabaseManager::testMonthFullyClosedDerived()
+{
+    int catId = m_db->saveCategory(0, "Peon", 1000.0);
+    int empJ = m_db->saveEmployee(0, "J300", "Jornalero Full", "jornal", "JORNAL", catId, "2023-01-01", "");
+    int empM = m_db->saveEmployee(0, "M300", "Mensual Full", "mensual", "MENSUAL", 0, "2023-01-01", "");
+
+    Q_UNUSED(empJ);
+    Q_UNUSED(empM);
+
+    // Initial state: not fully closed
+    QVERIFY(!m_db->isMonthFullyClosed(2026, 10));
+
+    // Close Q1 only -> not fully closed
+    m_db->insertCierre(2026, 10, "Q1", "jornal", "2026-10-15", "2026-10-20", "{}", "");
+    QVERIFY(!m_db->isMonthFullyClosed(2026, 10));
+
+    // Close Q2 only -> still mensual missing
+    m_db->insertCierre(2026, 10, "Q2", "jornal", "2026-10-31", "2026-11-05", "{}", "");
+    QVERIFY(!m_db->isMonthFullyClosed(2026, 10));
+
+    // Close Mensual -> now fully closed
+    m_db->insertCierre(2026, 10, "M", "mensual", "2026-10-31", "2026-11-05", "{}", "");
+    QVERIFY(m_db->isMonthFullyClosed(2026, 10));
+}
+
+void TestDatabaseManager::testReopenCierre()
+{
+    m_db->insertCierre(2026, 11, "M", "mensual", "2026-11-30", "2026-12-05", "{}", "");
+    QVERIFY(m_db->isCierreClosed(2026, 11, "M", "mensual"));
+
+    bool ok = m_db->reopenCierre(2026, 11, "M", "mensual");
+    QVERIFY(ok);
+    QVERIFY(!m_db->isCierreClosed(2026, 11, "M", "mensual"));
 }
 
 void TestDatabaseManager::testSnapshotImmutability()
@@ -547,8 +610,21 @@ void TestDatabaseManager::testSnapshotImmutability()
     int fId = m_db->addSchemaField("JORNAL", "horas_extra", "Horas Extra", "number", "0", 2);
     m_db->setEmployeeFieldValue(empId, fId, "Q1", "10");
 
-    // Close month 2026-07
-    m_db->closeMonth(2026, 7, "2026-07-31", "2026-07-15", "2026-07-31", "2026-08-05");
+    // Build snapshot for Q1
+    QJsonObject snapshot;
+    QJsonArray empsArr;
+    QJsonObject empObj;
+    empObj["id"] = empId;
+    QJsonObject fvObj;
+    QJsonArray fArr;
+    fArr.append(QJsonObject{{"field_code", "horas_extra"}, {"value", "10"}});
+    fvObj["Q1"] = fArr;
+    empObj["field_values"] = fvObj;
+    empsArr.append(empObj);
+    snapshot["empleados"] = empsArr;
+
+    QString snapStr = QJsonDocument(snapshot).toJson(QJsonDocument::Compact);
+    m_db->insertCierre(2026, 7, "Q1", "jornal", "2026-07-15", "2026-07-20", snapStr, "");
 
     // Now modify the active live database values
     m_db->setEmployeeFieldValue(empId, fId, "Q1", "999");
@@ -573,7 +649,21 @@ void TestDatabaseManager::testGetEmployeeFieldValuesForClosedPeriod()
     int fId = m_db->addSchemaField("MENSUAL", "adicional_titulo", "Adicional Título", "number", "0", 1);
     m_db->setEmployeeFieldValue(empId, fId, "Q1", "50000");
 
-    m_db->closeMonth(2026, 6, "2026-06-30", "2026-06-15", "2026-06-30", "2026-07-05");
+    // Snapshot for M
+    QJsonObject snapshot;
+    QJsonArray empsArr;
+    QJsonObject empObj;
+    empObj["id"] = empId;
+    QJsonObject fvObj;
+    QJsonArray fArr;
+    fArr.append(QJsonObject{{"field_code", "adicional_titulo"}, {"value", "50000"}});
+    fvObj["Q1"] = fArr;
+    empObj["field_values"] = fvObj;
+    empsArr.append(empObj);
+    snapshot["empleados"] = empsArr;
+
+    QString snapStr = QJsonDocument(snapshot).toJson(QJsonDocument::Compact);
+    m_db->insertCierre(2026, 6, "M", "mensual", "2026-06-30", "2026-07-05", snapStr, "");
 
     // Change live value for current active month
     m_db->setEmployeeFieldValue(empId, fId, "Q1", "70000");
@@ -587,14 +677,152 @@ void TestDatabaseManager::testGetEmployeeFieldValuesForClosedPeriod()
     QCOMPARE(openVals.first().toMap()["value"].toString(), QString("70000"));
 }
 
-void TestDatabaseManager::testReopenMonth()
+void TestDatabaseManager::testSnapshotFlatArrayFormat()
 {
-    m_db->closeMonth(2026, 5, "2026-05-31", "2026-05-15", "2026-05-31", "2026-06-05");
-    QVERIFY(m_db->isMonthClosed(2026, 5));
+    // Reproduce the exact format that executeBatchClose generates:
+    // field_values as a flat QJsonArray of objects (not a map keyed by quincena)
+    int empId = m_db->saveEmployee(0, "SNAP1", "Snapshot Flat Emp", "mensual", "MENSUAL", 0, "2020-01-01", "");
+    int fId = m_db->addSchemaField("MENSUAL", "sueldo_basico", "Sueldo B\u00e1sico", "number", "0", 1);
+    m_db->setEmployeeFieldValue(empId, fId, "Q1", "120000");
 
-    bool reopened = m_db->reopenMonth(2026, 5);
-    QVERIFY(reopened);
-    QVERIFY(!m_db->isMonthClosed(2026, 5));
+    // Build snapshot in executeBatchClose flat-array format
+    QJsonObject snapshot;
+    QJsonArray empsArr;
+    QJsonObject empObj;
+    empObj["id"] = empId;
+    empObj["legajo"] = "SNAP1";
+    empObj["nombre_completo"] = "Snapshot Flat Emp";
+    empObj["tipo_liquidacion"] = "mensual";
+    empObj["esquema_codigo"] = "MENSUAL";
+
+    // field_values as flat array (the format executeBatchClose uses)
+    QJsonArray fieldsArr;
+    QJsonObject fObj;
+    fObj["field_id"] = fId;
+    fObj["field_code"] = "sueldo_basico";
+    fObj["value"] = "120000";
+    fieldsArr.append(fObj);
+    empObj["field_values"] = fieldsArr;  // <-- flat array, NOT map
+    empsArr.append(empObj);
+    snapshot["empleados"] = empsArr;
+
+    QString snapStr = QJsonDocument(snapshot).toJson(QJsonDocument::Compact);
+    m_db->insertCierre(2026, 5, "M", "mensual", "2026-05-31", "2026-06-05", snapStr, "");
+
+    // Now change the live value
+    m_db->setEmployeeFieldValue(empId, fId, "Q1", "999999");
+
+    // Read from closed period — must return snapshot value, not live
+    auto closedVals = m_db->getEmployeeFieldValuesForPeriod(empId, "Q1", 2026, 5);
+    QVERIFY(!closedVals.isEmpty());
+    bool found = false;
+    for (const auto &fv : closedVals) {
+        auto m = fv.toMap();
+        if (m["field_code"].toString() == "sueldo_basico") {
+            QCOMPARE(m["value"].toString(), QString("120000"));
+            found = true;
+        }
+    }
+    QVERIFY(found);
+}
+
+void TestDatabaseManager::testCellReorderPreservesChartSettings()
+{
+    // Create two cells with chart settings
+    int c1 = m_db->saveCell(0, "RECIBO", "basico", "B\u00e1sico", "", "", "", "100000", 10, "MENSUAL",
+                            "formula", 0.0, "", 0.0, true, "#FF0000", true, false);
+    int c2 = m_db->saveCell(0, "RECIBO", "adicional", "Adicional", "", "", "", "20000", 20, "MENSUAL",
+                            "formula", 0.0, "", 0.0, true, "#00FF00", true, true);
+    QVERIFY(c1 > 0);
+    QVERIFY(c2 > 0);
+
+    // Simulate reorder: swap their orders (as moveCellUp would)
+    m_db->saveCell(c1, "RECIBO", "basico", "B\u00e1sico", "", "", "", "100000", 20, "MENSUAL",
+                   "formula", 0.0, "", 0.0, true, "#FF0000", true, false);
+    m_db->saveCell(c2, "RECIBO", "adicional", "Adicional", "", "", "", "20000", 10, "MENSUAL",
+                   "formula", 0.0, "", 0.0, true, "#00FF00", true, true);
+
+    // Verify chart settings are preserved after reorder
+    auto cells = m_db->listCellsBySchema("MENSUAL");
+    for (const auto &c : cells) {
+        auto m = c.toMap();
+        if (m["id"].toInt() == c1) {
+            QCOMPARE(m["color_hex"].toString(), QString("#FF0000"));
+            QCOMPARE(m["en_grafico"].toInt(), 1);
+            QCOMPARE(m["es_grafico_total"].toInt(), 0);
+        } else if (m["id"].toInt() == c2) {
+            QCOMPARE(m["color_hex"].toString(), QString("#00FF00"));
+            QCOMPARE(m["en_grafico"].toInt(), 1);
+            QCOMPARE(m["es_grafico_total"].toInt(), 1);
+        }
+    }
+
+    // Cleanup
+    m_db->deleteCell(c1);
+    m_db->deleteCell(c2);
+}
+
+void TestDatabaseManager::testDeleteCategoryBlockedByEmployees()
+{
+    int catId = m_db->saveCategory(0, "Cat Protegida", 1500.0);
+    QVERIFY(catId > 0);
+
+    // Create employee with this category
+    int empId = m_db->saveEmployee(0, "CAT1", "Emp Con Cat", "jornal", "JORNAL", catId, "2022-01-01", "");
+    QVERIFY(empId > 0);
+
+    // deleteCategory should fail because there's an active employee using it
+    QVERIFY(!m_db->deleteCategory(catId));
+
+    // Verify category still exists
+    auto cat = m_db->getCategory(catId);
+    QVERIFY(!cat.isEmpty());
+    QCOMPARE(cat["nombre"].toString(), QString("Cat Protegida"));
+
+    // Cleanup: remove employee first, then category
+    m_db->deleteEmployee(empId);
+    QVERIFY(m_db->deleteCategory(catId));
+}
+
+void TestDatabaseManager::testEmployeeSchemaChangeSyncsFields()
+{
+    // Create a schema with a field
+    m_db->saveSchema("", "ESQ_ORIG", "Esquema Original", "mensual");
+    m_db->saveSchema("", "ESQ_NUEVO", "Esquema Nuevo", "mensual");
+    m_db->addSchemaField("ESQ_NUEVO", "campo_nuevo", "Campo Nuevo", "number", "42", 1);
+
+    // Create employee on ESQ_ORIG
+    int empId = m_db->saveEmployee(0, "SYNC1", "Sync Test Emp", "mensual", "ESQ_ORIG", 0, "2020-01-01", "");
+    QVERIFY(empId > 0);
+
+    // Employee should NOT have campo_nuevo yet
+    auto vals = m_db->getEmployeeFieldValues(empId, "Q1");
+    bool foundCampoNuevo = false;
+    for (const auto &v : vals) {
+        if (v.toMap()["field_code"].toString() == "campo_nuevo") {
+            foundCampoNuevo = true;
+        }
+    }
+    QVERIFY(!foundCampoNuevo);
+
+    // Update employee to ESQ_NUEVO — sync should auto-create default field values
+    m_db->saveEmployee(empId, "SYNC1", "Sync Test Emp", "mensual", "ESQ_NUEVO", 0, "2020-01-01", "");
+
+    // Now employee should have campo_nuevo with default value "42"
+    vals = m_db->getEmployeeFieldValues(empId, "Q1");
+    foundCampoNuevo = false;
+    for (const auto &v : vals) {
+        if (v.toMap()["field_code"].toString() == "campo_nuevo") {
+            QCOMPARE(v.toMap()["value"].toString(), QString("42"));
+            foundCampoNuevo = true;
+        }
+    }
+    QVERIFY(foundCampoNuevo);
+
+    // Cleanup
+    m_db->deleteEmployee(empId);
+    m_db->deleteSchema("ESQ_NUEVO");
+    m_db->deleteSchema("ESQ_ORIG");
 }
 
 #include "tst_DatabaseManager.moc"
