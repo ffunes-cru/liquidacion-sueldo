@@ -11,7 +11,6 @@ set(QT_NO_PRIVATE_MODULE_WARNING ON)
 find_package(Qt6 REQUIRED COMPONENTS
     Core
     Gui
-    GuiPrivate
     Network
     Quick
     QuickControls2
@@ -20,7 +19,7 @@ find_package(Qt6 REQUIRED COMPONENTS
     Widgets
 )
 
-qt_standard_project_setup(REQUIRES 6.5)
+qt_standard_project_setup(REQUIRES 6.2)
 
 # Set Qt QML policies
 if(COMMAND qt_policy)

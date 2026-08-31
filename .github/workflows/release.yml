@@ -47,7 +47,7 @@ jobs:
           mkdir -p dist/LiquidacionSueldos
           cp build/liquidacion_sueldos_app.exe dist/LiquidacionSueldos/
           cp LICENSE dist/LiquidacionSueldos/
-          windeployqt-qt6 --qmldir qml dist/LiquidacionSueldos/liquidacion_sueldos_app.exe
+          windeployqt --qmldir qml dist/LiquidacionSueldos/liquidacion_sueldos_app.exe
 
       - name: Create Windows ZIP Archive
         shell: pwsh
@@ -62,7 +62,7 @@ jobs:
 
   build-linux:
     name: Build Linux x86_64 Package
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Code
