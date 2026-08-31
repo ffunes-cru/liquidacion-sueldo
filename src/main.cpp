@@ -58,6 +58,8 @@ int main(int argc, char *argv[]) {
   AppController appController(&dbManager);
 
   QQmlApplicationEngine engine;
+  engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");
+  engine.addImportPath(QCoreApplication::applicationDirPath());
 
   // Register AppController as a modern Qt 6 Singleton Instance
   qmlRegisterSingletonInstance("LiquidacionSueldos", 1, 0, "AppController",

@@ -46,8 +46,15 @@ jobs:
         run: |
           mkdir -p dist/LiquidacionSueldos
           cp build/liquidacion_sueldos_app.exe dist/LiquidacionSueldos/
-          cp LICENSE dist/LiquidacionSueldos/
           windeployqt --qmldir qml --compiler-runtime dist/LiquidacionSueldos/liquidacion_sueldos_app.exe
+
+          # Ensure all Qt6 QML module plugins (QtQuick, QtQuick.Controls, etc.) are deployed
+          for qmldir_path in /ucrt64/share/qt6/qml /ucrt64/lib/qt6/qml /ucrt64/qml; do
+            if [ -d "$qmldir_path" ]; then
+              mkdir -p dist/LiquidacionSueldos/qml
+              cp -r "$qmldir_path"/* dist/LiquidacionSueldos/qml/ || true
+            fi
+          done
 
           # Copy MinGW/GCC and 3rd-party runtime libraries to ensure 100% standalone portability
           for dll in libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll \
