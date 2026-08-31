@@ -20,43 +20,37 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup Qt 6
-        uses: jurplel/install-qt-action@v4
+      - name: Setup MSYS2 with Qt6 (UCRT64)
+        uses: msys2/setup-msys2@v2
         with:
-          version: '6.6.3'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win64_msvc2022_64'
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-declarative
+            mingw-w64-ucrt-x86_64-qt6-tools
 
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Configure CMake
+      - name: Configure and Build
+        shell: msys2 {0}
         run: |
-          cmake -B build -G "Ninja" `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
+          cmake -B build -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release \
             -DAPP_VERSION_STR="${{ github.ref_name }}"
-
-      - name: Build Application
-        run: cmake --build build --config Release
+          cmake --build build
 
       - name: Deploy Qt Dependencies (windeployqt)
+        shell: msys2 {0}
         run: |
-          $deployDir = "dist/LiquidacionSueldos"
-          New-Item -ItemType Directory -Force -Path $deployDir | Out-Null
-          Copy-Item "build/liquidacion_sueldos_app.exe" "$deployDir/"
-          Copy-Item "LICENSE" "$deployDir/"
-          
-          # Run windeployqt with QML scanner
-          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" `
-            --qmldir qml `
-            --plugindir "$deployDir/plugins" `
-            --no-translations `
-            --compiler-runtime `
-            "$deployDir/liquidacion_sueldos_app.exe"
+          mkdir -p dist/LiquidacionSueldos
+          cp build/liquidacion_sueldos_app.exe dist/LiquidacionSueldos/
+          cp LICENSE dist/LiquidacionSueldos/
+          windeployqt-qt6 --qmldir qml dist/LiquidacionSueldos/liquidacion_sueldos_app.exe
 
       - name: Create Windows ZIP Archive
+        shell: pwsh
         run: |
           Compress-Archive -Path "dist/LiquidacionSueldos/*" -DestinationPath "LiquidacionSueldos-Windows-x64.zip" -Force
 
