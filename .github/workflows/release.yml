@@ -41,13 +41,27 @@ jobs:
             -DAPP_VERSION_STR="${{ github.ref_name }}"
           cmake --build build
 
-      - name: Deploy Qt Dependencies (windeployqt)
+      - name: Deploy Qt Dependencies and Standalone Runtime (windeployqt)
         shell: msys2 {0}
         run: |
           mkdir -p dist/LiquidacionSueldos
           cp build/liquidacion_sueldos_app.exe dist/LiquidacionSueldos/
           cp LICENSE dist/LiquidacionSueldos/
-          windeployqt --qmldir qml dist/LiquidacionSueldos/liquidacion_sueldos_app.exe
+          windeployqt --qmldir qml --compiler-runtime dist/LiquidacionSueldos/liquidacion_sueldos_app.exe
+
+          # Copy MinGW/GCC and 3rd-party runtime libraries to ensure 100% standalone portability
+          for dll in libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll \
+                     zlib1.dll libzstd.dll libdouble-conversion.dll \
+                     libb2-1.dll libbrotlicommon.dll libbrotlidec.dll \
+                     libfreetype-6.dll libharfbuzz-0.dll libmd4c.dll \
+                     libpng16-16.dll libgraphite2.dll libglib-2.0-0.dll \
+                     libintl-8.dll libiconv-2.dll; do
+            if [ -f "/ucrt64/bin/$dll" ]; then
+              cp "/ucrt64/bin/$dll" dist/LiquidacionSueldos/
+            fi
+          done
+          cp /ucrt64/bin/libicu*.dll dist/LiquidacionSueldos/ || true
+          cp /ucrt64/bin/libpcre2-*.dll dist/LiquidacionSueldos/ || true
 
       - name: Create Windows ZIP Archive
         shell: pwsh

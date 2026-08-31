@@ -62,6 +62,8 @@ int main(int argc, char *argv[]) {
   // Register AppController as a modern Qt 6 Singleton Instance
   qmlRegisterSingletonInstance("LiquidacionSueldos", 1, 0, "AppController",
                                &appController);
+  qmlRegisterSingletonType(QUrl(QStringLiteral("qrc:/qml/components/Theme.qml")),
+                           "LiquidacionSueldos", 1, 0, "Theme");
   qmlRegisterUncreatableType<SchemaModel>(
       "LiquidacionSueldos", 1, 0, "SchemaModel",
       "El modelo se obtiene de AppController");
