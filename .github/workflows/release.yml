@@ -55,13 +55,15 @@ jobs:
                      libb2-1.dll libbrotlicommon.dll libbrotlidec.dll \
                      libfreetype-6.dll libharfbuzz-0.dll libmd4c.dll \
                      libpng16-16.dll libgraphite2.dll libglib-2.0-0.dll \
-                     libintl-8.dll libiconv-2.dll; do
+                     libintl-8.dll libiconv-2.dll libbz2-1.dll \
+                     libcrypto-3-x64.dll libssl-3-x64.dll libsqlite3-0.dll; do
             if [ -f "/ucrt64/bin/$dll" ]; then
               cp "/ucrt64/bin/$dll" dist/LiquidacionSueldos/
             fi
           done
           cp /ucrt64/bin/libicu*.dll dist/LiquidacionSueldos/ || true
           cp /ucrt64/bin/libpcre2-*.dll dist/LiquidacionSueldos/ || true
+          cp /ucrt64/bin/libbz2*.dll dist/LiquidacionSueldos/ || true
 
       - name: Create Windows ZIP Archive
         shell: pwsh

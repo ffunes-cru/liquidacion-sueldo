@@ -144,8 +144,12 @@ qt_add_executable(${PROJECT_NAME}
 )
 
 # Version & GitHub definitions
+if(NOT DEFINED APP_VERSION_STR)
+    set(APP_VERSION_STR "0.8.0")
+endif()
+
 target_compile_definitions(${PROJECT_NAME} PRIVATE
-    APP_VERSION_STR="1.0.0"
+    APP_VERSION_STR="${APP_VERSION_STR}"
     GITHUB_REPO_OWNER="ffunes-cru"
     GITHUB_REPO_NAME="liquidacion-sueldo"
 )
