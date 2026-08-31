@@ -3,7 +3,7 @@ name: Release & Hot-Update Packages
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
   workflow_dispatch:
 
 permissions:
