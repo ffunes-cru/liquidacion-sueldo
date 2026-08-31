@@ -12,7 +12,7 @@ permissions:
 jobs:
   build-windows:
     name: Build Windows x64 Package
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout Code
@@ -23,11 +23,10 @@ jobs:
       - name: Setup Qt 6
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.7.2'
+          version: '6.6.3'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'
-          modules: 'qtmultimedia'
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -77,31 +76,28 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install System Dependencies
+      - name: Install Qt 6 and System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
             cmake \
             ninja-build \
+            qt6-base-dev \
+            qt6-base-private-dev \
+            qt6-declarative-dev \
+            qt6-declarative-private-dev \
+            qt6-tools-dev \
+            libqt6sql6-sqlite \
             libgl1-mesa-dev \
             libxkbcommon-x11-0 \
             libfontconfig1 \
             libfreetype6
 
-      - name: Setup Qt 6
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.7.2'
-          host: 'linux'
-          target: 'desktop'
-          arch: 'gcc_64'
-
       - name: Configure CMake
         run: |
           cmake -B build -G "Ninja" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
             -DAPP_VERSION_STR="${{ github.ref_name }}"
 
       - name: Build Application
