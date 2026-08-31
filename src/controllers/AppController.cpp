@@ -10,9 +10,11 @@
 #include "models/ReceiptHistoryModel.h"
 #include "models/SchemaModel.h"
 #include "services/ExportService.h"
+#include "services/UpdateService.h"
 #include <QDebug>
 #include <QFileDialog>
 #include <QJsonDocument>
+#include <QTimer>
 
 AppController::AppController(DatabaseManager *db, QObject *parent)
     : QObject(parent), m_db(db) {
@@ -20,6 +22,7 @@ AppController::AppController(DatabaseManager *db, QObject *parent)
       << "[AppController] Inicializando controlador principal y subsistemas...";
   m_engine = new LiquidationEngine(m_db, this);
   m_exportService = new ExportService(m_db, this);
+  m_updateService = new UpdateService(this);
 
   m_employeeModel = new EmployeeModel(m_db, this);
   m_employeeVarsModel = new EmployeeVarsModel(m_db, this);
@@ -35,6 +38,13 @@ AppController::AppController(DatabaseManager *db, QObject *parent)
   m_selectedYear = today.year();
   m_selectedMonth = today.month();
   refreshPeriodState();
+
+  // Automatic background update check on startup
+  if (m_updateService->autoCheckOnStartup()) {
+    QTimer::singleShot(2500, this, [this]() {
+      m_updateService->checkForUpdates(true);
+    });
+  }
 
   qInfo()
       << "[AppController] Controlador y modelos inicializados correctamente.";
@@ -108,6 +118,9 @@ ReceiptHistoryModel *AppController::receiptHistoryModel() const {
 }
 CustomFunctionModel *AppController::customFunctionModel() const {
   return m_customFunctionModel;
+}
+UpdateService *AppController::updateService() const {
+  return m_updateService;
 }
 
 QVariantMap AppController::processLiquidation(int employeeId,

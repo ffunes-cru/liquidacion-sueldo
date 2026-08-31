@@ -34,6 +34,7 @@
 #include "models/GlobalVarsModel.h"
 #include "models/ReceiptHistoryModel.h"
 #include "models/SchemaModel.h"
+#include "services/UpdateService.h"
 
 class DatabaseManager;
 class LiquidationEngine;
@@ -58,6 +59,7 @@ class AppController : public QObject {
                  CONSTANT)
   Q_PROPERTY(CustomFunctionModel *customFunctionModel READ customFunctionModel
                  CONSTANT)
+  Q_PROPERTY(UpdateService *updateService READ updateService CONSTANT)
 
   // ── Global Period Selection ─────────────────────────────────
   Q_PROPERTY(int selectedYear READ selectedYear WRITE setSelectedYear NOTIFY
@@ -106,6 +108,7 @@ public:
   ChartCellModel *chartCellModel() const;
   ReceiptHistoryModel *receiptHistoryModel() const;
   CustomFunctionModel *customFunctionModel() const;
+  UpdateService *updateService() const;
 
   Q_INVOKABLE QVariantMap processLiquidation(int employeeId,
                                              const QString &quincenaSel = "",
@@ -242,6 +245,7 @@ private:
   ChartCellModel *m_chartCellModel;
   ReceiptHistoryModel *m_receiptHistoryModel;
   CustomFunctionModel *m_customFunctionModel;
+  UpdateService *m_updateService;
 
   // Global period state
   int m_selectedYear;

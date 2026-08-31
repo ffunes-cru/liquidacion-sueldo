@@ -1,0 +1,153 @@
+name: Release & Hot-Update Packages
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows x64 Package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.2'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtmultimedia'
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G "Ninja" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
+            -DAPP_VERSION_STR="${{ github.ref_name }}"
+
+      - name: Build Application
+        run: cmake --build build --config Release
+
+      - name: Deploy Qt Dependencies (windeployqt)
+        run: |
+          $deployDir = "dist/LiquidacionSueldos"
+          New-Item -ItemType Directory -Force -Path $deployDir | Out-Null
+          Copy-Item "build/liquidacion_sueldos_app.exe" "$deployDir/"
+          Copy-Item "LICENSE" "$deployDir/"
+          
+          # Run windeployqt with QML scanner
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" `
+            --qmldir qml `
+            --plugindir "$deployDir/plugins" `
+            --no-translations `
+            --compiler-runtime `
+            "$deployDir/liquidacion_sueldos_app.exe"
+
+      - name: Create Windows ZIP Archive
+        run: |
+          Compress-Archive -Path "dist/LiquidacionSueldos/*" -DestinationPath "LiquidacionSueldos-Windows-x64.zip" -Force
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: LiquidacionSueldos-Windows-x64.zip
+
+  build-linux:
+    name: Build Linux x86_64 Package
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            libgl1-mesa-dev \
+            libxkbcommon-x11-0 \
+            libfontconfig1 \
+            libfreetype6
+
+      - name: Setup Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.2'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'gcc_64'
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
+            -DAPP_VERSION_STR="${{ github.ref_name }}"
+
+      - name: Build Application
+        run: cmake --build build --config Release
+
+      - name: Prepare Linux Portable Distribution
+        run: |
+          mkdir -p dist/LiquidacionSueldos
+          cp build/liquidacion_sueldos_app dist/LiquidacionSueldos/
+          cp LICENSE dist/LiquidacionSueldos/
+          tar -czvf LiquidacionSueldos-Linux-x86_64.tar.gz -C dist/LiquidacionSueldos .
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-package
+          path: LiquidacionSueldos-Linux-x86_64.tar.gz
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download All Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_assets
+          merge-multiple: true
+
+      - name: Generate SHA-256 Checksums
+        run: |
+          cd release_assets
+          sha256sum LiquidacionSueldos-Windows-x64.zip LiquidacionSueldos-Linux-x86_64.tar.gz > checksums.sha256
+          cat checksums.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release_assets/LiquidacionSueldos-Windows-x64.zip
+            release_assets/LiquidacionSueldos-Linux-x86_64.tar.gz
+            release_assets/checksums.sha256
+          generate_release_notes: true
+          draft: false
+          prerelease: false

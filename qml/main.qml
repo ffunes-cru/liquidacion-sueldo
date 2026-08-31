@@ -178,6 +178,14 @@ ApplicationWindow {
 
                 Item { Layout.fillWidth: true }
 
+                // Update notification banner button
+                StyledButton {
+                    visible: AppController.updateService.isUpdateAvailable
+                    variant: "primary"
+                    text: "✨ Actualización v" + AppController.updateService.latestVersion + " disponible"
+                    onClicked: updateDialog.open()
+                }
+
                 // Settings Gear Button
                 StyledButton {
                     variant: "secondary"
@@ -255,10 +263,22 @@ ApplicationWindow {
     SettingsDialog {
         id: settingsDialog
         onAboutRequested: aboutDialog.open()
+        onCheckUpdatesRequested: {
+            updateDialog.open()
+            AppController.updateService.checkForUpdates(false)
+        }
     }
 
     AboutDialog {
         id: aboutDialog
+        onCheckUpdatesRequested: {
+            updateDialog.open()
+            AppController.updateService.checkForUpdates(false)
+        }
+    }
+
+    UpdateDialog {
+        id: updateDialog
     }
 
     CalculationErrorDialog {
@@ -273,6 +293,13 @@ ApplicationWindow {
         target: AppController
         function onCalculationErrorOccurred(errors) {
             calcErrorDialog.showErrors(errors)
+        }
+    }
+
+    Connections {
+        target: AppController.updateService
+        function onUpdateAvailablePrompt() {
+            updateDialog.open()
         }
     }
 }

@@ -14,6 +14,7 @@ AppDialog {
 
     property string statusMsg: ""
     signal aboutRequested()
+    signal checkUpdatesRequested()
 
     contentItem: ColumnLayout {
         spacing: 12
@@ -51,6 +52,53 @@ AppDialog {
                 currentIndex: AppController.currentRole === "admin" ? 0 : 1
                 onActivated: AppController.currentRole = (currentIndex === 0) ? "admin" : "user"
             }
+        }
+
+        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderColor }
+
+        // ── Actualizaciones del Sistema ─────────────────────────
+        Label {
+            text: "Actualizaciones del Sistema"
+            font.bold: true
+            font.pixelSize: 15
+            color: Theme.accentColor
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Label {
+                text: "Buscar actualizaciones automáticamente al iniciar:"
+                color: Theme.textColor
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+            StyledSwitch {
+                checked: AppController.updateService.autoCheckOnStartup
+                onToggled: AppController.updateService.autoCheckOnStartup = checked
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+
+            StyledButton {
+                Layout.fillWidth: true
+                variant: "primary"
+                text: "🔍 Buscar Actualizaciones Ahora"
+                onClicked: {
+                    root.close()
+                    root.checkUpdatesRequested()
+                }
+            }
+        }
+
+        Label {
+            text: AppController.updateService.lastCheckedTime !== ""
+                  ? "Última verificación: " + AppController.updateService.lastCheckedTime
+                  : "Versión instalada: v" + AppController.updateService.currentVersion
+            color: Theme.subtextColor
+            font.pixelSize: 11
         }
 
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderColor }
@@ -127,7 +175,7 @@ AppDialog {
 
         StyledButton {
             Layout.fillWidth: true
-            variant: "primary"
+            variant: "secondary"
             text: "ℹ️ Acerca del Sistema y Licencia GPLv3..."
             onClicked: {
                 root.close()

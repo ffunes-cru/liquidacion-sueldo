@@ -12,6 +12,7 @@ find_package(Qt6 REQUIRED COMPONENTS
     Core
     Gui
     GuiPrivate
+    Network
     Quick
     QuickControls2
     Sql
@@ -68,6 +69,8 @@ set(SOURCES
     # Services
     src/services/ExportService.h
     src/services/ExportService.cpp
+    src/services/UpdateService.h
+    src/services/UpdateService.cpp
 
     # Controllers
     src/controllers/AppController.h
@@ -134,10 +137,18 @@ set(QML_FILES
     qml/dialogs/CalculationErrorDialog.qml
     qml/dialogs/AboutDialog.qml
     qml/dialogs/CloseMonthDialog.qml
+    qml/dialogs/UpdateDialog.qml
 )
 
 qt_add_executable(${PROJECT_NAME}
     ${SOURCES}
+)
+
+# Version & GitHub definitions
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    APP_VERSION_STR="1.0.0"
+    GITHUB_REPO_OWNER="ffunes-cru"
+    GITHUB_REPO_NAME="liquidacion-sueldo"
 )
 
 # Mark Theme.qml as a singleton for the QML module
@@ -173,6 +184,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::Network
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Sql

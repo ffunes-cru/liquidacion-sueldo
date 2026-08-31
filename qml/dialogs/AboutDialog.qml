@@ -12,6 +12,8 @@ AppDialog {
     dialogHeight: 520
     standardButtons: Dialog.Close
 
+    signal checkUpdatesRequested()
+
     contentItem: ColumnLayout {
         spacing: 14
 
@@ -45,7 +47,7 @@ AppDialog {
                 }
 
                 Label {
-                    text: "Versión 1.0.0 (64-bit)"
+                    text: "Versión " + AppController.updateService.currentVersion + " (64-bit)"
                     font.pixelSize: 12
                     color: Theme.subtextColor
                 }
@@ -55,6 +57,15 @@ AppDialog {
                     font.pixelSize: 11
                     color: Theme.accentColor
                     font.bold: true
+                }
+            }
+
+            StyledButton {
+                variant: "secondary"
+                text: "🔍 Actualizaciones"
+                onClicked: {
+                    root.close()
+                    root.checkUpdatesRequested()
                 }
             }
         }

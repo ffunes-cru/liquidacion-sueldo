@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Sql Qml Quick Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Sql Qml Quick Network Test)
 
 # ── Shared engine/database sources (no GUI, no QML module) ────
 set(ENGINE_SOURCES
@@ -14,6 +14,8 @@ set(ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/database/DatabaseManager.cpp
     ${CMAKE_SOURCE_DIR}/src/services/ExportService.h
     ${CMAKE_SOURCE_DIR}/src/services/ExportService.cpp
+    ${CMAKE_SOURCE_DIR}/src/services/UpdateService.h
+    ${CMAKE_SOURCE_DIR}/src/services/UpdateService.cpp
     ${CMAKE_SOURCE_DIR}/src/controllers/AppController.h
     ${CMAKE_SOURCE_DIR}/src/controllers/AppController.cpp
     ${CMAKE_SOURCE_DIR}/src/models/CategoryModel.h
@@ -43,6 +45,7 @@ add_executable(LiquidacionTests
     tst_LiquidationEngine.cpp
     tst_DatabaseManager.cpp
     tst_ModelsAndController.cpp
+    tst_UpdateService.cpp
     tst_main.cpp
     ${ENGINE_SOURCES}
 )
@@ -62,6 +65,7 @@ target_link_libraries(LiquidacionTests PRIVATE
     Qt6::Sql
     Qt6::Qml
     Qt6::Quick
+    Qt6::Network
     Qt6::Widgets
     Qt6::Test
     QXlsx::QXlsx

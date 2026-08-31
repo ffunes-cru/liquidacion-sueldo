@@ -7,12 +7,12 @@
 #include <functional>
 
 // Factory functions — return QObject* to avoid incomplete type issues.
-// Defined in their respective .cpp files.
 extern QObject *createTestFormulaEngine();
 extern QObject *createTestQuincenaAggregator();
 extern QObject *createTestLiquidationEngine();
 extern QObject *createTestDatabaseManager();
 extern QObject *createTestModelsAndController();
+extern QObject *createTestUpdateService();
 
 static bool shouldRunTestObject(QObject *obj, int argc, char *argv[])
 {
@@ -44,7 +44,8 @@ int main(int argc, char *argv[])
         createTestQuincenaAggregator,
         createTestLiquidationEngine,
         createTestDatabaseManager,
-        createTestModelsAndController
+        createTestModelsAndController,
+        createTestUpdateService
     };
 
     for (auto &factory : factories) {
